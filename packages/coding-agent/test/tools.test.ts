@@ -1,0 +1,1192 @@
+import type { AgentToolResult } from "@greppleai/grip-agent-core";
+import type { ImageContent } from "@greppleai/grip-ai";
+import { applyPatch } from "diff";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { executeBashWithOperations } from "../src/core/bash-executor.ts";
+import { createBashTool, createLocalBashOperations } from "../src/core/tools/bash.ts";
+import { initHasher, lineHashes } from "../src/core/tools/hashline/hash.ts";
+import { DeferredRemoteToolOperations, LocalToolOperations } from "../src/core/tools/operations.ts";
+import {
+	createEditTool,
+	createFindTool,
+	createGrepTool,
+	createLsTool,
+	createReadTool,
+	createWebsearchTool,
+	createWriteTool,
+	parseBraveSearchResponse,
+	parseDuckDuckGoResponse,
+	parseFirecrawlSearchResponse,
+	parseWebsearchToolOptions,
+} from "../src/index.ts";
+import * as shellModule from "../src/utils/shell.ts";
+import { createHarness } from "./test-harness.ts";
+
+const operations = new LocalToolOperations(process.cwd());
+const readTool = createReadTool(operations);
+const writeTool = createWriteTool(operations);
+const editTool = createEditTool(operations);
+const bashTool = createBashTool(operations);
+const grepTool = createGrepTool(operations);
+const findTool = createFindTool(operations);
+const lsTool = createLsTool(operations);
+const websearchTool = createWebsearchTool();
+
+// Helper to extract text from content blocks
+function getTextOutput(result: any): string {
+	return (
+		result.content
+			?.filter((c: any) => c.type === "text")
+			.map((c: any) => c.text)
+			.join("\n") || ""
+	);
+}
+
+async function getLineHashes(content: string, path?: string): Promise<string[]> {
+	await initHasher();
+	const normalized = content
+		.replace(/^\uFEFF/, "")
+		.replace(/\r\n/g, "\n")
+		.replace(/\r/g, "\n");
+	return lineHashes(normalized, path);
+}
+
+async function getHashlineOutput(content: string, path: string): Promise<string> {
+	const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+	const visibleLines = normalized.endsWith("\n") ? normalized.slice(0, -1).split("\n") : normalized.split("\n");
+	const hashes = await getLineHashes(content, path);
+	return visibleLines.map((line, index) => `${hashes[index]}│${line}`).join("\n");
+}
+
+describe("Coding Agent Tools", () => {
+	let testDir: string;
+
+	beforeEach(() => {
+		// Create a unique temporary directory for each test
+		testDir = join(tmpdir(), `coding-agent-test-${Date.now()}`);
+		mkdirSync(testDir, { recursive: true });
+	});
+
+	afterEach(() => {
+		// Clean up test directory
+		rmSync(testDir, { recursive: true, force: true });
+	});
+
+	describe("read tool", () => {
+		it("should read file contents that fit within limits", async () => {
+			const testFile = join(testDir, "test.txt");
+			const content = "Hello, world!\nLine 2\nLine 3";
+			writeFileSync(testFile, content);
+
+			const result = await readTool.execute("test-call-1", { path: testFile });
+
+			expect(getTextOutput(result)).toBe(await getHashlineOutput(content, testFile));
+			// No truncation message since file fits within limits
+			expect(getTextOutput(result)).not.toContain("Use offset=");
+			expect(result.details).toBeUndefined();
+		});
+
+		it("should handle non-existent files", async () => {
+			const testFile = join(testDir, "nonexistent.txt");
+
+			await expect(readTool.execute("test-call-2", { path: testFile })).rejects.toThrow(/ENOENT|not found/i);
+		});
+
+		it("should truncate files exceeding line limit", async () => {
+			const testFile = join(testDir, "large.txt");
+			const lines = Array.from({ length: 2500 }, (_, i) => `Line ${i + 1}`);
+			writeFileSync(testFile, lines.join("\n"));
+
+			const result = await readTool.execute("test-call-3", { path: testFile });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("Line 1");
+			expect(output).toContain("Line 2000");
+			expect(output).not.toContain("Line 2001");
+			expect(output).toContain("[Showing lines 1-2000 of 2500. Use offset=2001 to continue.]");
+		});
+
+		it("should truncate when byte limit exceeded", async () => {
+			const testFile = join(testDir, "large-bytes.txt");
+			// Create file that exceeds 50KB byte limit but has fewer than 2000 lines
+			const lines = Array.from({ length: 500 }, (_, i) => `Line ${i + 1}: ${"x".repeat(200)}`);
+			writeFileSync(testFile, lines.join("\n"));
+
+			const result = await readTool.execute("test-call-4", { path: testFile });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("Line 1:");
+			// Should show byte limit message
+			expect(output).toMatch(/\[Showing lines 1-\d+ of 500 \(.* limit\)\. Use offset=\d+ to continue\.\]/);
+		});
+
+		it("should handle offset parameter", async () => {
+			const testFile = join(testDir, "offset-test.txt");
+			const lines = Array.from({ length: 100 }, (_, i) => `Line ${i + 1}`);
+			writeFileSync(testFile, lines.join("\n"));
+
+			const result = await readTool.execute("test-call-5", { path: testFile, offset: 51 });
+			const output = getTextOutput(result);
+
+			expect(output).not.toContain("Line 50");
+			expect(output).toContain("Line 51");
+			expect(output).toContain("Line 100");
+			// No truncation message since file fits within limits
+			expect(output).not.toContain("Use offset=");
+		});
+
+		it("should handle limit parameter", async () => {
+			const testFile = join(testDir, "limit-test.txt");
+			const lines = Array.from({ length: 100 }, (_, i) => `Line ${i + 1}`);
+			writeFileSync(testFile, lines.join("\n"));
+
+			const result = await readTool.execute("test-call-6", { path: testFile, limit: 10 });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("Line 1");
+			expect(output).toContain("Line 10");
+			expect(output).not.toContain("Line 11");
+			expect(output).toContain("[90 more lines in file. Use offset=11 to continue.]");
+		});
+
+		it("should handle offset + limit together", async () => {
+			const testFile = join(testDir, "offset-limit-test.txt");
+			const lines = Array.from({ length: 100 }, (_, i) => `Line ${i + 1}`);
+			writeFileSync(testFile, lines.join("\n"));
+
+			const result = await readTool.execute("test-call-7", {
+				path: testFile,
+				offset: 41,
+				limit: 20,
+			});
+			const output = getTextOutput(result);
+
+			expect(output).not.toContain("Line 40");
+			expect(output).toContain("Line 41");
+			expect(output).toContain("Line 60");
+			expect(output).not.toContain("Line 61");
+			expect(output).toContain("[40 more lines in file. Use offset=61 to continue.]");
+		});
+
+		it("should show error when offset is beyond file length", async () => {
+			const testFile = join(testDir, "short.txt");
+			writeFileSync(testFile, "Line 1\nLine 2\nLine 3");
+
+			await expect(readTool.execute("test-call-8", { path: testFile, offset: 100 })).rejects.toThrow(
+				/Offset 100 is beyond end of file \(3 lines total\)/,
+			);
+		});
+
+		it("should include truncation details when truncated", async () => {
+			const testFile = join(testDir, "large-file.txt");
+			const lines = Array.from({ length: 2500 }, (_, i) => `Line ${i + 1}`);
+			writeFileSync(testFile, lines.join("\n"));
+
+			const result = await readTool.execute("test-call-9", { path: testFile });
+
+			expect(result.details).toBeDefined();
+			expect(result.details?.truncation).toBeDefined();
+			expect(result.details?.truncation?.truncated).toBe(true);
+			expect(result.details?.truncation?.truncatedBy).toBe("lines");
+			expect(result.details?.truncation?.totalLines).toBe(2500);
+			expect(result.details?.truncation?.outputLines).toBe(2000);
+		});
+
+		it("should detect image MIME type from file magic (not extension)", async () => {
+			const png1x1Base64 =
+				"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==";
+			const pngBuffer = Buffer.from(png1x1Base64, "base64");
+
+			const testFile = join(testDir, "image.txt");
+			writeFileSync(testFile, pngBuffer);
+
+			const result = await readTool.execute("test-call-img-1", { path: testFile });
+
+			expect(result.content[0]?.type).toBe("text");
+			expect(getTextOutput(result)).toContain("Read image file [image/png]");
+
+			const imageBlock = result.content.find((c): c is ImageContent => c.type === "image");
+			expect(imageBlock).toBeDefined();
+			expect(imageBlock?.mimeType).toBe("image/png");
+			expect(typeof imageBlock?.data).toBe("string");
+			expect((imageBlock?.data ?? "").length).toBeGreaterThan(0);
+		});
+
+		it("should treat files with image extension but non-image content as text", async () => {
+			const testFile = join(testDir, "not-an-image.png");
+			writeFileSync(testFile, "definitely not a png");
+
+			const result = await readTool.execute("test-call-img-2", { path: testFile });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("definitely not a png");
+			expect(result.content.some((c: any) => c.type === "image")).toBe(false);
+		});
+	});
+
+	describe("write tool", () => {
+		it("should write file contents", async () => {
+			const testFile = join(testDir, "write-test.txt");
+			const content = "Test content";
+
+			const result = await writeTool.execute("test-call-3", { path: testFile, content });
+
+			expect(getTextOutput(result)).toContain("Successfully wrote");
+			expect(getTextOutput(result)).toContain(testFile);
+			expect(result.details).toBeUndefined();
+		});
+
+		it("should create parent directories", async () => {
+			const testFile = join(testDir, "nested", "dir", "test.txt");
+			const content = "Nested content";
+
+			const result = await writeTool.execute("test-call-4", { path: testFile, content });
+
+			expect(getTextOutput(result)).toContain("Successfully wrote");
+		});
+	});
+
+	describe("edit tool", () => {
+		it("should replace a hash-anchored line in a file", async () => {
+			const testFile = join(testDir, "edit-test.txt");
+			const originalContent = "Hello, world!";
+			writeFileSync(testFile, originalContent);
+			const hashes = await getLineHashes(originalContent, testFile);
+
+			const result = await editTool.execute("test-call-5", {
+				path: testFile,
+				changes: [{ hash_range_inclusive: [hashes[0], hashes[0]], content_lines: ["Hello, testing!"] }],
+			});
+
+			expect(getTextOutput(result)).toContain("Successfully replaced");
+			expect(result.details).toBeDefined();
+			expect(result.details.diff).toContain("testing");
+			expect(result.details.patch).toContain("--- ");
+			expect(result.details.patch).toContain("+++ ");
+			expect(result.details.patch).toContain("@@");
+			expect(result.details.patch).toContain("-Hello, world!");
+			expect(result.details.patch).toContain("+Hello, testing!");
+			expect(applyPatch(originalContent, result.details.patch)).toBe("Hello, testing!");
+		});
+
+		it("should fail when an anchor is stale", async () => {
+			const testFile = join(testDir, "edit-stale.txt");
+			const originalContent = "Hello, world!";
+			writeFileSync(testFile, originalContent);
+			const hashes = await getLineHashes(originalContent, testFile);
+			const staleAnchor = hashes[0] === "___" ? "---" : "___";
+
+			await expect(
+				editTool.execute("test-call-6", {
+					path: testFile,
+					changes: [{ hash_range_inclusive: [staleAnchor, staleAnchor], content_lines: ["Hello, testing!"] }],
+				}),
+			).rejects.toThrow(/E_STALE_ANCHOR/);
+		});
+
+		it("should include ENOENT when the edit target does not exist", async () => {
+			const missingFile = join(testDir, "missing.txt");
+
+			await expect(
+				editTool.execute("test-call-6b", {
+					path: missingFile,
+					changes: [{ hash_range_inclusive: ["abc", "abc"], content_lines: ["world"] }],
+				}),
+			).rejects.toThrow(`Could not edit file: ${missingFile}. Error code: ENOENT.`);
+		});
+
+		it("should target one occurrence when line content is repeated", async () => {
+			const testFile = join(testDir, "edit-duplicates.txt");
+			const originalContent = "foo\nkeep\nfoo\n";
+			writeFileSync(testFile, originalContent);
+			const hashes = await getLineHashes(originalContent, testFile);
+
+			await editTool.execute("test-call-7", {
+				path: testFile,
+				changes: [{ hash_range_inclusive: [hashes[2], hashes[2]], content_lines: ["bar"] }],
+			});
+
+			expect(readFileSync(testFile, "utf-8")).toBe("foo\nkeep\nbar\n");
+		});
+
+		it("should replace multiple disjoint regions in one call", async () => {
+			const testFile = join(testDir, "edit-multi.txt");
+			const originalContent = "alpha\nbeta\ngamma\ndelta\n";
+			writeFileSync(testFile, originalContent);
+			const hashes = await getLineHashes(originalContent, testFile);
+
+			const result = await editTool.execute("test-call-8", {
+				path: testFile,
+				changes: [
+					{ hash_range_inclusive: [hashes[0], hashes[0]], content_lines: ["ALPHA"] },
+					{ hash_range_inclusive: [hashes[2], hashes[2]], content_lines: ["GAMMA"] },
+				],
+			});
+
+			expect(getTextOutput(result)).toContain("Successfully replaced");
+			expect(readFileSync(testFile, "utf-8")).toBe("ALPHA\nbeta\nGAMMA\ndelta\n");
+			expect(result.details?.diff).toContain("ALPHA");
+			expect(result.details?.diff).toContain("GAMMA");
+		});
+
+		it("should collapse large unchanged gaps in multi-edit diffs", async () => {
+			const testFile = join(testDir, "edit-multi-large-gap.txt");
+			const lines = Array.from({ length: 600 }, (_, i) => `line ${String(i + 1).padStart(3, "0")}`);
+			const originalContent = `${lines.join("\n")}\n`;
+			writeFileSync(testFile, originalContent);
+			const hashes = await getLineHashes(originalContent, testFile);
+
+			const result = await editTool.execute("test-call-8b", {
+				path: testFile,
+				changes: [
+					{ hash_range_inclusive: [hashes[99], hashes[99]], content_lines: ["LINE 100"] },
+					{ hash_range_inclusive: [hashes[299], hashes[299]], content_lines: ["LINE 300"] },
+					{ hash_range_inclusive: [hashes[499], hashes[499]], content_lines: ["LINE 500"] },
+				],
+			});
+
+			const diff = result.details?.diff ?? "";
+			expect(diff).toContain("LINE 100");
+			expect(diff).toContain("LINE 300");
+			expect(diff).toContain("LINE 500");
+			expect(diff).toContain("...");
+			expect(diff).not.toContain("line 250");
+			expect(diff.split("\n").length).toBeLessThan(50);
+		});
+
+		it("should resolve all changes against the original hash snapshot", async () => {
+			const testFile = join(testDir, "edit-multi-original.txt");
+			const originalContent = "foo\nbar\nbaz\n";
+			writeFileSync(testFile, originalContent);
+			const hashes = await getLineHashes(originalContent, testFile);
+
+			await editTool.execute("test-call-9", {
+				path: testFile,
+				changes: [
+					{ hash_range_inclusive: [hashes[0], hashes[0]], content_lines: ["foo bar"] },
+					{ hash_range_inclusive: [hashes[1], hashes[1]], content_lines: ["BAR"] },
+				],
+			});
+
+			expect(readFileSync(testFile, "utf-8")).toBe("foo bar\nBAR\nbaz\n");
+		});
+
+		it("should fail when changes is empty", async () => {
+			const testFile = join(testDir, "edit-empty-changes.txt");
+			writeFileSync(testFile, "hello\nworld\n");
+
+			await expect(editTool.execute("test-call-11", { path: testFile, changes: [] })).rejects.toThrow(
+				/non-empty "changes" array/,
+			);
+		});
+
+		it("should fail when hash-anchored regions overlap", async () => {
+			const testFile = join(testDir, "edit-overlap.txt");
+			const originalContent = "one\ntwo\nthree\n";
+			writeFileSync(testFile, originalContent);
+			const hashes = await getLineHashes(originalContent, testFile);
+
+			await expect(
+				editTool.execute("test-call-12", {
+					path: testFile,
+					changes: [
+						{ hash_range_inclusive: [hashes[0], hashes[1]], content_lines: ["ONE", "TWO"] },
+						{ hash_range_inclusive: [hashes[1], hashes[2]], content_lines: ["TWO", "THREE"] },
+					],
+				}),
+			).rejects.toThrow(/overlap/);
+		});
+
+		it("should not partially apply changes when one anchor is stale", async () => {
+			const testFile = join(testDir, "edit-no-partial.txt");
+			const originalContent = "alpha\nbeta\ngamma\n";
+			writeFileSync(testFile, originalContent);
+			const hashes = await getLineHashes(originalContent, testFile);
+			const staleAnchor = hashes.includes("___") ? "---" : "___";
+
+			await expect(
+				editTool.execute("test-call-13", {
+					path: testFile,
+					changes: [
+						{ hash_range_inclusive: [hashes[0], hashes[0]], content_lines: ["ALPHA"] },
+						{ hash_range_inclusive: [staleAnchor, staleAnchor], content_lines: ["MISSING"] },
+					],
+				}),
+			).rejects.toThrow(/E_STALE_ANCHOR/);
+
+			expect(readFileSync(testFile, "utf-8")).toBe(originalContent);
+		});
+
+		it("should include EACCES for read-only files", async () => {
+			const testFile = join(testDir, "edit-readonly.txt");
+			const originalContent = "hello\n";
+			writeFileSync(testFile, originalContent);
+			const hashes = await getLineHashes(originalContent, testFile);
+			chmodSync(testFile, 0o444);
+
+			await expect(
+				editTool.execute("test-call-14", {
+					path: testFile,
+					changes: [{ hash_range_inclusive: [hashes[0], hashes[0]], content_lines: ["world"] }],
+				}),
+			).rejects.toThrow(`Could not edit file: ${testFile}. Error code: EACCES.`);
+		});
+
+		it("should include the original error message for unknown edit access errors", async () => {
+			const failingOperations = new LocalToolOperations(testDir);
+			failingOperations.access = async () => {
+				throw new Error("disk offline");
+			};
+			failingOperations.readFile = async () => Buffer.from("hello\n", "utf-8");
+			failingOperations.writeFile = async () => {};
+			const genericFailureTool = createEditTool(failingOperations);
+
+			await expect(
+				genericFailureTool.execute("test-call-16", {
+					path: "broken.txt",
+					changes: [{ hash_range_inclusive: ["abc", "abc"], content_lines: ["world"] }],
+				}),
+			).rejects.toThrow("Could not edit file: broken.txt. Error: disk offline.");
+		});
+	});
+
+	describe("deferred remote operations", () => {
+		it("fails every operation before remote backend configuration", async () => {
+			const operations = new DeferredRemoteToolOperations("/workspace");
+
+			expect(operations.getBackendInfo()).toEqual({ type: "remote", cwd: "/workspace", configured: false });
+			await expect(
+				operations.exec("pwd", {
+					onData: () => {},
+				}),
+			).rejects.toThrow("Remote backend is not configured");
+			await expect(operations.readFile("/workspace/file.txt")).rejects.toThrow("Remote backend is not configured");
+		});
+	});
+
+	describe("bash tool", () => {
+		it("should execute simple commands", async () => {
+			const result = await bashTool.execute("test-call-8", { command: "echo 'test output'" });
+
+			expect(getTextOutput(result)).toContain("test output");
+			expect(result.details).toBeUndefined();
+		});
+
+		it("should handle command errors", async () => {
+			await expect(bashTool.execute("test-call-9", { command: "exit 1" })).rejects.toThrow(
+				/(Command failed|code 1)/,
+			);
+		});
+
+		it("should respect timeout", async () => {
+			await expect(bashTool.execute("test-call-10", { command: "sleep 5", timeout: 1 })).rejects.toThrow(
+				/timed out/i,
+			);
+		});
+
+		it("should include full output path for truncated timeout and abort errors", async () => {
+			for (const testCase of [
+				{ error: "timeout:5", expected: "Command timed out after 5 seconds" },
+				{ error: "aborted", expected: "Command aborted" },
+			]) {
+				const operations = new LocalToolOperations(testDir);
+				operations.exec = async (_command, { onData }) => {
+					for (let i = 1; i <= 3000; i++) {
+						onData(Buffer.from(`${i}\n`, "utf-8"));
+					}
+					throw new Error(testCase.error);
+				};
+				const bash = createBashTool(operations);
+
+				let error: unknown;
+				try {
+					await bash.execute(`test-call-${testCase.error}`, { command: "chatty-fail" });
+				} catch (err) {
+					error = err;
+				}
+
+				expect(error).toBeInstanceOf(Error);
+				const message = (error as Error).message;
+				expect(message).toContain(testCase.expected);
+				expect(message).toMatch(/\[Showing lines \d+-\d+ of \d+\. Full output: /);
+				expect(message).not.toContain("Full output: undefined");
+				const fullOutputPath = message.match(/Full output: ([^\]\n]+)/)?.[1];
+				expect(fullOutputPath).toBeDefined();
+				expect(existsSync(fullOutputPath!)).toBe(true);
+				const fullOutput = readFileSync(fullOutputPath!, "utf-8");
+				expect(fullOutput).toContain("1\n2\n3");
+				expect(fullOutput).toContain("2998\n2999\n3000");
+			}
+		});
+
+		it("should throw error when cwd does not exist", async () => {
+			const nonexistentCwd = "/this/directory/definitely/does/not/exist/12345";
+
+			const bashToolWithBadCwd = createBashTool(new LocalToolOperations(nonexistentCwd));
+
+			await expect(bashToolWithBadCwd.execute("test-call-11", { command: "echo test" })).rejects.toThrow(
+				/Working directory does not exist/,
+			);
+		});
+
+		it("should handle process spawn errors", async () => {
+			vi.spyOn(shellModule, "getShellConfig").mockReturnValueOnce({
+				shell: "/nonexistent-shell-path-xyz123",
+				args: ["-c"],
+			});
+
+			const bashWithBadShell = createBashTool(new LocalToolOperations(testDir));
+
+			await expect(bashWithBadShell.execute("test-call-12", { command: "echo test" })).rejects.toThrow(/ENOENT/);
+		});
+
+		it("should pass shellPath through to shell resolution", async () => {
+			const getShellConfigSpy = vi.spyOn(shellModule, "getShellConfig");
+			const ops = createLocalBashOperations({ cwd: testDir, shellPath: "/custom/bash" });
+			await expect(
+				ops.exec("echo test", {
+					cwd: testDir,
+					onData: () => {},
+				}),
+			).rejects.toThrow("Custom shell path not found: /custom/bash");
+			expect(getShellConfigSpy).toHaveBeenCalledWith("/custom/bash");
+		});
+
+		it("should prepend command prefix when configured", async () => {
+			const bashWithPrefix = createBashTool(new LocalToolOperations(testDir), {
+				commandPrefix: "export TEST_VAR=hello",
+			});
+
+			const result = await bashWithPrefix.execute("test-prefix-1", { command: "echo $TEST_VAR" });
+			expect(getTextOutput(result).trim()).toBe("hello");
+		});
+
+		it("should include output from both prefix and command", async () => {
+			const bashWithPrefix = createBashTool(new LocalToolOperations(testDir), {
+				commandPrefix: "echo prefix-output",
+			});
+
+			const result = await bashWithPrefix.execute("test-prefix-2", { command: "echo command-output" });
+			expect(getTextOutput(result).trim()).toBe("prefix-output\ncommand-output");
+		});
+
+		it("should work without command prefix", async () => {
+			const bashWithoutPrefix = createBashTool(new LocalToolOperations(testDir), {});
+
+			const result = await bashWithoutPrefix.execute("test-prefix-3", { command: "echo no-prefix" });
+			expect(getTextOutput(result).trim()).toBe("no-prefix");
+		});
+
+		it("should coalesce streaming updates for chatty output", async () => {
+			const operations = new LocalToolOperations(testDir);
+			operations.exec = async (_command, { onData }) => {
+				for (let i = 0; i < 5000; i++) {
+					onData(Buffer.from(`line ${i}\n`, "utf-8"));
+				}
+				return { exitCode: 0 };
+			};
+			const updates: AgentToolResult<unknown>[] = [];
+			const bash = createBashTool(operations);
+
+			const result = await bash.execute("test-call-chatty-updates", { command: "chatty" }, undefined, (update) =>
+				updates.push(update),
+			);
+
+			expect(updates.length).toBeLessThan(25);
+			expect(getTextOutput(result)).toContain("line 4999");
+		});
+
+		it("should not count a trailing newline as an extra truncated bash output line", async () => {
+			const operations = new LocalToolOperations(testDir);
+			operations.exec = async (_command, { onData }) => {
+				for (let i = 1; i <= 4000; i++) {
+					onData(Buffer.from(`line-${String(i).padStart(4, "0")}\n`, "utf-8"));
+				}
+				return { exitCode: 0 };
+			};
+			const bash = createBashTool(operations);
+
+			const result = await bash.execute("test-call-trailing-newline-line-count", { command: "many-lines" });
+			const output = getTextOutput(result);
+
+			expect(result.details?.truncation?.totalLines).toBe(4000);
+			expect(result.details?.truncation?.outputLines).toBe(2000);
+			expect(output).toContain("line-2001");
+			expect(output).toContain("line-4000");
+			expect(output).toMatch(/\[Showing lines 2001-4000 of 4000\. Full output: /);
+			expect(output).not.toContain("4001");
+		});
+
+		it("should decode UTF-8 characters split across output chunks", async () => {
+			const euro = Buffer.from("€\n", "utf-8");
+			const operations = new LocalToolOperations(testDir);
+			operations.exec = async (_command, { onData }) => {
+				onData(euro.subarray(0, 1));
+				onData(euro.subarray(1));
+				return { exitCode: 0 };
+			};
+			const bash = createBashTool(operations);
+
+			const result = await bash.execute("test-call-split-utf8", { command: "split-utf8" });
+
+			expect(getTextOutput(result).trim()).toBe("€");
+		});
+
+		it("should expose local bash operations for extension reuse", async () => {
+			const ops = createLocalBashOperations({ cwd: testDir });
+			const chunks: Buffer[] = [];
+
+			const result = await ops.exec("echo $TEST_LOCAL_BASH_OPS", {
+				cwd: testDir,
+				onData: (data) => chunks.push(data),
+				env: { ...process.env, TEST_LOCAL_BASH_OPS: "from-local-ops" },
+			});
+
+			expect(result.exitCode).toBe(0);
+			expect(Buffer.concat(chunks).toString("utf-8").trim()).toBe("from-local-ops");
+		});
+
+		it("should preserve executeBash sanitization when using local bash operations", async () => {
+			const result = await executeBashWithOperations(
+				"printf '\\033[31mred\\033[0m\\r\\n'",
+				process.cwd(),
+				createLocalBashOperations({ cwd: process.cwd() }),
+			);
+
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toBe("red\n");
+		});
+
+		it("should persist full output when truncation happens by line count only", async () => {
+			const bash = createBashTool(new LocalToolOperations(testDir));
+			const result = await bash.execute("test-call-line-truncation", { command: "seq 3000" });
+			const output = getTextOutput(result);
+			const fullOutputPath = result.details?.fullOutputPath;
+
+			expect(result.details?.truncation?.truncated).toBe(true);
+			expect(result.details?.truncation?.truncatedBy).toBe("lines");
+			expect(fullOutputPath).toBeDefined();
+			expect(output).toMatch(/\[Showing lines \d+-\d+ of \d+\. Full output: /);
+			expect(output).not.toContain("Full output: undefined");
+
+			for (let i = 0; i < 20 && (!fullOutputPath || !existsSync(fullOutputPath)); i++) {
+				await new Promise((resolve) => setTimeout(resolve, 10));
+			}
+
+			expect(fullOutputPath).toBeDefined();
+			expect(existsSync(fullOutputPath!)).toBe(true);
+			const fullOutput = readFileSync(fullOutputPath!, "utf-8");
+			expect(fullOutput).toContain("1\n2\n3");
+			expect(fullOutput).toContain("2998\n2999\n3000");
+		});
+
+		it("executeBash should persist full output when truncation happens by line count only", async () => {
+			const result = await executeBashWithOperations(
+				"seq 3000",
+				process.cwd(),
+				createLocalBashOperations({ cwd: process.cwd() }),
+			);
+			const fullOutputPath = result.fullOutputPath;
+
+			expect(result.truncated).toBe(true);
+			expect(fullOutputPath).toBeDefined();
+
+			for (let i = 0; i < 20 && (!fullOutputPath || !existsSync(fullOutputPath)); i++) {
+				await new Promise((resolve) => setTimeout(resolve, 10));
+			}
+
+			expect(fullOutputPath).toBeDefined();
+			expect(existsSync(fullOutputPath!)).toBe(true);
+			const fullOutput = readFileSync(fullOutputPath!, "utf-8");
+			expect(fullOutput).toContain("1\n2\n3");
+			expect(fullOutput).toContain("2998\n2999\n3000");
+		});
+	});
+
+	describe("grep tool", () => {
+		it("should include filename when searching a single file", async () => {
+			const testFile = join(testDir, "example.txt");
+			writeFileSync(testFile, "first line\nmatch line\nlast line");
+
+			const result = await grepTool.execute("test-call-11", {
+				pattern: "match",
+				path: testFile,
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("example.txt:2: match line");
+		});
+
+		it("should respect global limit and include context lines", async () => {
+			const testFile = join(testDir, "context.txt");
+			const content = ["before", "match one", "after", "middle", "match two", "after two"].join("\n");
+			writeFileSync(testFile, content);
+
+			const result = await grepTool.execute("test-call-12", {
+				pattern: "match",
+				path: testFile,
+				limit: 1,
+				context: 1,
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("context.txt-1- before");
+			expect(output).toContain("context.txt:2: match one");
+			expect(output).toContain("context.txt-3- after");
+			expect(output).toContain("[1 matches limit reached. Use limit=2 for more, or refine pattern]");
+			// Ensure second match is not present
+			expect(output).not.toContain("match two");
+		});
+
+		it("should treat flag-like patterns as search text", async () => {
+			const marker = join(testDir, "grep-injection-marker");
+			const payload = join(testDir, "payload.sh");
+			const testFile = join(testDir, "target.txt");
+			writeFileSync(payload, `#!/bin/sh\necho executed > ${marker}\ncat "$1"\n`);
+			chmodSync(payload, 0o755);
+			writeFileSync(testFile, "target\n");
+
+			const result = await grepTool.execute("test-call-grep-injection", {
+				pattern: `--pre=${payload}`,
+				path: testDir,
+			});
+
+			expect(getTextOutput(result)).toContain("No matches found");
+			expect(existsSync(marker)).toBe(false);
+		});
+	});
+
+	describe("find tool", () => {
+		it("should include hidden files that are not gitignored", async () => {
+			const hiddenDir = join(testDir, ".secret");
+			mkdirSync(hiddenDir);
+			writeFileSync(join(hiddenDir, "hidden.txt"), "hidden");
+			writeFileSync(join(testDir, "visible.txt"), "visible");
+
+			const result = await findTool.execute("test-call-13", {
+				pattern: "**/*.txt",
+				path: testDir,
+			});
+
+			const outputLines = getTextOutput(result)
+				.split("\n")
+				.map((line) => line.trim())
+				.filter(Boolean);
+
+			expect(outputLines).toContain("visible.txt");
+			expect(outputLines).toContain(".secret/hidden.txt");
+		});
+
+		it("should respect .gitignore", async () => {
+			writeFileSync(join(testDir, ".gitignore"), "ignored.txt\n");
+			writeFileSync(join(testDir, "ignored.txt"), "ignored");
+			writeFileSync(join(testDir, "kept.txt"), "kept");
+
+			const result = await findTool.execute("test-call-14", {
+				pattern: "**/*.txt",
+				path: testDir,
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("kept.txt");
+			expect(output).not.toContain("ignored.txt");
+		});
+
+		it("should surface fd glob parse errors", async () => {
+			await expect(
+				findTool.execute("test-call-15", {
+					pattern: "[",
+					path: testDir,
+				}),
+			).rejects.toThrow(/error parsing glob|fd exited with code 1|fd error/i);
+		});
+
+		it("should treat flag-like patterns as search text", async () => {
+			const result = await findTool.execute("test-call-find-flag-pattern", {
+				pattern: "--help",
+				path: testDir,
+			});
+
+			expect(getTextOutput(result)).toContain("No files found matching pattern");
+		});
+	});
+
+	describe("ls tool", () => {
+		it("should list dotfiles and directories", async () => {
+			writeFileSync(join(testDir, ".hidden-file"), "secret");
+			mkdirSync(join(testDir, ".hidden-dir"));
+
+			const result = await lsTool.execute("test-call-15", { path: testDir });
+			const output = getTextOutput(result);
+
+			expect(output).toContain(".hidden-file");
+			expect(output).toContain(".hidden-dir/");
+		});
+	});
+
+	describe("websearch tool", () => {
+		it("parses DuckDuckGo abstract and related topic links", () => {
+			const results = parseDuckDuckGoResponse(
+				{
+					Heading: "Pi",
+					AbstractURL: "https://example.com/pi",
+					AbstractText: "Pi is a number.",
+					RelatedTopics: [
+						{ FirstURL: "https://example.com/one", Text: "One - first result" },
+						{
+							Topics: [{ FirstURL: "https://example.com/two", Text: "Two - second result" }],
+						},
+					],
+				},
+				3,
+			);
+
+			expect(results).toEqual([
+				{ title: "Pi", url: "https://example.com/pi", snippet: "Pi is a number." },
+				{ title: "One", url: "https://example.com/one", snippet: "One - first result" },
+				{ title: "Two", url: "https://example.com/two", snippet: "Two - second result" },
+			]);
+		});
+		it("parses Brave Search web results", () => {
+			const results = parseBraveSearchResponse(
+				{
+					web: {
+						results: [
+							{ title: "Pi Agent", url: "https://example.com/pi-agent", description: "Coding agent" },
+							{ title: "Duplicate", url: "https://example.com/pi-agent", description: "Duplicate" },
+							{ title: "Other", url: "https://example.com/other", description: "Other result" },
+						],
+					},
+				},
+				2,
+			);
+
+			expect(results).toEqual([
+				{ title: "Pi Agent", url: "https://example.com/pi-agent", snippet: "Coding agent" },
+				{ title: "Other", url: "https://example.com/other", snippet: "Other result" },
+			]);
+		});
+
+		it("parses Firecrawl Search web results", () => {
+			const results = parseFirecrawlSearchResponse(
+				{
+					success: true,
+					data: {
+						web: [
+							{ title: "Pi Agent", url: "https://example.com/pi-agent", description: "Coding agent" },
+							{ title: "Duplicate", url: "https://example.com/pi-agent", description: "Duplicate" },
+							{ title: "Markdown", url: "https://example.com/markdown", markdown: "Markdown snippet" },
+						],
+					},
+				},
+				2,
+			);
+
+			expect(results).toEqual([
+				{ title: "Pi Agent", url: "https://example.com/pi-agent", snippet: "Coding agent" },
+				{ title: "Markdown", url: "https://example.com/markdown", snippet: "Markdown snippet" },
+			]);
+		});
+
+		it("parses websearch tool config", () => {
+			expect(
+				parseWebsearchToolOptions({
+					provider: "brave",
+					apiKey: " key ",
+					baseUrl: " https://search.example.test ",
+				}),
+			).toEqual({ provider: "brave", apiKey: "key", baseUrl: "https://search.example.test" });
+			expect(parseWebsearchToolOptions({ provider: "firecrawl-search" })).toEqual({ provider: "firecrawl-search" });
+			expect(() => parseWebsearchToolOptions({ provider: "invalid" })).toThrow("Invalid tools.websearch.provider");
+		});
+
+		it("executes a DuckDuckGo search request", async () => {
+			const originalFetch = globalThis.fetch;
+			const fetchMock = vi.fn(async (url: URL | RequestInfo) => {
+				expect(String(url)).toContain("api.duckduckgo.com");
+				expect(String(url)).toContain("q=pi+agent");
+				return new Response(
+					JSON.stringify({
+						RelatedTopics: [{ FirstURL: "https://example.com/pi-agent", Text: "Pi Agent - coding agent" }],
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				);
+			});
+			globalThis.fetch = fetchMock as typeof fetch;
+			try {
+				const result = await websearchTool.execute("test-websearch", { query: "pi agent", limit: 1 });
+				const output = getTextOutput(result);
+				expect(output).toContain("Pi Agent");
+				expect(output).toContain("https://example.com/pi-agent");
+				expect(result.details?.results).toHaveLength(1);
+				expect(result.details?.source).toBe("duckduckgo-instant-answer");
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+
+		it("executes a Brave Search request from tool config", async () => {
+			const originalFetch = globalThis.fetch;
+			const braveTool = createWebsearchTool({
+				provider: "brave",
+				apiKey: "test-key",
+				baseUrl: "https://search.example.test/web/search",
+			});
+			const fetchMock = vi.fn(async (url: URL | RequestInfo, init?: RequestInit) => {
+				expect(String(url)).toContain("search.example.test/web/search");
+				expect(String(url)).toContain("q=pi+agent");
+				expect(init?.headers).toMatchObject({ "x-subscription-token": "test-key" });
+				return new Response(
+					JSON.stringify({
+						web: {
+							results: [{ title: "Pi Agent", url: "https://example.com/pi-agent", description: "Coding agent" }],
+						},
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				);
+			});
+			globalThis.fetch = fetchMock as typeof fetch;
+			try {
+				const result = await braveTool.execute("test-websearch-brave", { query: "pi agent", limit: 1 });
+				const output = getTextOutput(result);
+				expect(output).toContain("Pi Agent");
+				expect(output).toContain("https://example.com/pi-agent");
+				expect(result.details?.source).toBe("brave-search");
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+		it("uses websearch options from session settings tools block", async () => {
+			const originalFetch = globalThis.fetch;
+			const harness = createHarness({
+				settings: {
+					tools: {
+						websearch: {
+							provider: "brave",
+							apiKey: "settings-key",
+							baseUrl: "https://settings-search.example.test/web/search",
+						},
+					},
+				},
+			});
+			const fetchMock = vi.fn(async (url: URL | RequestInfo, init?: RequestInit) => {
+				expect(String(url)).toContain("settings-search.example.test/web/search");
+				expect(init?.headers).toMatchObject({ "x-subscription-token": "settings-key" });
+				return new Response(
+					JSON.stringify({
+						web: {
+							results: [{ title: "Configured", url: "https://example.com/configured" }],
+						},
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				);
+			});
+			globalThis.fetch = fetchMock as typeof fetch;
+			try {
+				const definition = harness.session.getToolDefinition("websearch");
+				expect(definition).toBeDefined();
+				const result = await definition!.execute(
+					"test-websearch-settings",
+					{ query: "configured" },
+					undefined,
+					undefined,
+					undefined as never,
+				);
+				const details = result.details as { source?: string } | undefined;
+				expect(getTextOutput(result)).toContain("https://example.com/configured");
+				expect(details?.source).toBe("brave-search");
+			} finally {
+				globalThis.fetch = originalFetch;
+				harness.cleanup();
+			}
+		});
+
+		it("executes a Firecrawl Search request from tool config", async () => {
+			const originalFetch = globalThis.fetch;
+			const firecrawlTool = createWebsearchTool({
+				provider: "firecrawl",
+				apiKey: "firecrawl-key",
+				baseUrl: "https://firecrawl.example.test/v2/search",
+			});
+			const fetchMock = vi.fn(async (url: URL | RequestInfo, init?: RequestInit) => {
+				expect(String(url)).toBe("https://firecrawl.example.test/v2/search");
+				expect(init?.method).toBe("POST");
+				expect(init?.headers).toMatchObject({ authorization: "Bearer firecrawl-key" });
+				expect(JSON.parse(String(init?.body))).toEqual({
+					query: "pi agent",
+					limit: 1,
+					sources: [{ type: "web" }],
+				});
+				return new Response(
+					JSON.stringify({
+						success: true,
+						data: {
+							web: [{ title: "Pi Agent", url: "https://example.com/pi-agent", description: "Coding agent" }],
+						},
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				);
+			});
+			globalThis.fetch = fetchMock as typeof fetch;
+			try {
+				const result = await firecrawlTool.execute("test-websearch-firecrawl", { query: "pi agent", limit: 1 });
+				const output = getTextOutput(result);
+				expect(output).toContain("Pi Agent");
+				expect(output).toContain("https://example.com/pi-agent");
+				expect(result.details?.source).toBe("firecrawl-search");
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+	});
+});
+
+describe("edit tool anchor behavior", () => {
+	let testDir: string;
+
+	beforeEach(() => {
+		testDir = join(tmpdir(), `coding-agent-anchor-test-${Date.now()}`);
+		mkdirSync(testDir, { recursive: true });
+	});
+
+	afterEach(() => {
+		rmSync(testDir, { recursive: true, force: true });
+	});
+
+	it("should resolve anchors after trailing whitespace changes", async () => {
+		const testFile = join(testDir, "trailing-ws.txt");
+		const originalContent = "line one\nline two\nline three\n";
+		writeFileSync(testFile, originalContent);
+		const hashes = await getLineHashes(originalContent, testFile);
+		writeFileSync(testFile, "line one   \nline two  \nline three\n");
+
+		await editTool.execute("test-anchor-whitespace", {
+			path: testFile,
+			changes: [{ hash_range_inclusive: [hashes[0], hashes[1]], content_lines: ["replaced"] }],
+		});
+
+		expect(readFileSync(testFile, "utf-8")).toBe("replaced\nline three\n");
+	});
+
+	it("should use anchors to replace Unicode content without fuzzy normalization", async () => {
+		const testFile = join(testDir, "unicode.txt");
+		const originalContent = "你好，世界\nconsole.log(‘hello’);\nrange: 1–5\nhello world\n";
+		writeFileSync(testFile, originalContent);
+		const hashes = await getLineHashes(originalContent, testFile);
+
+		await editTool.execute("test-anchor-unicode", {
+			path: testFile,
+			changes: [
+				{
+					hash_range_inclusive: [hashes[0], hashes[3]],
+					content_lines: ["你好，pi", "console.log('world');", "range: 10-50", "hello universe"],
+				},
+			],
+		});
+
+		expect(readFileSync(testFile, "utf-8")).toBe("你好，pi\nconsole.log('world');\nrange: 10-50\nhello universe\n");
+	});
+
+	it("should reject a reversed anchor range", async () => {
+		const testFile = join(testDir, "reversed.txt");
+		const originalContent = "first\nsecond\nthird\n";
+		writeFileSync(testFile, originalContent);
+		const hashes = await getLineHashes(originalContent, testFile);
+
+		await expect(
+			editTool.execute("test-anchor-reversed", {
+				path: testFile,
+				changes: [{ hash_range_inclusive: [hashes[2], hashes[0]], content_lines: ["replacement"] }],
+			}),
+		).rejects.toThrow(/E_BAD_OP/);
+	});
+});
+
+describe("edit tool CRLF and BOM handling", () => {
+	let testDir: string;
+
+	beforeEach(() => {
+		testDir = join(tmpdir(), `coding-agent-crlf-test-${Date.now()}`);
+		mkdirSync(testDir, { recursive: true });
+	});
+
+	afterEach(() => {
+		rmSync(testDir, { recursive: true, force: true });
+	});
+
+	it("should use normalized hash anchors for CRLF file content", async () => {
+		const testFile = join(testDir, "crlf-test.txt");
+		const originalContent = "line one\r\nline two\r\nline three\r\n";
+		writeFileSync(testFile, originalContent);
+		const hashes = await getLineHashes(originalContent, testFile);
+
+		const result = await editTool.execute("test-crlf-1", {
+			path: testFile,
+			changes: [{ hash_range_inclusive: [hashes[1], hashes[1]], content_lines: ["replaced line"] }],
+		});
+
+		expect(getTextOutput(result)).toContain("Successfully replaced");
+	});
+
+	it("should preserve CRLF line endings after an anchored edit", async () => {
+		const testFile = join(testDir, "crlf-preserve.txt");
+		const originalContent = "first\r\nsecond\r\nthird\r\n";
+		writeFileSync(testFile, originalContent);
+		const hashes = await getLineHashes(originalContent, testFile);
+
+		await editTool.execute("test-crlf-2", {
+			path: testFile,
+			changes: [{ hash_range_inclusive: [hashes[1], hashes[1]], content_lines: ["REPLACED"] }],
+		});
+
+		expect(readFileSync(testFile, "utf-8")).toBe("first\r\nREPLACED\r\nthird\r\n");
+	});
+
+	it("should preserve LF line endings for LF files", async () => {
+		const testFile = join(testDir, "lf-preserve.txt");
+		const originalContent = "first\nsecond\nthird\n";
+		writeFileSync(testFile, originalContent);
+		const hashes = await getLineHashes(originalContent, testFile);
+
+		await editTool.execute("test-lf-1", {
+			path: testFile,
+			changes: [{ hash_range_inclusive: [hashes[1], hashes[1]], content_lines: ["REPLACED"] }],
+		});
+
+		expect(readFileSync(testFile, "utf-8")).toBe("first\nREPLACED\nthird\n");
+	});
+
+	it("should preserve a UTF-8 BOM after an anchored edit", async () => {
+		const testFile = join(testDir, "bom-test.txt");
+		const originalContent = "\uFEFFfirst\r\nsecond\r\nthird\r\n";
+		writeFileSync(testFile, originalContent);
+		const hashes = await getLineHashes(originalContent, testFile);
+
+		await editTool.execute("test-bom", {
+			path: testFile,
+			changes: [{ hash_range_inclusive: [hashes[1], hashes[1]], content_lines: ["REPLACED"] }],
+		});
+
+		expect(readFileSync(testFile, "utf-8")).toBe("\uFEFFfirst\r\nREPLACED\r\nthird\r\n");
+	});
+
+	it("should preserve CRLF line endings and BOM for disjoint changes", async () => {
+		const testFile = join(testDir, "bom-crlf-multi.txt");
+		const originalContent = "\uFEFFfirst\r\nsecond\r\nthird\r\nfourth\r\n";
+		writeFileSync(testFile, originalContent);
+		const hashes = await getLineHashes(originalContent, testFile);
+
+		await editTool.execute("test-crlf-multi", {
+			path: testFile,
+			changes: [
+				{ hash_range_inclusive: [hashes[1], hashes[1]], content_lines: ["SECOND"] },
+				{ hash_range_inclusive: [hashes[3], hashes[3]], content_lines: ["FOURTH"] },
+			],
+		});
+
+		expect(readFileSync(testFile, "utf-8")).toBe("\uFEFFfirst\r\nSECOND\r\nthird\r\nFOURTH\r\n");
+	});
+});

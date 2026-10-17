@@ -1,0 +1,89 @@
+# JSON Event Stream Mode
+
+```bash
+grip --mode json "Your prompt"
+```
+
+Outputs all session events as JSON lines to stdout. Useful for integrating Grip into other tools or custom UIs.
+
+## Event Types
+
+Wire events use [`JsonAgentSessionEvent`](../src/modes/json-event.ts). It matches
+[`AgentSessionEvent`](../src/core/agent-session.ts) except that streaming message updates omit cumulative snapshots:
+
+```typescript
+type WithoutPartial<T> = T extends { partial: unknown } ? Omit<T, "partial"> : T;
+
+type JsonAgentSessionEvent =
+	| Exclude<AgentSessionEvent, { type: "message_update" }>
+	| {
+			type: "message_update";
+			assistantMessageEvent: WithoutPartial<AssistantMessageEvent>;
+		};
+```
+
+`queue_update` emits the full pending steering and follow-up queues whenever they change. `compaction_start` and `compaction_end` cover both manual and automatic compaction.
+
+Other base events come from [`AgentEvent`](../../agent/src/types.ts):
+
+```typescript
+type AgentEvent =
+  // Agent lifecycle
+  | { type: "agent_start" }
+  | { type: "agent_end"; messages: AgentMessage[] }
+  // Turn lifecycle
+  | { type: "turn_start" }
+  | { type: "turn_end"; message: AgentMessage; toolResults: ToolResultMessage[] }
+  // Message lifecycle
+  | { type: "message_start"; message: AgentMessage }
+  | { type: "message_update"; message: AgentMessage; assistantMessageEvent: AssistantMessageEvent }
+  | { type: "message_end"; message: AgentMessage }
+  // Tool execution
+  | { type: "tool_execution_start"; toolCallId: string; toolName: string; args: any }
+  | { type: "tool_execution_update"; toolCallId: string; toolName: string; args: any; partialResult: any }
+  | { type: "tool_execution_end"; toolCallId: string; toolName: string; result: any; isError: boolean };
+```
+
+## Message Types
+
+Base messages from [`packages/ai/src/types.ts`](../../ai/src/types.ts):
+- `UserMessage`
+- `AssistantMessage`
+- `ToolResultMessage`
+
+Extended messages re-exported by [`core/messages.ts`](../src/core/messages.ts) from `@greppleai/grip-agent-core`:
+- `BashExecutionMessage`
+- `CustomMessage`
+- `BranchSummaryMessage`
+- `CompactionSummaryMessage`
+- `CompactionSummaryMessage` (line 62)
+
+## Output Format
+
+Each line is a JSON object. Writes are serialized through the stdout queue, and provider event delivery waits for queued JSON output to drain. The first line is the session header:
+
+```json
+{"type":"session","version":3,"id":"uuid","timestamp":"...","cwd":"/path"}
+```
+
+Followed by events as they occur:
+
+```json
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"assistant","content":[],...}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hello"}}
+{"type":"message_end","message":{...}}
+{"type":"turn_end","message":{...},"toolResults":[]}
+{"type":"agent_end","messages":[...]}
+```
+`message_update` records are delta-only. They omit both the cumulative `message` field and
+`assistantMessageEvent.partial` to keep stream size linear. Use `contentIndex` and `delta`
+to assemble live text, thinking, or tool-call arguments if needed. `message_end` contains
+the final authoritative message.
+
+## Example
+
+```bash
+grip --mode json "List files" 2>/dev/null | jq -c 'select(.type == "message_end")'
+```

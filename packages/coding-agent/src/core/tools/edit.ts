@@ -1,0 +1,455 @@
+import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@greppleai/grip-agent-core";
+import { Text } from "@greppleai/grip-tui";
+import { createTwoFilesPatch } from "diff";
+import { type Static, Type } from "typebox";
+import type { Theme } from "../../modes/interactive/theme/theme.ts";
+import type { ToolDefinition } from "../extensions/types.ts";
+import { withFileMutationQueue } from "./file-mutation-queue.ts";
+import { type ApplyEditsResult, applyEdits, fmtBoundaryWarning } from "./hashline/apply.ts";
+import { initHasher, lineHashes } from "./hashline/hash.ts";
+import { type HEdit, type HTEdit, resEdits } from "./hashline/resolve.ts";
+import type { ToolBackendInfo, ToolOperations } from "./operations.ts";
+import { resolveToCwd } from "./path-utils.ts";
+import { formatBackendIcon, invalidArgText, shortenPath, str } from "./render-utils.ts";
+import { detectEnding, genDiff, type LineEnding, restoreEndings, stripBOM, toLF } from "./replace-diff.ts";
+import { normReq } from "./replace-normalize.ts";
+import { fmtCall, getPreviewInput, type RPreview, type RRState } from "./replace-render.ts";
+import { abortIf } from "./runtime.ts";
+import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
+
+const contentLinesSchema = Type.Array(Type.String(), {
+	description:
+		"Literal replacement content, one string per line. Use [] to delete the range. Do not include HASH│ prefixes from read output.",
+});
+
+const hashRangeInclusiveSchema = Type.Array(Type.String(), {
+	description: "Inclusive hash range to replace [start_hash, end_hash]. Use hash anchors only.",
+	minItems: 2,
+	maxItems: 2,
+});
+
+const editItemSchema = Type.Object(
+	{
+		hash_range_inclusive: hashRangeInclusiveSchema,
+		content_lines: contentLinesSchema,
+	},
+	{ additionalProperties: false },
+);
+
+const editSchema = Type.Object(
+	{
+		path: Type.String({ description: "Path to the file to edit (relative or absolute)" }),
+		changes: Type.Array(editItemSchema, {
+			description: "One or more hash-anchored replacements. All anchors must come from the same read snapshot.",
+		}),
+	},
+	{ additionalProperties: false },
+);
+
+export type EditToolInput = Static<typeof editSchema>;
+
+export type ReqParams = {
+	path: string;
+	changes: HTEdit[];
+};
+interface EditChangedLineRange {
+	first: number;
+	last: number;
+}
+
+export type RMetrics = {
+	edits_attempted: number;
+	edits_noop: number;
+	warnings: number;
+	classification: "applied" | "noop";
+	changed_lines?: EditChangedLineRange;
+	added_lines?: number;
+	removed_lines?: number;
+};
+
+export interface ReplaceDetails {
+	diff: string;
+	patch: string;
+	firstChangedLine?: number;
+	classification?: "noop";
+	metrics?: RMetrics;
+}
+
+export type EditToolDetails = ReplaceDetails;
+
+export interface EditToolOptions {}
+
+type EditRenderState = RRState;
+type DiffLineMarker = "+" | "-";
+
+type RenderableEditArgs = {
+	path?: string;
+	file_path?: string;
+	changes?: HTEdit[];
+	edits?: HTEdit[];
+	hash_range_inclusive?: [string, string];
+	content_lines?: string[];
+};
+
+function countDiffLines(diff: string, marker: DiffLineMarker): number {
+	let count = 0;
+	for (const line of diff.split("\n")) {
+		if (line.startsWith(marker) && !line.startsWith(`${marker}${marker}${marker}`)) {
+			count++;
+		}
+	}
+	return count;
+}
+
+function hashStoreKey(operations: ToolOperations, absolutePath: string): string {
+	const backend = operations.getBackendInfo?.();
+	if (!backend) return absolutePath;
+	if (backend.type === "remote" && backend.configured) return `remote:${backend.url}:${absolutePath}`;
+	return absolutePath;
+}
+
+function formatEditCall(
+	args: RenderableEditArgs | undefined,
+	theme: Theme,
+	backendInfo: ToolBackendInfo | undefined,
+): string {
+	const previewInput = getPreviewInput(args);
+	if (previewInput) {
+		return formatBackendIcon(backendInfo, theme) + fmtCall(previewInput, {}, false, theme).replace("replace", "edit");
+	}
+	const invalidArg = invalidArgText(theme);
+	const rawPath = str(args?.file_path ?? args?.path);
+	const path = rawPath !== null ? shortenPath(rawPath) : null;
+	const pathDisplay = path === null ? invalidArg : path ? theme.fg("accent", path) : theme.fg("toolOutput", "...");
+	return `${formatBackendIcon(backendInfo, theme)}${theme.fg("toolTitle", theme.bold("edit"))} ${pathDisplay}`;
+}
+
+async function computePreview(request: ReqParams, operations: ToolOperations): Promise<RPreview> {
+	try {
+		await initHasher();
+		const absolutePath = resolveToCwd(request.path, operations.cwd);
+		await operations.access(absolutePath, "read");
+		const rawContent = (await operations.readFile(absolutePath)).toString("utf-8");
+		const { text } = stripBOM(rawContent);
+		const originalNormalized = toLF(text);
+		const originalHashes = await lineHashes(originalNormalized, hashStoreKey(operations, absolutePath));
+		const result = applyEdits(
+			originalNormalized,
+			resEdits(request.changes),
+			undefined,
+			originalHashes,
+			request.path,
+		).content;
+		if (originalNormalized === result) {
+			return { error: `No changes made to ${request.path}. The edits produced identical content.` };
+		}
+		const resultHashes = await lineHashes(result);
+		return { diff: genDiff(originalNormalized, result, 4, resultHashes, originalHashes).diff };
+	} catch (error) {
+		return { error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+function normalizeEditArguments(input: unknown): EditToolInput {
+	return normReq(input) as EditToolInput;
+}
+
+function assertReq(request: unknown): asserts request is ReqParams {
+	if (!request || typeof request !== "object" || Array.isArray(request)) {
+		throw new Error("[E_BAD_SHAPE] Edit request must be an object.");
+	}
+	const record = request as Record<string, unknown>;
+	for (const legacyKey of ["oldText", "newText", "old_text", "new_text", "old_range", "start", "end", "lines"]) {
+		if (Object.hasOwn(record, legacyKey)) {
+			throw new Error(
+				`[E_LEGACY_SHAPE] "${legacyKey}" is not supported. Call read first, then use {hash_range_inclusive: ["<START>", "<END>"], content_lines: [...]}.`,
+			);
+		}
+	}
+	const unknown = Object.keys(record).filter((key) => key !== "path" && key !== "changes");
+	if (unknown.length > 0) {
+		throw new Error(`[E_BAD_SHAPE] Edit request contains unknown or unsupported fields: ${unknown.join(", ")}.`);
+	}
+	if (typeof record.path !== "string" || record.path.length === 0) {
+		throw new Error('[E_BAD_SHAPE] Edit request requires a non-empty "path" string.');
+	}
+	if (!Array.isArray(record.changes) || record.changes.length === 0) {
+		throw new Error('[E_BAD_SHAPE] Edit request requires a non-empty "changes" array.');
+	}
+}
+interface EditSourceSnapshot {
+	bom: string;
+	originalEnding: LineEnding;
+	originalContent: string;
+	originalHashes: string[];
+	storeKey: string;
+}
+
+interface AppliedEditResultOptions {
+	path: string;
+	editCount: number;
+	anchorResult: ApplyEditsResult;
+	warnings: string[];
+	originalContent: string;
+	resultContent: string;
+	originalHashes: string[];
+	resultHashes: string[];
+}
+
+async function readEditSource(
+	path: string,
+	absolutePath: string,
+	operations: ToolOperations,
+): Promise<EditSourceSnapshot> {
+	try {
+		await operations.access(absolutePath, "readwrite");
+	} catch (error) {
+		const message = error instanceof Error && "code" in error ? `Error code: ${String(error.code)}` : String(error);
+		throw new Error(`Could not edit file: ${path}. ${message}.`);
+	}
+	const rawContent = (await operations.readFile(absolutePath)).toString("utf-8");
+	const { bom, text } = stripBOM(rawContent);
+	const originalContent = toLF(text);
+	const storeKey = hashStoreKey(operations, absolutePath);
+	return {
+		bom,
+		originalEnding: detectEnding(text),
+		originalContent,
+		originalHashes: await lineHashes(originalContent, storeKey),
+		storeKey,
+	};
+}
+
+function collectRemovedHashes(edits: HEdit[], originalHashes: string[]): Set<string> {
+	const hashIndexes = new Map<string, number>();
+	for (let index = 0; index < originalHashes.length; index++) {
+		const hash = originalHashes[index];
+		if (hash !== undefined && !hashIndexes.has(hash)) hashIndexes.set(hash, index);
+	}
+	const removedHashes = new Set<string>();
+	for (const edit of edits) {
+		const startLine = hashIndexes.get(edit.hash_range_inclusive[0].hash) ?? -1;
+		const endLine = hashIndexes.get(edit.hash_range_inclusive[1].hash) ?? -1;
+		if (startLine < 0 || endLine < 0) continue;
+		for (let index = startLine; index <= endLine; index++) {
+			const hash = originalHashes[index];
+			if (hash) removedHashes.add(hash);
+		}
+	}
+	return removedHashes;
+}
+
+function indexLineOccurrences(lines: string[]): Map<string, number[]> {
+	const indexesByLine = new Map<string, number[]>();
+	for (let index = 0; index < lines.length; index++) {
+		const line = lines[index];
+		const indexes = indexesByLine.get(line);
+		if (indexes) indexes.push(index);
+		else indexesByLine.set(line, [index]);
+	}
+	return indexesByLine;
+}
+
+function collectEditWarnings(anchorResult: ApplyEditsResult, resultContent: string, resultHashes: string[]): string[] {
+	const warnings = [...(anchorResult.warnings ?? [])];
+	const resultLines = resultContent.split("\n");
+	const indexesByLine = indexLineOccurrences(resultLines);
+	for (const warning of anchorResult.boundaryWarnings ?? []) {
+		const matchIndex = indexesByLine.get(warning.survivingLineContent)?.[warning.occurrence] ?? -1;
+		if (matchIndex < 0) continue;
+		warnings.push(
+			fmtBoundaryWarning({
+				kind: warning.kind,
+				survivingContent: warning.survivingLineContent,
+				matchIndex,
+				resultLines,
+				resultHashes,
+			}),
+		);
+	}
+	return warnings;
+}
+
+function buildNoopEditResult(
+	path: string,
+	editCount: number,
+	anchorResult: ApplyEditsResult,
+	warnings: string[],
+): AgentToolResult<EditToolDetails> {
+	return {
+		content: [{ type: "text", text: `No changes made to ${path}. The edits produced identical content.` }],
+		details: {
+			diff: "",
+			patch: "",
+			classification: "noop",
+			metrics: {
+				edits_attempted: editCount,
+				edits_noop: anchorResult.noopEdits?.length ?? 0,
+				warnings: warnings.length,
+				classification: "noop",
+			},
+		},
+	};
+}
+
+function buildAppliedEditResult(options: AppliedEditResultOptions): AgentToolResult<EditToolDetails> {
+	const diffResult = genDiff(
+		options.originalContent,
+		options.resultContent,
+		2,
+		options.resultHashes,
+		options.originalHashes,
+	);
+	const warningBlock = options.warnings.length > 0 ? `\n\nWarnings:\n${options.warnings.join("\n")}` : "";
+	const changedLines =
+		options.anchorResult.firstChangedLine !== undefined && options.anchorResult.lastChangedLine !== undefined
+			? {
+					first: options.anchorResult.firstChangedLine,
+					last: options.anchorResult.lastChangedLine,
+				}
+			: undefined;
+	return {
+		content: [{ type: "text", text: `Successfully replaced in ${options.path}.${warningBlock}` }],
+		details: {
+			diff: diffResult.diff,
+			patch: createTwoFilesPatch(options.path, options.path, options.originalContent, options.resultContent),
+			firstChangedLine: options.anchorResult.firstChangedLine ?? diffResult.firstChangedLine,
+			metrics: {
+				edits_attempted: options.editCount,
+				edits_noop: options.anchorResult.noopEdits?.length ?? 0,
+				warnings: options.warnings.length,
+				classification: "applied",
+				...(changedLines ? { changed_lines: changedLines } : {}),
+				added_lines: countDiffLines(diffResult.diff, "+"),
+				removed_lines: countDiffLines(diffResult.diff, "-"),
+			},
+		},
+	};
+}
+
+async function executeEditMutation(
+	request: ReqParams,
+	absolutePath: string,
+	operations: ToolOperations,
+	signal: AbortSignal | undefined,
+): Promise<AgentToolResult<EditToolDetails>> {
+	abortIf(signal);
+	await initHasher();
+	const source = await readEditSource(request.path, absolutePath, operations);
+	const resolvedEdits = resEdits(request.changes);
+	const anchorResult = applyEdits(source.originalContent, resolvedEdits, signal, source.originalHashes, request.path);
+	const resultContent = anchorResult.content;
+	const resultHashes = await lineHashes(resultContent, source.storeKey, {
+		content: source.originalContent,
+		hashes: source.originalHashes,
+		removedHashes: collectRemovedHashes(resolvedEdits, source.originalHashes),
+	});
+	const warnings = collectEditWarnings(anchorResult, resultContent, resultHashes);
+	if (source.originalContent === resultContent) {
+		return buildNoopEditResult(request.path, request.changes.length, anchorResult, warnings);
+	}
+	abortIf(signal);
+	await operations.writeFile(absolutePath, source.bom + restoreEndings(resultContent, source.originalEnding));
+	return buildAppliedEditResult({
+		path: request.path,
+		editCount: request.changes.length,
+		anchorResult,
+		warnings,
+		originalContent: source.originalContent,
+		resultContent,
+		originalHashes: source.originalHashes,
+		resultHashes,
+	});
+}
+
+export type EditToolDefinition = ToolDefinition<typeof editSchema, EditToolDetails | undefined, EditRenderState>;
+
+export function createEditToolDefinition(operations: ToolOperations, _options?: EditToolOptions): EditToolDefinition {
+	return {
+		name: "edit",
+		label: "edit",
+		description:
+			"Edit a file using hash-anchored line replacements. Call read first; it returns HASH│content lines. Use hash_range_inclusive with the 3-character start/end hashes and content_lines with literal replacement lines only.",
+		promptSnippet: "Edit files using hashline anchors from read output",
+		promptGuidelines: [
+			"Use read before edit to get HASH│content anchors.",
+			"Use edit with changes: [{ hash_range_inclusive: [startHash, endHash], content_lines: [...] }].",
+			"hash_range_inclusive contains only the 3-character hashes, not line numbers and not HASH│content.",
+			"content_lines contains literal file content only; do not include HASH│ prefixes. Use [] to delete a range.",
+			"After a successful edit, call read again before follow-up edits unless the response includes current warning anchors.",
+		],
+		parameters: editSchema,
+		renderShell: "default",
+		prepareArguments: normalizeEditArguments,
+		async execute(_toolCallId, input: EditToolInput, signal?: AbortSignal) {
+			const normalized = normReq(input);
+			assertReq(normalized);
+			const absolutePath = resolveToCwd(normalized.path, operations.cwd);
+			return withFileMutationQueue(absolutePath, () =>
+				executeEditMutation(normalized, absolutePath, operations, signal),
+			);
+		},
+		renderCall(args, theme, context) {
+			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			const previewInput = getPreviewInput(args);
+			if (!context.executionStarted && context.argsComplete && previewInput) {
+				const argsKey = JSON.stringify(previewInput);
+				if (context.state.argsKey !== argsKey) {
+					context.state.argsKey = argsKey;
+					context.state.preview = undefined;
+					const generation = (context.state.previewGeneration ?? 0) + 1;
+					context.state.previewGeneration = generation;
+					void computePreview(previewInput, operations).then((preview) => {
+						if (context.state.argsKey === argsKey && context.state.previewGeneration === generation) {
+							context.state.preview = preview;
+							context.invalidate();
+						}
+					});
+				}
+				text.setText(
+					formatBackendIcon(operations.getBackendInfo?.(), theme) +
+						fmtCall(previewInput, context.state, context.expanded, theme).replace("replace", "edit"),
+				);
+				return text;
+			}
+			text.setText(formatEditCall(args as RenderableEditArgs | undefined, theme, operations.getBackendInfo?.()));
+			return text;
+		},
+		renderResult(result, _options, theme, context) {
+			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			if (context.isError) {
+				const errorText = result.content
+					?.filter((entry) => entry.type === "text")
+					.map((entry) => entry.text ?? "")
+					.join("\n");
+				text.setText(errorText ? `\n${theme.fg("error", errorText)}` : "");
+				return text;
+			}
+			const diff = result.details?.diff;
+			if (!diff) {
+				text.setText("");
+				return text;
+			}
+			const lines = diff.split("\n").map((line) => {
+				if (line.startsWith("+") && !line.startsWith("+++")) return theme.fg("success", line);
+				if (line.startsWith("-") && !line.startsWith("---")) return theme.fg("error", line);
+				return theme.fg("dim", line);
+			});
+			text.setText(`\n${lines.join("\n")}`);
+			return text;
+		},
+	};
+}
+
+type CompatibleEditAgentTool = AgentTool<typeof editSchema, EditToolDetails> & {
+	execute: (
+		toolCallId: string,
+		params: Record<string, unknown>,
+		signal?: AbortSignal,
+		onUpdate?: AgentToolUpdateCallback<EditToolDetails>,
+	) => Promise<AgentToolResult<EditToolDetails>>;
+};
+
+export function createEditTool(operations: ToolOperations, options?: EditToolOptions): CompatibleEditAgentTool {
+	return wrapToolDefinition(createEditToolDefinition(operations, options)) as CompatibleEditAgentTool;
+}

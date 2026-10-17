@@ -1,0 +1,197 @@
+import type { FileEntry, LabelEntry, SessionEntry, SessionHeader, SessionTreeNode } from "../types.ts";
+import type { SessionLabelSnapshot, SessionStore } from "./session-store.ts";
+
+export class InMemorySessionStore implements SessionStore {
+	protected fileEntries: FileEntry[] = [];
+	protected byId: Map<string, SessionEntry> = new Map();
+	protected labelsById: Map<string, string> = new Map();
+	protected labelTimestampsById: Map<string, string> = new Map();
+	protected leafId: string | null = null;
+	private sessionReference: string | undefined;
+
+	isPersisted(): boolean {
+		return false;
+	}
+
+	getSessionReference(): string | undefined {
+		return this.sessionReference;
+	}
+
+	setSessionReference(reference: string): void {
+		this.sessionReference = reference;
+	}
+
+	exists(reference: string): boolean {
+		return reference === this.sessionReference && this.fileEntries.length > 0;
+	}
+
+	ensureDir(_path: string): void {
+		// No-op for in-memory sessions.
+	}
+
+	load(reference: string): FileEntry[] {
+		return reference === this.sessionReference ? [...this.fileEntries] : [];
+	}
+
+	setEntries(entries: FileEntry[]): void {
+		this.fileEntries = entries;
+		this.rebuildIndex();
+	}
+
+	getFileEntries(): FileEntry[] {
+		return this.fileEntries;
+	}
+
+	getHeader(): SessionHeader | null {
+		const header = this.fileEntries.find((entry) => entry.type === "session");
+		return header ? (header as SessionHeader) : null;
+	}
+
+	getEntries(): SessionEntry[] {
+		return this.fileEntries.filter((entry): entry is SessionEntry => entry.type !== "session");
+	}
+
+	getEntryIndex(): Map<string, SessionEntry> {
+		return this.byId;
+	}
+
+	has(id: string): boolean {
+		return this.byId.has(id);
+	}
+
+	appendEntry(entry: SessionEntry): void {
+		this.fileEntries.push(entry);
+		this.byId.set(entry.id, entry);
+		this.leafId = entry.id;
+		this.applyLabelEntry(entry);
+	}
+
+	saveSnapshot(): void {
+		// No-op for in-memory sessions.
+	}
+
+	commitSnapshot(): void {
+		// No-op for in-memory sessions.
+	}
+
+	getLeafId(): string | null {
+		return this.leafId;
+	}
+
+	setLeafId(leafId: string | null): void {
+		this.leafId = leafId;
+	}
+
+	getLeafEntry(): SessionEntry | undefined {
+		return this.leafId ? this.byId.get(this.leafId) : undefined;
+	}
+
+	getEntry(id: string): SessionEntry | undefined {
+		return this.byId.get(id);
+	}
+
+	getChildren(parentId: string): SessionEntry[] {
+		const children: SessionEntry[] = [];
+		for (const entry of this.byId.values()) {
+			if (entry.parentId === parentId) {
+				children.push(entry);
+			}
+		}
+		return children;
+	}
+
+	getLabel(id: string): string | undefined {
+		return this.labelsById.get(id);
+	}
+
+	getBranch(fromId?: string): SessionEntry[] {
+		const path: SessionEntry[] = [];
+		const startId = fromId ?? this.leafId;
+		let current = startId ? this.byId.get(startId) : undefined;
+		while (current) {
+			path.unshift(current);
+			current = current.parentId ? this.byId.get(current.parentId) : undefined;
+		}
+		return path;
+	}
+
+	getTree(): SessionTreeNode[] {
+		const entries = this.getEntries();
+		const nodeMap = new Map<string, SessionTreeNode>();
+		const roots: SessionTreeNode[] = [];
+
+		for (const entry of entries) {
+			const label = this.labelsById.get(entry.id);
+			const labelTimestamp = this.labelTimestampsById.get(entry.id);
+			nodeMap.set(entry.id, { entry, children: [], label, labelTimestamp });
+		}
+
+		const childNodes: Array<[parent: SessionTreeNode, child: SessionTreeNode]> = [];
+		for (const entry of entries) {
+			const node = nodeMap.get(entry.id)!;
+			if (entry.parentId === null || entry.parentId === entry.id) {
+				roots.push(node);
+				continue;
+			}
+			const parent = nodeMap.get(entry.parentId);
+			if (parent) childNodes.push([parent, node]);
+			else roots.push(node);
+		}
+		childNodes.sort(
+			([, left], [, right]) => new Date(left.entry.timestamp).getTime() - new Date(right.entry.timestamp).getTime(),
+		);
+		for (const [parent, child] of childNodes) parent.children.push(child);
+
+		return roots;
+	}
+
+	getSessionName(): string | undefined {
+		const entries = this.getEntries();
+		for (let i = entries.length - 1; i >= 0; i--) {
+			const entry = entries[i];
+			if (entry.type === "session_info") {
+				return entry.name?.trim() || undefined;
+			}
+		}
+		return undefined;
+	}
+
+	getLabelsForEntryIds(entryIds: Set<string>): SessionLabelSnapshot[] {
+		const labels: SessionLabelSnapshot[] = [];
+		for (const [targetId, label] of this.labelsById) {
+			if (entryIds.has(targetId)) {
+				labels.push({ targetId, label, timestamp: this.labelTimestampsById.get(targetId)! });
+			}
+		}
+		return labels;
+	}
+
+	hasAssistantMessage(): boolean {
+		return this.fileEntries.some((entry) => entry.type === "message" && entry.message.role === "assistant");
+	}
+
+	private rebuildIndex(): void {
+		this.byId.clear();
+		this.labelsById.clear();
+		this.labelTimestampsById.clear();
+		this.leafId = null;
+		for (const entry of this.fileEntries) {
+			if (entry.type === "session") continue;
+			this.byId.set(entry.id, entry);
+			this.leafId = entry.id;
+			this.applyLabelEntry(entry);
+		}
+	}
+
+	private applyLabelEntry(entry: SessionEntry): void {
+		if (entry.type !== "label") return;
+		const labelEntry = entry as LabelEntry;
+		if (labelEntry.label) {
+			this.labelsById.set(labelEntry.targetId, labelEntry.label);
+			this.labelTimestampsById.set(labelEntry.targetId, labelEntry.timestamp);
+		} else {
+			this.labelsById.delete(labelEntry.targetId);
+			this.labelTimestampsById.delete(labelEntry.targetId);
+		}
+	}
+}

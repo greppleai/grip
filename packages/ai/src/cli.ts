@@ -1,0 +1,145 @@
+#!/usr/bin/env node
+
+import { createInterface, type Interface } from "node:readline";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { getOAuthProvider, getOAuthProviders } from "./utils/oauth/index.ts";
+import type { OAuthCredentials, OAuthProviderId } from "./utils/oauth/types.ts";
+
+const AUTH_FILE = "auth.json";
+const PROVIDERS = getOAuthProviders();
+
+interface StoredOAuthCredentials extends OAuthCredentials {
+	type: "oauth";
+}
+
+type OAuthCredentialStore = Record<string, StoredOAuthCredentials>;
+
+function prompt(rl: Interface, question: string): Promise<string> {
+	return new Promise((resolve) => rl.question(question, resolve));
+}
+
+function loadAuth(): OAuthCredentialStore {
+	if (!existsSync(AUTH_FILE)) return {};
+	try {
+		return JSON.parse(readFileSync(AUTH_FILE, "utf-8"));
+	} catch {
+		return {};
+	}
+}
+
+function saveAuth(auth: OAuthCredentialStore): void {
+	writeFileSync(AUTH_FILE, JSON.stringify(auth, null, 2), { encoding: "utf-8", mode: 0o600 });
+	chmodSync(AUTH_FILE, 0o600);
+}
+
+async function login(providerId: OAuthProviderId): Promise<void> {
+	const provider = getOAuthProvider(providerId);
+	if (!provider) {
+		console.error(`Unknown provider: ${providerId}`);
+		process.exit(1);
+	}
+
+	const rl = createInterface({ input: process.stdin, output: process.stdout });
+	const promptFn = (msg: string) => prompt(rl, `${msg} `);
+
+	try {
+		const credentials = await provider.login({
+			onAuth: (info) => {
+				console.log(`\nOpen this URL in your browser:\n${info.url}`);
+				if (info.instructions) console.log(info.instructions);
+				console.log();
+			},
+			onDeviceCode: (info) => {
+				console.log(`\nOpen this URL in your browser:\n${info.verificationUri}`);
+				console.log(`Enter code: ${info.userCode}`);
+				console.log();
+			},
+			onPrompt: async (p) => {
+				return await promptFn(`${p.message}${p.placeholder ? ` (${p.placeholder})` : ""}:`);
+			},
+			onProgress: (msg) => console.log(msg),
+		});
+
+		const auth = loadAuth();
+		auth[providerId] = { type: "oauth", ...credentials };
+		saveAuth(auth);
+
+		console.log(`\nCredentials saved to ${AUTH_FILE}`);
+	} finally {
+		rl.close();
+	}
+}
+
+async function resolveLoginProvider(requestedProvider: OAuthProviderId | undefined): Promise<OAuthProviderId> {
+	let provider = requestedProvider;
+	if (!provider) {
+		const rl = createInterface({ input: process.stdin, output: process.stdout });
+		console.log("Select a provider:\n");
+		for (let i = 0; i < PROVIDERS.length; i++) {
+			console.log(`  ${i + 1}. ${PROVIDERS[i].name}`);
+		}
+		console.log();
+		const choice = await prompt(rl, `Enter number (1-${PROVIDERS.length}): `);
+		rl.close();
+		const index = parseInt(choice, 10) - 1;
+		if (index < 0 || index >= PROVIDERS.length) {
+			console.error("Invalid selection");
+			process.exit(1);
+		}
+		provider = PROVIDERS[index].id;
+	}
+	if (!PROVIDERS.some((candidate) => candidate.id === provider)) {
+		console.error(`Unknown provider: ${provider}`);
+		console.error(`Use 'npx @greppleai/grip-ai list' to see available providers`);
+		process.exit(1);
+	}
+	return provider;
+}
+
+async function main(): Promise<void> {
+	const args = process.argv.slice(2);
+	const command = args[0];
+
+	if (!command || command === "help" || command === "--help" || command === "-h") {
+		const providerList = PROVIDERS.map((p) => `  ${p.id.padEnd(20)} ${p.name}`).join("\n");
+		console.log(`Usage: npx @greppleai/grip-ai <command> [provider]
+
+Commands:
+  login [provider]  Login to an OAuth provider
+  list              List available providers
+
+Providers:
+${providerList}
+
+Examples:
+  npx @greppleai/grip-ai login              # interactive provider selection
+  npx @greppleai/grip-ai login anthropic    # login to specific provider
+  npx @greppleai/grip-ai list               # list providers
+`);
+		return;
+	}
+
+	if (command === "list") {
+		console.log("Available OAuth providers:\n");
+		for (const p of PROVIDERS) {
+			console.log(`  ${p.id.padEnd(20)} ${p.name}`);
+		}
+		return;
+	}
+
+	if (command === "login") {
+		const provider = await resolveLoginProvider(args[1] as OAuthProviderId | undefined);
+		console.log(`Logging in to ${provider}...`);
+		await login(provider);
+		return;
+	}
+
+	console.error(`Unknown command: ${command}`);
+	console.error(`Use 'npx @greppleai/grip-ai --help' for usage`);
+	process.exit(1);
+}
+
+main().catch((err) => {
+	console.error("Error:", err.message);
+	process.exit(1);
+});

@@ -1,0 +1,74 @@
+{
+	"name": "grip-monorepo",
+	"private": true,
+	"type": "module",
+	"workspaces": [
+		"packages/*",
+		"packages/coding-agent/examples/extensions/with-deps",
+		"packages/coding-agent/examples/extensions/custom-provider-anthropic",
+		"packages/coding-agent/examples/extensions/custom-provider-gitlab-duo",
+		"packages/coding-agent/examples/extensions/sandbox"
+	],
+	"scripts": {
+		"clean": "npm run clean --workspaces",
+		"build": "cd packages/tui && npm run build && cd ../ai && npm run build && cd ../agent && npm run build && cd ../coding-agent && npm run build",
+		"biome:check": "biome check",
+		"biome:check:fix": "biome check --fix",
+		"biome:format:fix": "biome format --fix",
+		"biome:migrate": "biome migrate",
+		"check": "biome check --write --error-on-warnings . && npm run check:near-identical-data-structures && npm run check:implementation-derived-type-aliases && npm run check:inline-type-imports && npm run check:inline-string-literal-unions && npm run check:excessive-collection-iterations && npm run check:versions && npm run check:pinned-deps && npm run check:ts-imports && npm run check:shrinkwrap && npm run check:install-lock:coding-agent && tsgo --noEmit && npm run check:browser-smoke",
+		"check:near-identical-data-structures": "node .grip/biome/noNearIdenticalDataStructures.mjs",
+		"check:implementation-derived-type-aliases": "node .grip/biome/noImplementationDerivedTypeAliases.mjs",
+		"check:inline-type-imports": "node .grip/biome/noInlineTypeImports.mjs",
+		"check:inline-string-literal-unions": "node .grip/biome/noInlineStringLiteralUnions.mjs",
+		"check:excessive-collection-iterations": "node .grip/biome/noExcessiveCollectionIterations.mjs",
+		"check:browser-smoke": "node scripts/check-browser-smoke.mjs",
+		"check:versions": "node scripts/sync-versions.js",
+		"check:pinned-deps": "node scripts/check-pinned-deps.mjs",
+		"check:shrinkwrap": "node scripts/generate-coding-agent-shrinkwrap.mjs --check",
+		"check:install-lock:coding-agent": "node scripts/generate-coding-agent-install-lock.mjs --check",
+		"check:ts-imports": "node scripts/check-ts-relative-imports.mjs",
+		"profile:tui": "node scripts/profile-coding-agent-node.mjs --mode tui",
+		"profile:rpc": "node scripts/profile-coding-agent-node.mjs --mode rpc",
+		"test": "npm run test:grip-config && npm run test --workspaces --if-present",
+		"test:grip-config": "node --test .grip/biome/*.test.mjs .grip/hooks/*.test.mjs",
+		"version:patch": "node scripts/sync-versions.js --bump patch && npm install --package-lock-only --ignore-scripts",
+		"version:minor": "node scripts/sync-versions.js --bump minor && npm install --package-lock-only --ignore-scripts",
+		"version:major": "node scripts/sync-versions.js --bump major && npm install --package-lock-only --ignore-scripts",
+		"version:set": "node scripts/sync-versions.js --set",
+		"prepublishOnly": "npm run clean && npm run build && npm run check",
+		"publish": "npm run prepublishOnly && npm publish -ws --access public",
+		"publish:dry": "npm run prepublishOnly && npm publish -ws --access public --dry-run",
+		"release:local": "node scripts/local-release.mjs",
+		"shrinkwrap:coding-agent": "node scripts/generate-coding-agent-shrinkwrap.mjs",
+		"install-lock:coding-agent": "node scripts/generate-coding-agent-install-lock.mjs",
+		"release:patch": "node scripts/release.mjs patch",
+		"release:minor": "node scripts/release.mjs minor",
+		"release:major": "node scripts/release.mjs major",
+		"prepare": "husky"
+	},
+	"devDependencies": {
+		"@anthropic-ai/sandbox-runtime": "0.0.26",
+		"@biomejs/biome": "2.5.10",
+		"@hono/node-server": "2.0.3",
+		"@types/node": "22.19.19",
+		"@typescript/native-preview": "7.0.0-dev.20260120.1",
+		"esbuild": "0.28.1",
+		"hono": "4.12.28",
+		"husky": "9.1.7",
+		"jiti": "2.7.0",
+		"shx": "0.4.0",
+		"tsx": "4.22.1",
+		"typescript": "5.9.3"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"version": "0.2.15",
+	"overrides": {
+		"rimraf": "6.1.2",
+		"gaxios": {
+			"rimraf": "6.1.2"
+		}
+	}
+}

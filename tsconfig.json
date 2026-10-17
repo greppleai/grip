@@ -1,0 +1,23 @@
+{
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"paths": {
+			"*": ["./*"],
+			"@greppleai/grip-ai": ["./packages/ai/src/index.ts"],
+			"@greppleai/grip-ai/oauth": ["./packages/ai/src/oauth.ts"],
+			"@greppleai/grip-ai/*": ["./packages/ai/src/*.ts", "./packages/ai/src/providers/*.ts"],
+			"@greppleai/grip-ai/dist/*": ["./packages/ai/src/*"],
+			"@greppleai/grip-agent-core": ["./packages/agent/src/index.ts"],
+			"@greppleai/grip-agent-core/*": ["./packages/agent/src/*.ts"],
+			"@greppleai/grip-coding-agent": ["./packages/coding-agent/src/index.ts"],
+			"@greppleai/grip-coding-agent/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
+			"@greppleai/grip-coding-agent/*": ["./packages/coding-agent/src/*"],
+			"typebox": ["./node_modules/typebox"],
+			"@greppleai/grip-tui": ["./packages/tui/src/index.ts"],
+			"@greppleai/grip-tui/*": ["./packages/tui/src/*"]
+		}
+	},
+	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
+	"exclude": ["**/dist/**"]
+}

@@ -1,0 +1,83 @@
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { GripAgent } from "../src/core/grip-agent.ts";
+import { LocalSessionManager } from "../src/core/session/local-session-manager.ts";
+import { getMissingSessionCwdIssue, MissingSessionCwdError } from "../src/core/session-cwd.ts";
+
+function createTempDir(name: string): string {
+	const dir = join(tmpdir(), `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+	mkdirSync(dir, { recursive: true });
+	return dir;
+}
+
+function writeSessionFile(path: string, cwd: string): void {
+	writeFileSync(
+		path,
+		`${JSON.stringify({
+			type: "session",
+			version: 3,
+			id: "session-id",
+			timestamp: new Date().toISOString(),
+			cwd,
+		})}\n`,
+	);
+}
+
+describe("session cwd handling", () => {
+	const cleanupPaths: string[] = [];
+
+	afterEach(() => {
+		for (const path of cleanupPaths.splice(0)) {
+			rmSync(path, { recursive: true, force: true });
+		}
+	});
+
+	it("detects missing session cwd from persisted sessions", () => {
+		const fallbackCwd = createTempDir("pi-session-cwd-fallback");
+		const missingCwd = join(fallbackCwd, "does-not-exist");
+		const sessionDir = createTempDir("pi-session-cwd-session-dir");
+		const sessionFile = join(sessionDir, "session.jsonl");
+		cleanupPaths.push(fallbackCwd, sessionDir);
+		writeSessionFile(sessionFile, missingCwd);
+
+		const sessionManager = new LocalSessionManager({ cwd: process.cwd() }).openReference(sessionFile);
+		const issue = getMissingSessionCwdIssue(sessionManager, fallbackCwd);
+		expect(issue).toEqual({
+			sessionReference: sessionManager.getSessionReference(),
+			sessionCwd: missingCwd,
+			fallbackCwd,
+		});
+	});
+
+	it("supports overriding the effective cwd when opening a session", () => {
+		const fallbackCwd = createTempDir("pi-session-cwd-override");
+		const missingCwd = join(fallbackCwd, "does-not-exist");
+		const sessionDir = createTempDir("pi-session-cwd-override-session-dir");
+		const sessionFile = join(sessionDir, "session.jsonl");
+		cleanupPaths.push(fallbackCwd, sessionDir);
+		writeSessionFile(sessionFile, missingCwd);
+
+		const sessionManager = new LocalSessionManager({ cwd: process.cwd(), sessionDir: undefined }).openReference(
+			sessionFile,
+			{ cwdOverride: fallbackCwd },
+		);
+		expect(sessionManager.getCwd()).toBe(fallbackCwd);
+		expect(getMissingSessionCwdIssue(sessionManager, fallbackCwd)).toBeUndefined();
+	});
+
+	it("throws a controlled error before runtime creation when the stored cwd is missing", async () => {
+		const fallbackCwd = createTempDir("pi-session-cwd-runtime");
+		const missingCwd = join(fallbackCwd, "does-not-exist");
+		const sessionDir = createTempDir("pi-session-cwd-runtime-session-dir");
+		const sessionFile = join(sessionDir, "session.jsonl");
+		cleanupPaths.push(fallbackCwd, sessionDir);
+		writeSessionFile(sessionFile, missingCwd);
+
+		const sessionManager = new LocalSessionManager({ cwd: process.cwd() }).openReference(sessionFile);
+		const pi = await GripAgent.create({ cwd: fallbackCwd, agentDir: fallbackCwd });
+
+		await expect(pi.createAgentSession({ session: sessionManager })).rejects.toBeInstanceOf(MissingSessionCwdError);
+	});
+});

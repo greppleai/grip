@@ -1,0 +1,1102 @@
+/**
+ * RPC mode: Headless operation with JSON stdin/stdout protocol.
+ *
+ * Used for embedding the agent in other applications.
+ * Receives commands as JSON on stdin, outputs events and responses as JSON on stdout.
+ *
+ * Protocol:
+ * - Commands: JSON objects with `type` field, optional `id` for correlation
+ * - Responses: JSON objects with `type: "response"`, `command`, `success`, and optional `data`/`error`
+ * - Events: JsonAgentSessionEvent objects streamed as they occur
+ * - Extension UI: Extension UI requests are emitted, client responds with extension_ui_response
+ */
+
+import * as crypto from "node:crypto";
+import { stat } from "node:fs/promises";
+import type { AgentToolResult } from "@greppleai/grip-agent-core";
+import type {
+	ExtensionNotificationType,
+	ExtensionUIContext,
+	ExtensionUIDialogOptions,
+	ExtensionWidgetOptions,
+	WorkingIndicatorOptions,
+} from "../../core/extensions/types.ts";
+import type { GripAgentRuntimeHost } from "../../core/grip-agent.ts";
+import {
+	flushRawStdout,
+	takeOverStdout,
+	waitForRawStdoutBackpressure,
+	writeRawStdout,
+} from "../../core/output-guard.ts";
+import { HIDDEN_BUILTIN_SLASH_COMMAND_NAMES } from "../../core/slash-commands.ts";
+import { killTrackedDetachedChildren } from "../../utils/shell.ts";
+import { type Theme, theme } from "../interactive/theme/theme.ts";
+import { toJsonEvent } from "../json-event.ts";
+import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
+import type {
+	RpcCommand,
+	RpcExtensionUIRequest,
+	RpcExtensionUIResponse,
+	RpcListSessionsResponse,
+	RpcResponse,
+	RpcSessionState,
+	RpcSlashCommand,
+	RpcToolCallRequest,
+} from "./rpc-types.ts";
+
+// Re-export types for consumers
+export type {
+	RpcCommand,
+	RpcExtensionUIRequest,
+	RpcExtensionUIResponse,
+	RpcInstructionDefinition,
+	RpcListSessionsOptions,
+	RpcListSessionsResponse,
+	RpcResponse,
+	RpcSessionState,
+	RpcToolCallRequest,
+	RpcToolDefinition,
+} from "./rpc-types.ts";
+
+type RpcInputParseResult = { ok: true; value: unknown } | { ok: false };
+
+const DEFAULT_RPC_SESSION_LIST_LIMIT = 100;
+const MAX_RPC_SESSION_LIST_LIMIT = 500;
+
+/**
+ * Run in RPC mode.
+ * Listens for JSON commands on stdin, outputs events and responses on stdout.
+ */
+export async function runRpcMode(runtimeHost: GripAgentRuntimeHost): Promise<never> {
+	takeOverStdout();
+	let session = runtimeHost.session;
+	let unsubscribe: (() => void) | undefined;
+	let unsubscribeBackpressure: (() => void) | undefined;
+
+	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
+		writeRawStdout(serializeJsonLine(obj));
+	};
+
+	const success = <T extends RpcCommand["type"]>(
+		id: string | undefined,
+		command: T,
+		data?: object | null,
+	): RpcResponse => {
+		if (data === undefined) {
+			return { id, type: "response", command, success: true } as RpcResponse;
+		}
+		return { id, type: "response", command, success: true, data } as RpcResponse;
+	};
+
+	const error = (id: string | undefined, command: string, message: string): RpcResponse => {
+		return { id, type: "response", command, success: false, error: message };
+	};
+
+	// Pending extension UI requests waiting for response
+	const pendingExtensionRequests = new Map<
+		string,
+		{ resolve: (value: any) => void; reject: (error: Error) => void }
+	>();
+	const pendingRpcToolRequests = new Map<
+		string,
+		{ resolve: (result: AgentToolResult<unknown>) => void; reject: (error: Error) => void; abort: () => void }
+	>();
+
+	// Shutdown request flag
+	let shutdownRequested = false;
+	let shuttingDown = false;
+	let shutdownCheckScheduled = false;
+	let activeInputCommands = 0;
+	const pendingPromptCommands = new Set<Promise<void>>();
+	const signalCleanupHandlers: Array<() => void> = [];
+
+	const scheduleShutdownCheck = (): void => {
+		if (!shutdownRequested || shutdownCheckScheduled) return;
+		shutdownCheckScheduled = true;
+		setTimeout(() => {
+			shutdownCheckScheduled = false;
+			if (!shutdownRequested || activeInputCommands > 0 || pendingPromptCommands.size > 0) return;
+			void session
+				.waitForIdle()
+				.then(() => waitForRawStdoutBackpressure())
+				.then(() => checkShutdownRequested())
+				.catch((error: unknown) => {
+					output({
+						type: "extension_error",
+						extensionPath: "<shutdown>",
+						event: "shutdown",
+						error: String(error),
+					});
+				});
+		}, 0);
+	};
+
+	/** Helper for dialog methods with signal/timeout support */
+	function createDialogPromise<T>(
+		opts: ExtensionUIDialogOptions | undefined,
+		defaultValue: T,
+		request: Record<string, unknown>,
+		parseResponse: (response: RpcExtensionUIResponse) => T,
+	): Promise<T> {
+		if (opts?.signal?.aborted) return Promise.resolve(defaultValue);
+
+		const id = crypto.randomUUID();
+		return new Promise((resolve, reject) => {
+			let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+			const cleanup = () => {
+				if (timeoutId) clearTimeout(timeoutId);
+				opts?.signal?.removeEventListener("abort", onAbort);
+				pendingExtensionRequests.delete(id);
+			};
+
+			const onAbort = () => {
+				cleanup();
+				resolve(defaultValue);
+			};
+			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+
+			if (opts?.timeout) {
+				timeoutId = setTimeout(() => {
+					cleanup();
+					resolve(defaultValue);
+				}, opts.timeout);
+			}
+
+			pendingExtensionRequests.set(id, {
+				resolve: (response: RpcExtensionUIResponse) => {
+					cleanup();
+					resolve(parseResponse(response));
+				},
+				reject,
+			});
+			output({ type: "extension_ui_request", id, ...request } as RpcExtensionUIRequest);
+		});
+	}
+
+	/**
+	 * Create an extension UI context that uses the RPC protocol.
+	 */
+	const createExtensionUIContext = (): ExtensionUIContext => ({
+		select: (title, options, opts) =>
+			createDialogPromise(opts, undefined, { method: "select", title, options, timeout: opts?.timeout }, (r) =>
+				"cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined,
+			),
+
+		confirm: (title, message, opts) =>
+			createDialogPromise(opts, false, { method: "confirm", title, message, timeout: opts?.timeout }, (r) =>
+				"cancelled" in r && r.cancelled ? false : "confirmed" in r ? r.confirmed : false,
+			),
+
+		input: (title, placeholder, opts) =>
+			createDialogPromise(opts, undefined, { method: "input", title, placeholder, timeout: opts?.timeout }, (r) =>
+				"cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined,
+			),
+
+		notify(message: string, type?: ExtensionNotificationType): void {
+			// Fire and forget - no response needed
+			output({
+				type: "extension_ui_request",
+				id: crypto.randomUUID(),
+				method: "notify",
+				message,
+				notifyType: type,
+			} as RpcExtensionUIRequest);
+		},
+
+		onTerminalInput(): () => void {
+			// Raw terminal input not supported in RPC mode
+			return () => {};
+		},
+
+		setStatus(key: string, text: string | undefined): void {
+			// Fire and forget - no response needed
+			output({
+				type: "extension_ui_request",
+				id: crypto.randomUUID(),
+				method: "setStatus",
+				statusKey: key,
+				statusText: text,
+			} as RpcExtensionUIRequest);
+		},
+
+		setWorkingMessage(_message?: string): void {
+			// Working message not supported in RPC mode - requires TUI loader access
+		},
+
+		setWorkingVisible(_visible: boolean): void {
+			// Working visibility not supported in RPC mode - requires TUI loader access
+		},
+
+		setWorkingIndicator(_options?: WorkingIndicatorOptions): void {
+			// Working indicator customization not supported in RPC mode - requires TUI loader access
+		},
+
+		setHiddenThinkingLabel(_label?: string): void {
+			// Hidden thinking label not supported in RPC mode - requires TUI message rendering access
+		},
+
+		setWidget(key: string, content: unknown, options?: ExtensionWidgetOptions): void {
+			// Only support string arrays in RPC mode - factory functions are ignored
+			if (content === undefined || Array.isArray(content)) {
+				output({
+					type: "extension_ui_request",
+					id: crypto.randomUUID(),
+					method: "setWidget",
+					widgetKey: key,
+					widgetLines: content as string[] | undefined,
+					widgetPlacement: options?.placement,
+				} as RpcExtensionUIRequest);
+			}
+			// Component factories are not supported in RPC mode - would need TUI access
+		},
+
+		setFooter(_factory: unknown): void {
+			// Custom footer not supported in RPC mode - requires TUI access
+		},
+
+		setHeader(_factory: unknown): void {
+			// Custom header not supported in RPC mode - requires TUI access
+		},
+
+		setTitle(title: string): void {
+			// Fire and forget - host can implement terminal title control
+			output({
+				type: "extension_ui_request",
+				id: crypto.randomUUID(),
+				method: "setTitle",
+				title,
+			} as RpcExtensionUIRequest);
+		},
+
+		async custom() {
+			// Custom UI not supported in RPC mode
+			return undefined as never;
+		},
+
+		pasteToEditor(text: string): void {
+			// Paste handling not supported in RPC mode - falls back to setEditorText
+			this.setEditorText(text);
+		},
+
+		setEditorText(text: string): void {
+			// Fire and forget - host can implement editor control
+			output({
+				type: "extension_ui_request",
+				id: crypto.randomUUID(),
+				method: "set_editor_text",
+				text,
+			} as RpcExtensionUIRequest);
+		},
+
+		getEditorText(): string {
+			// Synchronous method can't wait for RPC response
+			// Host should track editor state locally if needed
+			return "";
+		},
+
+		async editor(title: string, prefill?: string): Promise<string | undefined> {
+			const id = crypto.randomUUID();
+			return new Promise((resolve, reject) => {
+				pendingExtensionRequests.set(id, {
+					resolve: (response: RpcExtensionUIResponse) => {
+						if ("cancelled" in response && response.cancelled) {
+							resolve(undefined);
+						} else if ("value" in response) {
+							resolve(response.value);
+						} else {
+							resolve(undefined);
+						}
+					},
+					reject,
+				});
+				output({ type: "extension_ui_request", id, method: "editor", title, prefill } as RpcExtensionUIRequest);
+			});
+		},
+
+		addAutocompleteProvider(): void {
+			// Autocomplete provider composition is not supported in RPC mode
+		},
+
+		setEditorComponent(): void {
+			// Custom editor components not supported in RPC mode
+		},
+
+		getEditorComponent() {
+			// Custom editor components not supported in RPC mode
+			return undefined;
+		},
+
+		get theme() {
+			return theme;
+		},
+
+		getAllThemes() {
+			return [];
+		},
+
+		getTheme(_name: string) {
+			return undefined;
+		},
+
+		setTheme(_theme: string | Theme) {
+			// Theme switching not supported in RPC mode
+			return { success: false, error: "Theme switching not supported in RPC mode" };
+		},
+
+		getToolsExpanded() {
+			// Tool expansion not supported in RPC mode - no TUI
+			return false;
+		},
+
+		setToolsExpanded(_expanded: boolean) {
+			// Tool expansion not supported in RPC mode - no TUI
+		},
+	});
+
+	runtimeHost.setRebindSession(async () => {
+		await rebindSession();
+	});
+
+	const rebindSession = async (): Promise<void> => {
+		session = runtimeHost.session;
+		await session.bindExtensions({
+			uiContext: createExtensionUIContext(),
+			commandContextActions: {
+				waitForIdle: () => session.waitForIdle(),
+				newSession: async (options) => runtimeHost.newSession(options),
+				fork: async (entryId, forkOptions) => {
+					const result = await runtimeHost.fork(entryId, forkOptions);
+					return { cancelled: result.cancelled };
+				},
+				navigateTree: async (targetId, options) => {
+					const result = await session.navigateTree(targetId, {
+						summarize: options?.summarize,
+						customInstructions: options?.customInstructions,
+						replaceInstructions: options?.replaceInstructions,
+						label: options?.label,
+					});
+					return { cancelled: result.cancelled };
+				},
+				switchSession: async (sessionPath, options) => {
+					return runtimeHost.switchSession(sessionPath, options);
+				},
+				reload: async () => {
+					await session.reload();
+				},
+			},
+			shutdownHandler: () => {
+				shutdownRequested = true;
+				scheduleShutdownCheck();
+			},
+			onError: (err) => {
+				output({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
+			},
+		});
+
+		unsubscribe?.();
+		unsubscribeBackpressure?.();
+		unsubscribe = session.subscribe((event) => {
+			output(toJsonEvent(event));
+			if (event.type === "agent_settled" && shutdownRequested) scheduleShutdownCheck();
+		});
+		unsubscribeBackpressure = session.agent.subscribe(async () => {
+			await waitForRawStdoutBackpressure();
+		});
+	};
+
+	const registerSignalHandlers = (): void => {
+		const signals: NodeJS.Signals[] = ["SIGTERM"];
+		if (process.platform !== "win32") {
+			signals.push("SIGHUP");
+		}
+
+		for (const signal of signals) {
+			const handler = () => {
+				killTrackedDetachedChildren();
+				void shutdown(signal === "SIGHUP" ? 129 : 143, signal);
+			};
+			process.on(signal, handler);
+			signalCleanupHandlers.push(() => process.off(signal, handler));
+		}
+	};
+
+	await rebindSession();
+	registerSignalHandlers();
+
+	const NOT_HANDLED = Symbol("not-handled");
+	type CommandResult = RpcResponse | undefined | typeof NOT_HANDLED;
+
+	const createRpcToolExecutor = (toolName: string) => {
+		return (toolCallId: string, params: unknown, signal: AbortSignal | undefined) => {
+			const requestId = crypto.randomUUID();
+			const request: RpcToolCallRequest = {
+				type: "rpc_tool_call",
+				requestId,
+				toolName,
+				toolCallId,
+				args: params,
+			};
+			return new Promise<AgentToolResult<unknown>>((resolve, reject) => {
+				let timeoutId: ReturnType<typeof setTimeout> | undefined;
+				const cleanup = () => {
+					if (timeoutId) clearTimeout(timeoutId);
+					signal?.removeEventListener("abort", onAbort);
+					pendingRpcToolRequests.delete(requestId);
+				};
+				const onAbort = () => {
+					cleanup();
+					reject(new Error(`RPC tool aborted: ${toolName}`));
+				};
+				if (signal?.aborted) {
+					onAbort();
+					return;
+				}
+				signal?.addEventListener("abort", onAbort, { once: true });
+				timeoutId = setTimeout(
+					() => {
+						cleanup();
+						reject(new Error(`Timed out waiting for RPC tool result: ${toolName}`));
+					},
+					5 * 60 * 1000,
+				);
+				pendingRpcToolRequests.set(requestId, {
+					resolve: (result) => {
+						cleanup();
+						resolve(result);
+					},
+					reject: (error) => {
+						cleanup();
+						reject(error);
+					},
+					abort: onAbort,
+				});
+				output(request);
+			});
+		};
+	};
+
+	const handlePromptCommands = async (command: RpcCommand): Promise<CommandResult> => {
+		const id = command.id;
+		switch (command.type) {
+			case "prompt": {
+				// Emit the authoritative response only after preflight succeeds. Queued and
+				// immediately handled prompts also count as success.
+				let preflightSucceeded = false;
+				const promptOperation = session.prompt(command.message, {
+					images: command.images,
+					streamingBehavior: command.streamingBehavior,
+					source: "rpc",
+					preflightResult: (didSucceed) => {
+						if (didSucceed) {
+							preflightSucceeded = true;
+							output(success(id, "prompt"));
+						}
+					},
+				});
+				pendingPromptCommands.add(promptOperation);
+				void promptOperation.then(
+					() => {
+						pendingPromptCommands.delete(promptOperation);
+						scheduleShutdownCheck();
+					},
+					(errorValue: unknown) => {
+						if (!preflightSucceeded) {
+							const message = errorValue instanceof Error ? errorValue.message : String(errorValue);
+							output(error(id, "prompt", message));
+						}
+						pendingPromptCommands.delete(promptOperation);
+						scheduleShutdownCheck();
+					},
+				);
+				return undefined;
+			}
+			case "get_structured_response": {
+				const result = await session.getStructuredResponse({
+					schema: command.schema,
+					name: command.name,
+					description: command.description,
+					maxCorrections: command.maxCorrections,
+					scope: command.scope,
+				});
+				return success(id, "get_structured_response", result);
+			}
+			case "steer":
+				await session.steer(command.message, command.images);
+				return success(id, "steer");
+			case "follow_up":
+				await session.followUp(command.message, command.images);
+				return success(id, "follow_up");
+			case "abort":
+				await session.abort();
+				return success(id, "abort");
+			default:
+				return NOT_HANDLED;
+		}
+	};
+
+	const handleNewSessionCommand = async (command: RpcCommand): Promise<CommandResult> => {
+		if (command.type !== "new_session") return NOT_HANDLED;
+		const options =
+			command.sessionId || command.parentSession
+				? { id: command.sessionId, parentSession: command.parentSession }
+				: undefined;
+		const result = await runtimeHost.newSession(options);
+		if (!result.cancelled) await rebindSession();
+		return success(command.id, "new_session", result);
+	};
+
+	const handleListSessionsCommand = async (command: RpcCommand): Promise<CommandResult> => {
+		if (command.type !== "list_sessions") return NOT_HANDLED;
+		const limit = parseSessionListLimit(command.limit);
+		if (typeof limit === "string") return error(command.id, "list_sessions", limit);
+		const offset = parseSessionListCursor(command.cursor);
+		if (typeof offset === "string") return error(command.id, "list_sessions", offset);
+		const sessions = await runtimeHost.listSessions();
+		const page = sessions.slice(offset, offset + limit);
+		const nextOffset = offset + page.length;
+		const response: RpcListSessionsResponse = {
+			sessions: page,
+			...(nextOffset < sessions.length ? { nextCursor: String(nextOffset) } : {}),
+		};
+		return success(command.id, "list_sessions", response);
+	};
+
+	const handleConfigurationCommands = async (command: RpcCommand): Promise<CommandResult> => {
+		const id = command.id;
+		switch (command.type) {
+			case "get_state": {
+				const state: RpcSessionState = {
+					model: session.model,
+					thinkingLevel: session.thinkingLevel,
+					isStreaming: session.isStreaming,
+					isIdle: session.isIdle,
+					isCompacting: session.isCompacting,
+					steeringMode: session.steeringMode,
+					followUpMode: session.followUpMode,
+					sessionFile: session.sessionFile,
+					sessionId: session.sessionId,
+					sessionName: session.sessionName,
+					autoCompactionEnabled: session.autoCompactionEnabled,
+					messageCount: session.messages.length,
+					pendingMessageCount: session.pendingMessageCount,
+					toolBackend: session.getToolBackendInfo(),
+				};
+				return success(id, "get_state", state);
+			}
+			case "set_model": {
+				const models = await session.modelRegistry.getAvailable();
+				const model = models.find((model) => model.provider === command.provider && model.id === command.modelId);
+				if (!model) return error(id, "set_model", `Model not found: ${command.provider}/${command.modelId}`);
+				await session.setModel(model);
+				return success(id, "set_model", model);
+			}
+			case "cycle_model": {
+				const result = await session.cycleModel();
+				return success(id, "cycle_model", result || null);
+			}
+			case "get_available_models": {
+				const models = await session.modelRegistry.getAvailable();
+				return success(id, "get_available_models", { models });
+			}
+			case "set_thinking_level":
+				session.setThinkingLevel(command.level);
+				return success(id, "set_thinking_level");
+			case "cycle_thinking_level": {
+				const level = session.cycleThinkingLevel();
+				return success(id, "cycle_thinking_level", level ? { level } : null);
+			}
+			case "set_steering_mode":
+				session.setSteeringMode(command.mode);
+				return success(id, "set_steering_mode");
+			case "set_follow_up_mode":
+				session.setFollowUpMode(command.mode);
+				return success(id, "set_follow_up_mode");
+			case "compact": {
+				const result = await session.compact(command.customInstructions);
+				return success(id, "compact", result);
+			}
+			case "set_auto_compaction":
+				session.setAutoCompactionEnabled(command.enabled);
+				return success(id, "set_auto_compaction");
+			case "set_auto_retry":
+				session.setAutoRetryEnabled(command.enabled);
+				return success(id, "set_auto_retry");
+			case "abort_retry":
+				session.abortRetry();
+				return success(id, "abort_retry");
+			default:
+				return NOT_HANDLED;
+		}
+	};
+
+	const handleBackendCommands = async (command: RpcCommand): Promise<CommandResult> => {
+		const id = command.id;
+		switch (command.type) {
+			case "bash": {
+				const eventResult = await session.extensionRunner.emitUserBash({
+					type: "user_bash",
+					command: command.command,
+					excludeFromContext: command.excludeFromContext ?? false,
+					cwd: session.session.getCwd(),
+				});
+				if (eventResult?.result) {
+					if (command.record !== false) {
+						session.recordBashResult(command.command, eventResult.result, {
+							excludeFromContext: command.excludeFromContext,
+						});
+					}
+					return success(id, "bash", eventResult.result);
+				}
+				const result = await session.executeBash(command.command, undefined, {
+					operations: eventResult?.operations,
+					record: command.record,
+					truncate: command.truncate,
+					excludeFromContext: command.excludeFromContext,
+				});
+				return success(id, "bash", result);
+			}
+			case "abort_bash":
+				session.abortBash();
+				return success(id, "abort_bash");
+			case "set_remote_sandbox": {
+				const info = await session.configureRemoteSandbox({
+					type: "daemon",
+					url: command.url,
+					token: command.token,
+				});
+				return success(id, "set_remote_sandbox", info);
+			}
+			case "clear_remote_sandbox":
+				await session.clearRemoteSandbox();
+				return success(id, "clear_remote_sandbox", session.getToolBackendInfo());
+			case "upload_file": {
+				await session.uploadFile(command.sourcePath, command.destinationPath);
+				const result = await stat(command.sourcePath);
+				return success(id, "upload_file", { bytes: result.size });
+			}
+			case "download_file": {
+				await session.downloadFile(command.sourcePath, command.destinationPath);
+				const result = await stat(command.destinationPath);
+				return success(id, "download_file", { bytes: result.size });
+			}
+			default:
+				return NOT_HANDLED;
+		}
+	};
+
+	const handleSessionNavigationCommands = async (command: RpcCommand): Promise<CommandResult> => {
+		const id = command.id;
+		switch (command.type) {
+			case "get_session_stats":
+				return success(id, "get_session_stats", session.getSessionStats());
+			case "export_html": {
+				const path = await session.exportToHtml(command.outputPath);
+				return success(id, "export_html", { path });
+			}
+			case "switch_session": {
+				const result = await runtimeHost.switchSession(command.sessionPath);
+				if (!result.cancelled) await rebindSession();
+				return success(id, "switch_session", result);
+			}
+			case "fork": {
+				const result = await runtimeHost.fork(command.entryId);
+				if (!result.cancelled) await rebindSession();
+				return success(id, "fork", { text: result.selectedText, cancelled: result.cancelled });
+			}
+			case "clone": {
+				const leafId = session.session.getLeafId();
+				if (!leafId) return error(id, "clone", "Cannot clone session: no current entry selected");
+				const result = await runtimeHost.fork(leafId, { position: "at" });
+				if (!result.cancelled) await rebindSession();
+				return success(id, "clone", { cancelled: result.cancelled });
+			}
+			default:
+				return NOT_HANDLED;
+		}
+	};
+
+	const handleSessionQueryCommands = async (command: RpcCommand): Promise<CommandResult> => {
+		const id = command.id;
+		switch (command.type) {
+			case "get_fork_messages":
+				return success(id, "get_fork_messages", { messages: session.getUserMessagesForForking() });
+			case "get_entries": {
+				let entries = session.session.getEntries();
+				if (command.since !== undefined) {
+					const sinceIndex = entries.findIndex((entry) => entry.id === command.since);
+					if (sinceIndex === -1) return error(id, "get_entries", `Entry not found: ${command.since}`);
+					entries = entries.slice(sinceIndex + 1);
+				}
+				return success(id, "get_entries", { entries, leafId: session.session.getLeafId() });
+			}
+			case "get_tree":
+				return success(id, "get_tree", { tree: session.session.getTree(), leafId: session.session.getLeafId() });
+			case "get_last_assistant_text":
+				return success(id, "get_last_assistant_text", { text: session.getLastAssistantText() });
+			case "set_session_name": {
+				const name = command.name.trim();
+				if (!name) return error(id, "set_session_name", "Session name cannot be empty");
+				session.setSessionName(name);
+				return success(id, "set_session_name");
+			}
+			case "get_messages":
+				return success(id, "get_messages", { messages: session.messages });
+			default:
+				return NOT_HANDLED;
+		}
+	};
+
+	const collectCommands = (): RpcSlashCommand[] => {
+		const commands: RpcSlashCommand[] = [];
+		for (const registeredCommand of session.extensionRunner.getRegisteredCommands()) {
+			if (HIDDEN_BUILTIN_SLASH_COMMAND_NAMES.has(registeredCommand.name)) continue;
+			commands.push({
+				name: registeredCommand.invocationName,
+				description: registeredCommand.description,
+				source: "extension",
+				sourceInfo: registeredCommand.sourceInfo,
+			});
+		}
+		for (const template of session.promptTemplates) {
+			commands.push({
+				name: template.name,
+				description: template.description,
+				source: "prompt",
+				sourceInfo: template.sourceInfo,
+			});
+		}
+		for (const skill of session.getRegisteredSkills()) {
+			commands.push({
+				name: `skill:${skill.name}`,
+				description: skill.description,
+				source: "skill",
+				sourceInfo: skill.sourceInfo,
+			});
+		}
+		for (const rule of session.getRegisteredRules()) {
+			commands.push({
+				name: `rule:${rule.name}`,
+				description: rule.description,
+				source: "rule",
+				sourceInfo: rule.sourceInfo,
+			});
+		}
+		return commands;
+	};
+
+	const handleSkillCommands = async (command: RpcCommand): Promise<CommandResult> => {
+		const id = command.id;
+		switch (command.type) {
+			case "get_commands":
+				return success(id, "get_commands", { commands: collectCommands() });
+			case "register_skill": {
+				if (!command.skill.filePath && command.skill.content === undefined) {
+					return error(
+						id,
+						"register_skill",
+						`registerSkill("${command.skill.name}") requires filePath or content`,
+					);
+				}
+				const filePath = command.skill.filePath ?? `<rpc-skill:${command.skill.name}>`;
+				session.registerSessionSkill({
+					name: command.skill.name,
+					description: command.skill.description,
+					filePath,
+					baseDir: command.skill.baseDir,
+					disableModelInvocation: command.skill.disableModelInvocation ?? false,
+					tools: command.skill.tools ?? [],
+					...(command.skill.content !== undefined ? { content: command.skill.content } : {}),
+				});
+				return success(id, "register_skill");
+			}
+			case "unregister_skill":
+				return success(id, "unregister_skill", { unregistered: session.unregisterSessionSkill(command.name) });
+			default:
+				return NOT_HANDLED;
+		}
+	};
+
+	const handleRuleCommands = async (command: RpcCommand): Promise<CommandResult> => {
+		const id = command.id;
+		switch (command.type) {
+			case "register_rule": {
+				if (!command.rule.filePath && command.rule.content === undefined) {
+					return error(id, "register_rule", `registerRule("${command.rule.name}") requires filePath or content`);
+				}
+				const filePath = command.rule.filePath ?? `<rpc-rule:${command.rule.name}>`;
+				session.registerSessionRule({
+					name: command.rule.name,
+					description: command.rule.description,
+					filePath,
+					baseDir: command.rule.baseDir,
+					disableModelInvocation: command.rule.disableModelInvocation ?? false,
+					tools: command.rule.tools ?? [],
+					...(command.rule.content !== undefined ? { content: command.rule.content } : {}),
+				});
+				return success(id, "register_rule");
+			}
+			case "unregister_rule":
+				return success(id, "unregister_rule", { unregistered: session.unregisterSessionRule(command.name) });
+			default:
+				return NOT_HANDLED;
+		}
+	};
+
+	const handleToolRegistrationCommands = async (command: RpcCommand): Promise<CommandResult> => {
+		const id = command.id;
+		switch (command.type) {
+			case "register_tool":
+				session.registerSessionTool(
+					{
+						name: command.tool.name,
+						label: command.tool.label,
+						description: command.tool.description,
+						promptSnippet: command.tool.promptSnippet,
+						promptGuidelines: command.tool.promptGuidelines,
+						parameters: command.tool.parameters,
+						executionMode: command.tool.executionMode,
+						execute: createRpcToolExecutor(command.tool.name),
+					},
+					{ lazy: command.tool.lazy },
+				);
+				return success(id, "register_tool");
+			case "unregister_tool":
+				return success(id, "unregister_tool", { unregistered: session.unregisterSessionTool(command.name) });
+			case "get_available_tools":
+				return success(id, "get_available_tools", { tools: session.getAvailableSessionTools() });
+			case "rpc_tool_result":
+			case "rpc_tool_error":
+				return success(id, command.type);
+			default:
+				return NOT_HANDLED;
+		}
+	};
+
+	const requireHandledCommandResult = async (
+		command: RpcCommand,
+		resultPromise: Promise<CommandResult>,
+	): Promise<RpcResponse | undefined> => {
+		const result = await resultPromise;
+		if (result !== NOT_HANDLED) return result;
+		const unknownCommand = command as unknown as { type: string };
+		return error(command.id, unknownCommand.type, `Unknown command: ${unknownCommand.type}`);
+	};
+	// Route synchronously so commands begin handling in input order. Awaiting a chain of
+	// non-matching async handlers would let later input commands overtake earlier ones.
+	const handleCommand = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
+		switch (command.type) {
+			case "prompt":
+			case "get_structured_response":
+			case "steer":
+			case "follow_up":
+			case "abort":
+				return requireHandledCommandResult(command, handlePromptCommands(command));
+			case "new_session":
+				return requireHandledCommandResult(command, handleNewSessionCommand(command));
+			case "list_sessions":
+				return requireHandledCommandResult(command, handleListSessionsCommand(command));
+			case "get_state":
+			case "set_model":
+			case "cycle_model":
+			case "get_available_models":
+			case "set_thinking_level":
+			case "cycle_thinking_level":
+			case "set_steering_mode":
+			case "set_follow_up_mode":
+			case "compact":
+			case "set_auto_compaction":
+			case "set_auto_retry":
+			case "abort_retry":
+				return requireHandledCommandResult(command, handleConfigurationCommands(command));
+			case "bash":
+			case "abort_bash":
+			case "set_remote_sandbox":
+			case "clear_remote_sandbox":
+			case "upload_file":
+			case "download_file":
+				return requireHandledCommandResult(command, handleBackendCommands(command));
+			case "get_session_stats":
+			case "export_html":
+			case "switch_session":
+			case "fork":
+			case "clone":
+				return requireHandledCommandResult(command, handleSessionNavigationCommands(command));
+			case "get_fork_messages":
+			case "get_entries":
+			case "get_tree":
+			case "get_last_assistant_text":
+			case "set_session_name":
+			case "get_messages":
+				return requireHandledCommandResult(command, handleSessionQueryCommands(command));
+			case "get_commands":
+			case "register_skill":
+			case "unregister_skill":
+				return requireHandledCommandResult(command, handleSkillCommands(command));
+			case "register_rule":
+			case "unregister_rule":
+				return requireHandledCommandResult(command, handleRuleCommands(command));
+			case "register_tool":
+			case "unregister_tool":
+			case "get_available_tools":
+			case "rpc_tool_result":
+			case "rpc_tool_error":
+				return requireHandledCommandResult(command, handleToolRegistrationCommands(command));
+			default: {
+				const unknownCommand = command as unknown as { id?: string; type: string };
+				return error(unknownCommand.id, unknownCommand.type, `Unknown command: ${unknownCommand.type}`);
+			}
+		}
+	};
+
+	/**
+	 * Check if shutdown was requested and perform shutdown if so.
+	 * Called after handling each command when waiting for the next command.
+	 */
+	let detachInput = () => {};
+
+	async function shutdown(exitCode = 0, signal?: NodeJS.Signals): Promise<never> {
+		if (shuttingDown) {
+			process.exit(exitCode);
+		}
+		shuttingDown = true;
+		for (const cleanup of signalCleanupHandlers) {
+			cleanup();
+		}
+		unsubscribe?.();
+		unsubscribeBackpressure?.();
+		for (const pending of pendingRpcToolRequests.values()) {
+			pending.abort();
+		}
+		pendingRpcToolRequests.clear();
+		await runtimeHost.dispose();
+		detachInput();
+		process.stdin.pause();
+		if (signal !== "SIGTERM") {
+			await flushRawStdout();
+		}
+		process.exit(exitCode);
+	}
+
+	async function checkShutdownRequested(): Promise<void> {
+		if (!shutdownRequested || activeInputCommands > 0 || pendingPromptCommands.size > 0) return;
+		await shutdown();
+	}
+
+	const parseInputLine = (line: string): RpcInputParseResult => {
+		try {
+			return { ok: true, value: JSON.parse(line) };
+		} catch (parseError: unknown) {
+			output(
+				error(
+					undefined,
+					"parse",
+					`Failed to parse command: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+				),
+			);
+			return { ok: false };
+		}
+	};
+
+	const handlePendingRpcResponse = (parsed: unknown): boolean => {
+		if (typeof parsed !== "object" || parsed === null || !("type" in parsed)) return false;
+		switch (parsed.type) {
+			case "extension_ui_response": {
+				const response = parsed as RpcExtensionUIResponse;
+				const pending = pendingExtensionRequests.get(response.id);
+				if (pending) {
+					pendingExtensionRequests.delete(response.id);
+					pending.resolve(response);
+				}
+				return true;
+			}
+			case "rpc_tool_result": {
+				const response = parsed as Extract<RpcCommand, { type: "rpc_tool_result" }>;
+				const pending = pendingRpcToolRequests.get(response.requestId);
+				if (pending) pending.resolve(response.result);
+				return true;
+			}
+			case "rpc_tool_error": {
+				const response = parsed as Extract<RpcCommand, { type: "rpc_tool_error" }>;
+				const pending = pendingRpcToolRequests.get(response.requestId);
+				if (pending) pending.reject(new Error(response.error));
+				return true;
+			}
+			default:
+				return false;
+		}
+	};
+
+	const handleParsedCommand = async (command: RpcCommand): Promise<void> => {
+		try {
+			const response = await handleCommand(command);
+			if (response) {
+				output(response);
+				await waitForRawStdoutBackpressure();
+			}
+			await checkShutdownRequested();
+		} catch (commandError: unknown) {
+			output(
+				error(
+					command.id,
+					command.type,
+					commandError instanceof Error ? commandError.message : String(commandError),
+				),
+			);
+			await waitForRawStdoutBackpressure();
+		}
+	};
+
+	const handleInputLine = async (line: string) => {
+		const parseResult = parseInputLine(line);
+		if (!parseResult.ok) {
+			await waitForRawStdoutBackpressure();
+			return;
+		}
+		if (handlePendingRpcResponse(parseResult.value)) return;
+		await handleParsedCommand(parseResult.value as RpcCommand);
+	};
+
+	const onInputEnd = () => {
+		shutdownRequested = true;
+		scheduleShutdownCheck();
+	};
+	process.stdin.on("end", onInputEnd);
+
+	detachInput = (() => {
+		const detachJsonl = attachJsonlLineReader(process.stdin, (line) => {
+			activeInputCommands++;
+			void handleInputLine(line).finally(() => {
+				activeInputCommands--;
+				scheduleShutdownCheck();
+			});
+		});
+		return () => {
+			detachJsonl();
+			process.stdin.off("end", onInputEnd);
+		};
+	})();
+
+	// Keep process alive forever
+	return new Promise(() => {});
+}
+
+function parseSessionListLimit(limit: number | undefined): number | string {
+	if (limit === undefined) {
+		return DEFAULT_RPC_SESSION_LIST_LIMIT;
+	}
+	if (!Number.isInteger(limit) || limit < 1) {
+		return "Session list limit must be a positive integer";
+	}
+	return Math.min(limit, MAX_RPC_SESSION_LIST_LIMIT);
+}
+
+function parseSessionListCursor(cursor: string | undefined): number | string {
+	if (cursor === undefined) {
+		return 0;
+	}
+	if (!/^\d+$/.test(cursor)) {
+		return "Session list cursor is invalid";
+	}
+	return Number(cursor);
+}

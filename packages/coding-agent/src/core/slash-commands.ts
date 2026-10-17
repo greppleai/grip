@@ -1,0 +1,52 @@
+import { APP_NAME } from "../config.ts";
+import type { SourceInfo } from "./source-info.ts";
+
+export type SlashCommandSource = "extension" | "prompt" | "skill" | "rule";
+
+export interface SlashCommandInfo {
+	name: string;
+	description?: string;
+	source: SlashCommandSource;
+	sourceInfo: SourceInfo;
+}
+
+export interface BuiltinSlashCommand {
+	name: string;
+	description: string;
+}
+
+export const HIDDEN_BUILTIN_SLASH_COMMAND_NAMES: ReadonlySet<string> = new Set(["hooks", "sandbox"]);
+
+export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
+	{ name: "hooks", description: "Enable or disable hooks for this session" },
+	{ name: "sandbox", description: "Configure or manage the workspace tool sandbox" },
+	{ name: "cd", description: "Change the working directory" },
+	{ name: "settings", description: "Open settings menu" },
+	{ name: "model", description: "Switch models" },
+	{
+		name: "context-compression",
+		description: "Enable or disable agent-initiated context compression for this session",
+	},
+	{ name: "compress-detection", description: "Enable or disable background compression detection for this session" },
+	{ name: "compress-detection-model", description: "Choose or clear the background compression detection model" },
+	{ name: "scoped-models", description: "Enable/disable models for Ctrl+P cycling" },
+	{ name: "profile", description: "Create or use a scoped-model profile" },
+	{ name: "export", description: "Export session (HTML default, or specify path: .html/.jsonl)" },
+	{ name: "import", description: "Import and resume a session from a JSONL file" },
+	{ name: "share", description: "Share session as a secret GitHub gist" },
+	{ name: "copy", description: "Copy last agent message to clipboard" },
+	{ name: "name", description: "Set session display name" },
+	{ name: "session", description: "Show session info and stats" },
+	{ name: "changelog", description: "Show changelog entries" },
+	{ name: "hotkeys", description: "Show all keyboard shortcuts" },
+	{ name: "fork", description: "Create a new fork from a previous user message" },
+	{ name: "clone", description: "Duplicate the current session at the current position" },
+	{ name: "tree", description: "Navigate session tree (switch branches)" },
+	{ name: "login", description: "Configure provider authentication" },
+	{ name: "logout", description: "Remove provider authentication" },
+	{ name: "new", description: "Start a new session" },
+	{ name: "compact", description: "Manually compact the session context" },
+	{ name: "resume", description: "Resume a different session" },
+	{ name: "reload", description: "Reload keybindings, hooks, extensions, skills, rules, prompts, and themes" },
+	{ name: "quit", description: `Quit ${APP_NAME}` },
+];

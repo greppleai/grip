@@ -1,0 +1,1069 @@
+# Changelog
+
+## [Unreleased]
+
+### Breaking Changes
+
+- Renamed the project-owned agent core package from `@fleetagent/pi-agent-core` to `@greppleai/grip-agent-core`; update dependencies and imports. See the [manual migration guide](../coding-agent/docs/migrating-to-grip.md).
+
+## [0.2.15](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.14...@fleetagent/pi-agent-core-v0.2.15) (2026-10-07)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.14 to ^0.2.15
+
+## [0.2.14](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.13...@fleetagent/pi-agent-core-v0.2.14) (2026-09-30)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.13 to ^0.2.14
+
+## [0.2.13](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.12...@fleetagent/pi-agent-core-v0.2.13) (2026-09-26)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.12 to ^0.2.13
+
+## [0.2.12](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.11...@fleetagent/pi-agent-core-v0.2.12) (2026-09-25)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.11 to ^0.2.12
+
+## [0.2.11](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.10...@fleetagent/pi-agent-core-v0.2.11) (2026-09-24)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.10 to ^0.2.11
+
+## [0.2.10](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.9...@fleetagent/pi-agent-core-v0.2.10) (2026-09-24)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.9 to ^0.2.10
+
+## [0.2.9](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.8...@fleetagent/pi-agent-core-v0.2.9) (2026-09-24)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.8 to ^0.2.9
+
+## [0.2.8](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.7...@fleetagent/pi-agent-core-v0.2.8) (2026-09-23)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.7 to ^0.2.8
+
+## [0.2.7](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.6...@fleetagent/pi-agent-core-v0.2.7) (2026-09-19)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.6 to ^0.2.7
+
+## [0.2.6](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.5...@fleetagent/pi-agent-core-v0.2.6) (2026-09-17)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.5 to ^0.2.6
+
+## [0.2.5](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.4...@fleetagent/pi-agent-core-v0.2.5) (2026-09-17)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.4 to ^0.2.5
+
+## [0.2.4](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.3...@fleetagent/pi-agent-core-v0.2.4) (2026-09-12)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.3 to ^0.2.4
+
+## [0.2.3](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.2...@fleetagent/pi-agent-core-v0.2.3) (2026-09-10)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.2 to ^0.2.3
+
+## [0.2.2](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.1...@fleetagent/pi-agent-core-v0.2.2) (2026-09-08)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.1 to ^0.2.2
+
+## [0.2.1](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.2.0...@fleetagent/pi-agent-core-v0.2.1) (2026-09-07)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.2.0 to ^0.2.1
+
+## [0.2.0](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.1.9...@fleetagent/pi-agent-core-v0.2.0) (2026-09-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* JSON/RPC message updates now emit deltas only, and deprecated TypeBox APIs are removed.
+
+### Features
+
+* **coding-agent:** add hooks and custom Biome checks ([66e670c](https://github.com/fleetagent/pi/commit/66e670c5a80407b0b26a59366d0ef0d92abd2c85))
+* **coding-agent:** harden session and sandbox infrastructure ([49b9db0](https://github.com/fleetagent/pi/commit/49b9db0654bee932eccfb57bdaf5917ce48ac7be))
+* integrate selective upstream migration ([0e3d391](https://github.com/fleetagent/pi/commit/0e3d391b8bfcdad751881a04a7967cc747b8e0fe))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.1.9 to ^0.2.0
+
+## [0.1.9](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.1.8...@fleetagent/pi-agent-core-v0.1.9) (2026-07-27)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.1.8 to ^0.1.9
+
+## [0.1.8](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.1.7...@fleetagent/pi-agent-core-v0.1.8) (2026-07-13)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.1.7 to ^0.1.8
+
+## [0.1.7](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.1.6...@fleetagent/pi-agent-core-v0.1.7) (2026-07-13)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.1.6 to ^0.1.7
+
+## [0.1.6](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.1.5...@fleetagent/pi-agent-core-v0.1.6) (2026-07-13)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.1.5 to ^0.1.6
+
+## [0.1.5](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.1.4...@fleetagent/pi-agent-core-v0.1.5) (2026-07-13)
+
+
+### Features
+
+* add subagents and harden runtime boundaries ([90c6e9e](https://github.com/fleetagent/pi/commit/90c6e9e72dfa72f893cab757dd615bb2bd37b461))
+
+
+### Bug Fixes
+
+* **coding-agent:** refresh next-turn context safely ([ad03b61](https://github.com/fleetagent/pi/commit/ad03b612ecd5d6897060e8cb5dc0172af92e887e))
+* port upstream runtime fixes ([d8b2aa3](https://github.com/fleetagent/pi/commit/d8b2aa39527245d1035ab959156bc88d1dea8488))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.1.4 to ^0.1.5
+
+## [Unreleased]
+
+### Added
+
+* Allow blocked `beforeToolCall` results to terminate all-terminating tool batches without another model call ([upstream `1eb988cfe`](https://github.com/fleetagent/pi/commit/1eb988cfe88fb0ff740ff62583d2f16359f7b6b0)).
+* Export typed JSONL decode and session errors with exact references, physical lines, byte offsets, operation phases, decode kinds, original causes, and write outcomes while preserving existing outer session error codes ([upstream `7aca0d7b3`](https://github.com/fleetagent/pi/commit/7aca0d7b3e041a9e2b635e8370b2549f032932d6)).
+
+### Fixed
+
+* Publish JSONL session creation and forks through unique sibling files and rename, serialize append-before-memory updates, and fence ambiguous append failures so partial sessions cannot become visible ([upstream `a838c069e`](https://github.com/fleetagent/pi/commit/a838c069e6318edee8317eff759b74c3934745f0)).
+* Reject same-owner JSONL create/create, create/fork, and fork/fork collisions for one canonical cwd and session ID with `already_exists`, while allowing the same ID in different cwd namespaces and detecting already-published IDs across owners/processes ([upstream `9d090bc5d`](https://github.com/fleetagent/pi/commit/9d090bc5dcecf8f35354e09fe57413e57dea8e5b)).
+* Repair only unterminated final JSON/UTF-8 fragments or missing final newlines through atomic replacement, while rejecting interior, schema, duplicate-ID, parent, target, and other state corruption without changing session bytes ([upstream `4a0e2f115`](https://github.com/fleetagent/pi/commit/4a0e2f115ad46d34c19d200c6a71fa79d264092d), follow-up [`7aca0d7b3`](https://github.com/fleetagent/pi/commit/7aca0d7b3e041a9e2b635e8370b2549f032932d6)).
+
+* Normalize missing or null tool result content before it enters agent history or provider payloads, including results from untyped extension and remote-backed tools ([upstream `8c0ccd14b`](https://github.com/fleetagent/pi/commit/8c0ccd14b34b6e5c403363518e331094b69ebf6c)).
+
+* Reject invalid harness shell execution timeouts.
+* Reject `Agent.reset()` while a run is active to prevent transcript and runtime-state corruption ([upstream `1532c99943`](https://github.com/fleetagent/pi/commit/1532c99943b894fe1d12e15ac388c7b1887ca403)).
+* Fixed harness session storage short entry ids to use the random tail of generated uuidv7 ids instead of the timestamp prefix.
+* Serialize split-turn compaction summary requests in the harness.
+
+## [0.1.4](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.1.3...@fleetagent/pi-agent-core-v0.1.4) (2026-06-16)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.1.3 to ^0.1.4
+
+## [0.1.3](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.1.2...@fleetagent/pi-agent-core-v0.1.3) (2026-06-14)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.1.2 to ^0.1.3
+
+## [0.1.2](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.1.1...@fleetagent/pi-agent-core-v0.1.2) (2026-06-13)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.1.1 to ^0.1.2
+
+## [0.1.1](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.1.0...@fleetagent/pi-agent-core-v0.1.1) (2026-06-12)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.1.0 to ^0.1.1
+
+## [0.1.0](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.0.12...@fleetagent/pi-agent-core-v0.1.0) (2026-06-12)
+
+
+### Features
+
+* add model thinking level metadata ([80f06d3](https://github.com/fleetagent/pi/commit/80f06d3636312a87ad7a9b5d74a726ad62c24d34)), closes [#3208](https://github.com/fleetagent/pi/issues/3208)
+* **agent:** add harness factory helpers ([d29e47c](https://github.com/fleetagent/pi/commit/d29e47c77108bb6bdce7ae816cf7c9670db0b654))
+* **agent:** add harness stream configuration ([c0f416a](https://github.com/fleetagent/pi/commit/c0f416aabc6c3f991fde19e68bb37dec6c8b9a7e))
+* **agent:** add initial harness foundation ([a5b2736](https://github.com/fleetagent/pi/commit/a5b27367d35d2cbcc33baa43b8ff17cf43d8e7ab))
+* **agent:** add post-turn stop callback ([73b7b2c](https://github.com/fleetagent/pi/commit/73b7b2c56456441f356e1fba016d14fc28e3c0d2))
+* **agent:** return diagnostics from resource loaders ([ddb1864](https://github.com/fleetagent/pi/commit/ddb18640e3edce20c97f0d6c9227be63666196f5))
+* **agent:** split harness compaction and session modules ([83599e7](https://github.com/fleetagent/pi/commit/83599e789da8cd28253401b295110944a3f63f13))
+* image content ([c3c1073](https://github.com/fleetagent/pi/commit/c3c10737d86f76ec61fc46ccc957eda883010d6d))
+
+
+### Bug Fixes
+
+* **agent:** correct uuidv7 sequence handling ([c00f1cf](https://github.com/fleetagent/pi/commit/c00f1cf1302142c90a414e26ecd09f7988d97b6f))
+* **agent:** preserve oversized tail output with trailing newline ([b1893b3](https://github.com/fleetagent/pi/commit/b1893b3d7720273c1c2289dde88cf22e6c1a83aa)), closes [#4715](https://github.com/fleetagent/pi/issues/4715)
+* **agent:** stop tool preflight after extension abort ([b944827](https://github.com/fleetagent/pi/commit/b94482762321ed0b9f8f245be57c84d786a7105d)), closes [#4276](https://github.com/fleetagent/pi/issues/4276)
+* **ai:** honor codex transport option ([b8bb241](https://github.com/fleetagent/pi/commit/b8bb2411ff5a2be5767fa02a43859b0e40a6d673)), closes [#4083](https://github.com/fleetagent/pi/issues/4083)
+* **coding-agent:** remove global fetch override closes [#4619](https://github.com/fleetagent/pi/issues/4619) ([c9e7049](https://github.com/fleetagent/pi/commit/c9e70492125806053e0ea31ad00eef6822d4a268))
+* **compaction:** clamp summary output tokens ([3d9e14d](https://github.com/fleetagent/pi/commit/3d9e14d7482f4a99d5224926099bec0d17ff86fd))
+* **windows:** hide bash helper consoles ([29b3417](https://github.com/fleetagent/pi/commit/29b3417a7a6d87a0db48841ce5f316f9e9711352)), closes [#4699](https://github.com/fleetagent/pi/issues/4699)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.0.12 to ^0.1.0
+
+## [0.0.12](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.0.11...@fleetagent/pi-agent-core-v0.0.12) (2026-06-12)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.0.11 to ^0.0.12
+
+## [0.0.11](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.0.10...@fleetagent/pi-agent-core-v0.0.11) (2026-06-11)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.0.10 to ^0.0.11
+
+## [0.0.10](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.0.9...@fleetagent/pi-agent-core-v0.0.10) (2026-06-11)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.0.9 to ^0.0.10
+
+## [0.0.9](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.0.8...@fleetagent/pi-agent-core-v0.0.9) (2026-06-07)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.0.8 to ^0.0.9
+
+## [0.0.8](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.0.7...@fleetagent/pi-agent-core-v0.0.8) (2026-06-05)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.0.7 to ^0.0.8
+
+## [0.0.7](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.0.6...@fleetagent/pi-agent-core-v0.0.7) (2026-06-04)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.0.6 to ^0.0.7
+
+## [0.0.6](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.0.5...@fleetagent/pi-agent-core-v0.0.6) (2026-05-24)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.0.5 to ^0.0.6
+
+## [0.0.5](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.0.4...@fleetagent/pi-agent-core-v0.0.5) (2026-05-23)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.0.4 to ^0.0.5
+
+## [0.0.4](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.0.3...@fleetagent/pi-agent-core-v0.0.4) (2026-05-23)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.0.3 to ^0.0.4
+
+## [0.0.3](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.0.2...@fleetagent/pi-agent-core-v0.0.3) (2026-05-23)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.0.2 to ^0.0.3
+
+## [0.0.2](https://github.com/fleetagent/pi/compare/@fleetagent/pi-agent-core-v0.0.1...@fleetagent/pi-agent-core-v0.0.2) (2026-05-23)
+
+
+### Miscellaneous Chores
+
+* **@fleetagent/pi-agent-core:** Synchronize pi versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @fleetagent/pi-ai bumped from ^0.0.1 to ^0.0.2
+
+## 0.0.1 (2026-05-23)
+
+
+### Features
+
+* add model thinking level metadata ([80f06d3](https://github.com/fleetagent/pi/commit/80f06d3636312a87ad7a9b5d74a726ad62c24d34)), closes [#3208](https://github.com/fleetagent/pi/issues/3208)
+* **agent:** add harness factory helpers ([d29e47c](https://github.com/fleetagent/pi/commit/d29e47c77108bb6bdce7ae816cf7c9670db0b654))
+* **agent:** add harness stream configuration ([c0f416a](https://github.com/fleetagent/pi/commit/c0f416aabc6c3f991fde19e68bb37dec6c8b9a7e))
+* **agent:** add initial harness foundation ([a5b2736](https://github.com/fleetagent/pi/commit/a5b27367d35d2cbcc33baa43b8ff17cf43d8e7ab))
+* **agent:** add post-turn stop callback ([73b7b2c](https://github.com/fleetagent/pi/commit/73b7b2c56456441f356e1fba016d14fc28e3c0d2))
+* **agent:** return diagnostics from resource loaders ([ddb1864](https://github.com/fleetagent/pi/commit/ddb18640e3edce20c97f0d6c9227be63666196f5))
+* **agent:** split harness compaction and session modules ([83599e7](https://github.com/fleetagent/pi/commit/83599e789da8cd28253401b295110944a3f63f13))
+* image content ([c3c1073](https://github.com/fleetagent/pi/commit/c3c10737d86f76ec61fc46ccc957eda883010d6d))
+
+
+### Bug Fixes
+
+* **agent:** correct uuidv7 sequence handling ([c00f1cf](https://github.com/fleetagent/pi/commit/c00f1cf1302142c90a414e26ecd09f7988d97b6f))
+* **agent:** preserve oversized tail output with trailing newline ([b1893b3](https://github.com/fleetagent/pi/commit/b1893b3d7720273c1c2289dde88cf22e6c1a83aa)), closes [#4715](https://github.com/fleetagent/pi/issues/4715)
+* **agent:** stop tool preflight after extension abort ([b944827](https://github.com/fleetagent/pi/commit/b94482762321ed0b9f8f245be57c84d786a7105d)), closes [#4276](https://github.com/fleetagent/pi/issues/4276)
+* **ai:** honor codex transport option ([b8bb241](https://github.com/fleetagent/pi/commit/b8bb2411ff5a2be5767fa02a43859b0e40a6d673)), closes [#4083](https://github.com/fleetagent/pi/issues/4083)
+* **coding-agent:** remove global fetch override closes [#4619](https://github.com/fleetagent/pi/issues/4619) ([c9e7049](https://github.com/fleetagent/pi/commit/c9e70492125806053e0ea31ad00eef6822d4a268))
+* **compaction:** clamp summary output tokens ([3d9e14d](https://github.com/fleetagent/pi/commit/3d9e14d7482f4a99d5224926099bec0d17ff86fd))
+* **windows:** hide bash helper consoles ([29b3417](https://github.com/fleetagent/pi/commit/29b3417a7a6d87a0db48841ce5f316f9e9711352)), closes [#4699](https://github.com/fleetagent/pi/issues/4699)
+
+## [Unreleased]
+
+### Breaking Changes
+
+- Changed the npm package scope to `@fleetagent`.
+
+## [0.75.4] - 2026-05-20
+
+### Changed
+
+- Changed source syntax to avoid TypeScript constructs that require JavaScript emit, keeping the package compatible with Node.js strip-only TypeScript checks.
+- Removed the package-level development watch script now that the root TypeScript check validates strip-only-compatible sources.
+
+### Fixed
+
+- Fixed tool-call preflight to stop preparing sibling tool calls after the run is aborted ([#4276](https://github.com/fleetagent/pi/issues/4276)).
+- Fixed tail truncation for oversized single-line output that ends with a trailing newline ([#4715](https://github.com/fleetagent/pi/issues/4715)).
+- Fixed Windows Node execution environment command spawns to hide helper console windows from background processes ([#4699](https://github.com/fleetagent/pi/issues/4699)).
+
+## [0.75.3] - 2026-05-18
+
+## [0.75.2] - 2026-05-18
+
+## [0.75.1] - 2026-05-18
+
+## [0.75.0] - 2026-05-17
+
+### Breaking Changes
+
+- Raised the minimum supported Node.js version to 22.19.0.
+
+## [0.74.1] - 2026-05-16
+
+## [0.74.0] - 2026-05-07
+
+## [0.73.1] - 2026-05-07
+
+## [0.73.0] - 2026-05-04
+
+## [0.72.1] - 2026-05-02
+
+### Changed
+
+- Changed the default agent transport to `auto` so providers can use their best available transport by default ([#4083](https://github.com/badlogic/pi-mono/issues/4083)).
+
+## [0.72.0] - 2026-05-01
+
+### Added
+
+- Added `shouldStopAfterTurn` to the low-level agent loop config for gracefully exiting after a completed turn before polling queued messages or starting another LLM call.
+
+## [0.71.1] - 2026-05-01
+
+## [0.71.0] - 2026-04-30
+
+## [0.70.6] - 2026-04-28
+
+## [0.70.5] - 2026-04-27
+
+## [0.70.4] - 2026-04-27
+
+## [0.70.3] - 2026-04-27
+
+## [0.70.2] - 2026-04-24
+
+## [0.70.1] - 2026-04-24
+
+## [0.70.0] - 2026-04-23
+
+## [0.69.0] - 2026-04-22
+
+### Breaking Changes
+
+- Migrated public TypeBox-facing types and examples from `@sinclair/typebox` 0.34.x to `typebox` 1.x. Install and import from `typebox` instead of relying on `@sinclair/typebox` transitively ([#3112](https://github.com/badlogic/pi-mono/issues/3112))
+
+### Added
+
+- Added `terminate: true` tool-result hints to skip the automatic follow-up LLM call when every finalized tool result in the current batch opts into early termination ([#3525](https://github.com/badlogic/pi-mono/issues/3525))
+
+## [0.68.1] - 2026-04-22
+
+### Fixed
+
+- Fixed `streamProxy()` to preserve the proxy-safe serializable subset of stream options, including session, transport, retry-delay, metadata, header, cache-retention, and thinking-budget settings ([#3512](https://github.com/badlogic/pi-mono/issues/3512))
+- Fixed parallel tool execution to emit `tool_execution_end` as soon as each tool is finalized, while still emitting persisted tool-result messages in assistant source order ([#3503](https://github.com/badlogic/pi-mono/issues/3503))
+
+## [0.68.0] - 2026-04-20
+
+### Changed
+
+- Clarified parallel tool execution ordering docs to specify that final tool lifecycle and tool-result artifacts are emitted in tool completion order.
+
+## [0.67.68] - 2026-04-17
+
+## [0.67.67] - 2026-04-17
+
+### Fixed
+
+- Fixed parallel tool-call finalization to convert `afterToolCall` hook throws into error tool results instead of aborting the batch ([#3084](https://github.com/badlogic/pi-mono/issues/3084))
+
+## [0.67.6] - 2026-04-16
+
+## [0.67.5] - 2026-04-16
+
+## [0.67.4] - 2026-04-16
+
+## [0.67.3] - 2026-04-15
+
+## [0.67.2] - 2026-04-14
+
+## [0.67.1] - 2026-04-13
+
+## [0.67.0] - 2026-04-13
+
+## [0.66.1] - 2026-04-08
+
+## [0.66.0] - 2026-04-08
+
+## [0.65.2] - 2026-04-06
+
+## [0.65.1] - 2026-04-05
+
+## [0.65.0] - 2026-04-03
+
+### Breaking Changes
+
+- `AgentState` has been reshaped:
+  - `streamMessage` was renamed to `streamingMessage`
+  - `error` was renamed to `errorMessage`
+  - `isStreaming`, `streamingMessage`, `pendingToolCalls`, and `errorMessage` are now readonly in the public API
+  - `pendingToolCalls` is now typed as `ReadonlySet<string>`
+  - `tools` and `messages` are now accessor properties, and assigning either field copies the provided top-level array instead of preserving array identity
+- `AgentOptions.initialState` no longer accepts runtime-owned fields. Remove `isStreaming`, `streamingMessage`, `pendingToolCalls`, and `errorMessage` from `initialState` values.
+- Removed `Agent` mutator methods in favor of direct property access:
+  - `agent.setSystemPrompt(value)` -> `agent.state.systemPrompt = value`
+  - `agent.setModel(model)` -> `agent.state.model = model`
+  - `agent.setThinkingLevel(level)` -> `agent.state.thinkingLevel = level`
+  - `agent.setTools(tools)` -> `agent.state.tools = tools`
+  - `agent.replaceMessages(messages)` -> `agent.state.messages = messages`
+  - `agent.appendMessage(message)` -> `agent.state.messages.push(message)`
+  - `agent.clearMessages()` -> `agent.state.messages = []`
+  - `agent.setToolExecution(mode)` -> `agent.toolExecution = mode`
+  - `agent.setBeforeToolCall(fn)` -> `agent.beforeToolCall = fn`
+  - `agent.setAfterToolCall(fn)` -> `agent.afterToolCall = fn`
+  - `agent.setTransport(transport)` -> `agent.transport = transport`
+- Removed queue mode getter/setter methods in favor of properties:
+  - `agent.setSteeringMode(mode)` -> `agent.steeringMode = mode`
+  - `agent.getSteeringMode()` -> `agent.steeringMode`
+  - `agent.setFollowUpMode(mode)` -> `agent.followUpMode = mode`
+  - `agent.getFollowUpMode()` -> `agent.followUpMode`
+- `Agent.subscribe()` listeners are now awaited and receive the active `AbortSignal`:
+  - `agent.subscribe((event) => { ... })` -> `agent.subscribe(async (event, signal) => { ... })`
+  - `agent_end` is now the final emitted event for a run, but not the idle boundary
+  - `agent.waitForIdle()`, `agent.prompt(...)`, and `agent.continue()` now settle only after awaited `agent_end` listeners finish
+  - `agent.state.isStreaming` remains `true` until that settlement completes
+
+## [0.64.0] - 2026-03-29
+
+### Added
+
+- Added `AgentTool.prepareArguments` hook to prepare raw tool call arguments before schema validation, enabling compatibility shims for resumed sessions with outdated tool schemas
+
+## [0.63.2] - 2026-03-29
+
+### Added
+
+- Added `Agent.signal` to expose the active abort signal for the current turn, allowing callers to forward cancellation into nested async work ([#2660](https://github.com/badlogic/pi-mono/issues/2660))
+
+## [0.63.1] - 2026-03-27
+
+## [0.63.0] - 2026-03-27
+
+## [0.62.0] - 2026-03-23
+
+## [0.61.1] - 2026-03-20
+
+## [0.61.0] - 2026-03-20
+
+## [0.60.0] - 2026-03-18
+
+## [0.59.0] - 2026-03-17
+
+## [0.58.4] - 2026-03-16
+
+### Fixed
+
+- Fixed steering messages to wait until the current assistant message's tool-call batch fully finishes instead of skipping pending tool calls.
+
+## [0.58.3] - 2026-03-15
+
+## [0.58.2] - 2026-03-15
+
+## [0.58.1] - 2026-03-14
+
+## [0.58.0] - 2026-03-14
+
+### Added
+
+- Added `beforeToolCall` and `afterToolCall` hooks to `AgentOptions` and `AgentLoopConfig` for preflight blocking and post-execution tool result mutation.
+
+### Changed
+
+- Added configurable tool execution mode to `Agent` and `agentLoop` via `toolExecution: "parallel" | "sequential"`, with `parallel` as the default. Parallel mode preflights tool calls sequentially, executes allowed tools concurrently, and emits final tool results in assistant source order.
+
+## [0.57.1] - 2026-03-07
+
+## [0.57.0] - 2026-03-07
+
+## [0.56.3] - 2026-03-06
+
+## [0.56.2] - 2026-03-05
+
+## [0.56.1] - 2026-03-05
+
+## [0.56.0] - 2026-03-04
+
+## [0.55.4] - 2026-03-02
+
+## [0.55.3] - 2026-02-27
+
+## [0.55.2] - 2026-02-27
+
+## [0.55.1] - 2026-02-26
+
+## [0.55.0] - 2026-02-24
+
+## [0.54.2] - 2026-02-23
+
+## [0.54.1] - 2026-02-22
+
+## [0.54.0] - 2026-02-19
+
+## [0.53.1] - 2026-02-19
+
+## [0.53.0] - 2026-02-17
+
+## [0.52.12] - 2026-02-13
+
+### Added
+
+- Added `transport` to `AgentOptions` and `AgentLoopConfig` forwarding, allowing stream transport preference (`"sse"`, `"websocket"`, `"auto"`) to flow into provider calls.
+
+## [0.52.11] - 2026-02-13
+
+## [0.52.10] - 2026-02-12
+
+## [0.52.9] - 2026-02-08
+
+## [0.52.8] - 2026-02-07
+
+## [0.52.7] - 2026-02-06
+
+### Fixed
+
+- Fixed `continue()` to resume queued steering/follow-up messages when context currently ends in an assistant message, and preserved one-at-a-time steering ordering during assistant-tail resumes ([#1312](https://github.com/badlogic/pi-mono/pull/1312) by [@ferologics](https://github.com/ferologics))
+
+## [0.52.6] - 2026-02-05
+
+## [0.52.5] - 2026-02-05
+
+## [0.52.4] - 2026-02-05
+
+## [0.52.3] - 2026-02-05
+
+## [0.52.2] - 2026-02-05
+
+## [0.52.1] - 2026-02-05
+
+## [0.52.0] - 2026-02-05
+
+## [0.51.6] - 2026-02-04
+
+## [0.51.5] - 2026-02-04
+
+## [0.51.4] - 2026-02-03
+
+## [0.51.3] - 2026-02-03
+
+## [0.51.2] - 2026-02-03
+
+## [0.51.1] - 2026-02-02
+
+## [0.51.0] - 2026-02-01
+
+## [0.50.9] - 2026-02-01
+
+## [0.50.8] - 2026-02-01
+
+### Added
+
+- Added `maxRetryDelayMs` option to `AgentOptions` to cap server-requested retry delays. Passed through to the underlying stream function. ([#1123](https://github.com/badlogic/pi-mono/issues/1123))
+
+## [0.50.7] - 2026-01-31
+
+## [0.50.6] - 2026-01-30
+
+## [0.50.5] - 2026-01-30
+
+## [0.50.3] - 2026-01-29
+
+## [0.50.2] - 2026-01-29
+
+## [0.50.1] - 2026-01-26
+
+## [0.50.0] - 2026-01-26
+
+## [0.49.3] - 2026-01-22
+
+## [0.49.2] - 2026-01-19
+
+## [0.49.1] - 2026-01-18
+
+## [0.49.0] - 2026-01-17
+
+## [0.48.0] - 2026-01-16
+
+## [0.47.0] - 2026-01-16
+
+## [0.46.0] - 2026-01-15
+
+## [0.45.7] - 2026-01-13
+
+## [0.45.6] - 2026-01-13
+
+## [0.45.5] - 2026-01-13
+
+## [0.45.4] - 2026-01-13
+
+## [0.45.3] - 2026-01-13
+
+## [0.45.2] - 2026-01-13
+
+## [0.45.1] - 2026-01-13
+
+## [0.45.0] - 2026-01-13
+
+## [0.44.0] - 2026-01-12
+
+## [0.43.0] - 2026-01-11
+
+## [0.42.5] - 2026-01-11
+
+## [0.42.4] - 2026-01-10
+
+## [0.42.3] - 2026-01-10
+
+## [0.42.2] - 2026-01-10
+
+## [0.42.1] - 2026-01-09
+
+## [0.42.0] - 2026-01-09
+
+## [0.41.0] - 2026-01-09
+
+## [0.40.1] - 2026-01-09
+
+## [0.40.0] - 2026-01-08
+
+## [0.39.1] - 2026-01-08
+
+## [0.39.0] - 2026-01-08
+
+## [0.38.0] - 2026-01-08
+
+### Added
+
+- `thinkingBudgets` option on `Agent` and `AgentOptions` to customize token budgets per thinking level ([#529](https://github.com/badlogic/pi-mono/pull/529) by [@melihmucuk](https://github.com/melihmucuk))
+
+## [0.37.8] - 2026-01-07
+
+## [0.37.7] - 2026-01-07
+
+## [0.37.6] - 2026-01-06
+
+## [0.37.5] - 2026-01-06
+
+## [0.37.4] - 2026-01-06
+
+## [0.37.3] - 2026-01-06
+
+### Added
+
+- `sessionId` option on `Agent` to forward session identifiers to LLM providers for session-based caching.
+
+## [0.37.2] - 2026-01-05
+
+## [0.37.1] - 2026-01-05
+
+## [0.37.0] - 2026-01-05
+
+### Fixed
+
+- `minimal` thinking level now maps to `minimal` reasoning effort instead of being treated as `low`.
+
+## [0.36.0] - 2026-01-05
+
+## [0.35.0] - 2026-01-05
+
+## [0.34.2] - 2026-01-04
+
+## [0.34.1] - 2026-01-04
+
+## [0.34.0] - 2026-01-04
+
+## [0.33.0] - 2026-01-04
+
+## [0.32.3] - 2026-01-03
+
+## [0.32.2] - 2026-01-03
+
+## [0.32.1] - 2026-01-03
+
+## [0.32.0] - 2026-01-03
+
+### Breaking Changes
+
+- **Queue API replaced with steer/followUp**: The `queueMessage()` method has been split into two methods with different delivery semantics ([#403](https://github.com/badlogic/pi-mono/issues/403)):
+  - `steer(msg)`: Interrupts the agent mid-run. Delivered after current tool execution, skips remaining tools.
+  - `followUp(msg)`: Waits until the agent finishes. Delivered only when there are no more tool calls or steering messages.
+- **Queue mode renamed**: `queueMode` option renamed to `steeringMode`. Added new `followUpMode` option. Both control whether messages are delivered one-at-a-time or all at once.
+- **AgentLoopConfig callbacks renamed**: `getQueuedMessages` split into `getSteeringMessages` and `getFollowUpMessages`.
+- **Agent methods renamed**:
+  - `queueMessage()` → `steer()` and `followUp()`
+  - `clearMessageQueue()` → `clearSteeringQueue()`, `clearFollowUpQueue()`, `clearAllQueues()`
+  - `setQueueMode()`/`getQueueMode()` → `setSteeringMode()`/`getSteeringMode()` and `setFollowUpMode()`/`getFollowUpMode()`
+
+### Fixed
+
+- `prompt()` and `continue()` now throw if called while the agent is already streaming, preventing race conditions and corrupted state. Use `steer()` or `followUp()` to queue messages during streaming, or `await` the previous call.
+
+## [0.31.1] - 2026-01-02
+
+## [0.31.0] - 2026-01-02
+
+### Breaking Changes
+
+- **Transport abstraction removed**: `ProviderTransport`, `AppTransport`, and `AgentTransport` interface have been removed. Use the `streamFn` option directly for custom streaming implementations.
+
+- **Agent options renamed**:
+  - `transport` → removed (use `streamFn` instead)
+  - `messageTransformer` → `convertToLlm`
+  - `preprocessor` → `transformContext`
+
+- **`AppMessage` renamed to `AgentMessage`**: All references to `AppMessage` have been renamed to `AgentMessage` for consistency.
+
+- **`CustomMessages` renamed to `CustomAgentMessages`**: The declaration merging interface has been renamed.
+
+- **`UserMessageWithAttachments` and `Attachment` types removed**: Attachment handling is now the responsibility of the `convertToLlm` function.
+
+- **Agent loop moved from `@mariozechner/pi-ai`**: The `agentLoop`, `agentLoopContinue`, and related types have moved to this package. Import from `@mariozechner/pi-agent-core` instead.
+
+### Added
+
+- `streamFn` option on `Agent` for custom stream implementations. Default uses `streamSimple` from pi-ai.
+
+- `streamProxy()` utility function for browser apps that need to proxy LLM calls through a backend server. Replaces the removed `AppTransport`.
+
+- `getApiKey` option for dynamic API key resolution (useful for expiring OAuth tokens like GitHub Copilot).
+
+- `agentLoop()` and `agentLoopContinue()` low-level functions for running the agent loop without the `Agent` class wrapper.
+
+- New exported types: `AgentLoopConfig`, `AgentContext`, `AgentTool`, `AgentToolResult`, `AgentToolUpdateCallback`, `StreamFn`.
+
+### Changed
+
+- `Agent` constructor now has all options optional (empty options use defaults).
+
+- `queueMessage()` is now synchronous (no longer returns a Promise).

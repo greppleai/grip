@@ -1,0 +1,65 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
+	"plugins": ["./.grip/biome/noInlineFunctionObjectTypes.grit"],
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"complexity": {
+				"noExcessiveCognitiveComplexity": "error"
+			},
+			"style": {
+				"noNonNullAssertion": "off",
+				"useConst": "error",
+				"useNodejsImportProtocol": "off"
+			},
+			"suspicious": {
+				"noExplicitAny": "off",
+				"noControlCharactersInRegex": "off",
+				"noEmptyInterface": "off"
+			},
+			"performance": {
+				"noBarrelFile": "error"
+			}
+		}
+	},
+	"formatter": {
+		"enabled": true,
+		"formatWithErrors": false,
+		"indentStyle": "tab",
+		"indentWidth": 3,
+		"lineWidth": 120
+	},
+	"files": {
+		"includes": [
+			"packages/*/src/**/*.ts",
+			"packages/*/test/**/*.ts",
+			"packages/coding-agent/examples/**/*.ts",
+			"!!.worktrees",
+			"!**/node_modules/**/*",
+			"!**/test-sessions.ts",
+			"!**/models.generated.ts",
+			"!packages/mom/data/**/*",
+			"!!**/node_modules"
+		]
+	},
+	"overrides": [
+		{
+			"includes": [
+				"packages/agent/src/index.ts",
+				"packages/agent/src/node.ts",
+				"packages/ai/src/index.ts",
+				"packages/ai/src/oauth.ts",
+				"packages/coding-agent/src/index.ts",
+				"packages/tui/src/index.ts"
+			],
+			"linter": {
+				"rules": {
+					"performance": {
+						"noBarrelFile": "off"
+					}
+				}
+			}
+		}
+	]
+}

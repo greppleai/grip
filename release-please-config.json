@@ -1,0 +1,53 @@
+{
+	"$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+	"release-type": "node",
+	"initial-version": "0.0.1",
+	"bump-minor-pre-major": true,
+	"bump-patch-for-minor-pre-major": true,
+	"separate-pull-requests": false,
+	"plugins": [
+		{
+			"type": "node-workspace"
+		},
+		{
+			"type": "linked-versions",
+			"groupName": "pi",
+			"components": [
+				"@fleetagent/pi-ai",
+				"@fleetagent/pi-agent-core",
+				"@fleetagent/pi-tui",
+				"@greppleai/grip"
+			]
+		}
+	],
+	"packages": {
+		"packages/ai": {
+			"component": "@fleetagent/pi-ai",
+			"package-name": "@fleetagent/pi-ai",
+			"release-type": "node",
+			"initial-version": "0.0.1",
+			"changelog-path": "CHANGELOG.md"
+		},
+		"packages/agent": {
+			"component": "@fleetagent/pi-agent-core",
+			"package-name": "@fleetagent/pi-agent-core",
+			"release-type": "node",
+			"initial-version": "0.0.1",
+			"changelog-path": "CHANGELOG.md"
+		},
+		"packages/tui": {
+			"component": "@fleetagent/pi-tui",
+			"package-name": "@fleetagent/pi-tui",
+			"release-type": "node",
+			"initial-version": "0.0.1",
+			"changelog-path": "CHANGELOG.md"
+		},
+		"packages/coding-agent": {
+			"component": "@greppleai/grip",
+			"package-name": "@greppleai/grip",
+			"release-type": "node",
+			"initial-version": "0.0.1",
+			"changelog-path": "CHANGELOG.md"
+		}
+	}
+}

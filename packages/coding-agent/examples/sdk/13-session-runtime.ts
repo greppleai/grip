@@ -1,0 +1,49 @@
+#!/usr/bin/env tsx
+/**
+ * Session replacement
+ *
+ * Use GripAgent when you need to replace the active AgentSession, for example
+ * for new-session, resume, fork, or import flows.
+ *
+ * The important pattern is: after GripAgent replaces the active session, rebind
+ * any session-local subscriptions and extension bindings to `pi.session`.
+ */
+
+import { GripAgent, LocalSessionManager } from "@greppleai/grip-coding-agent";
+
+const pi = await GripAgent.create({
+	cwd: process.cwd(),
+	sessionManager: new LocalSessionManager({ cwd: process.cwd() }),
+});
+
+let unsubscribe: (() => void) | undefined;
+
+async function bindSession() {
+	unsubscribe?.();
+	const session = pi.session;
+	await session.bindExtensions({});
+	unsubscribe = session.subscribe((event) => {
+		if (event.type === "queue_update") {
+			console.log("Queued:", event.steering.length + event.followUp.length);
+		}
+	});
+	return session;
+}
+
+await pi.createAgentSession();
+let session = await bindSession();
+const originalSessionReference = session.sessionReference;
+console.log("Initial session:", originalSessionReference);
+
+await pi.newSession();
+session = await bindSession();
+console.log("After newSession():", session.sessionReference);
+
+if (originalSessionReference) {
+	await pi.switchSession(originalSessionReference);
+	session = await bindSession();
+	console.log("After switchSession():", session.sessionReference);
+}
+
+unsubscribe?.();
+await pi.dispose();

@@ -1,0 +1,45 @@
+import type { JsonlErrorPhase } from "../jsonl-errors.ts";
+import type { FileEntry, SessionEntry, SessionHeader, SessionTreeNode } from "../types.ts";
+
+export interface SessionReferenceOptions {
+	allowExistingEmptyFile?: boolean;
+}
+
+export interface SessionSnapshotOptions {
+	phase?: JsonlErrorPhase;
+}
+
+export interface SessionLabelSnapshot {
+	targetId: string;
+	label: string;
+	timestamp: string;
+}
+
+export interface SessionStore {
+	isPersisted(): boolean;
+	getSessionReference(): string | undefined;
+	setSessionReference(reference: string, options?: SessionReferenceOptions): void;
+	exists(path: string): boolean;
+	ensureDir(path: string): void;
+	load(filePath: string): FileEntry[];
+	setEntries(entries: FileEntry[]): void;
+	getFileEntries(): FileEntry[];
+	getHeader(): SessionHeader | null;
+	getEntries(): SessionEntry[];
+	getEntryIndex(): Map<string, SessionEntry>;
+	has(id: string): boolean;
+	appendEntry(entry: SessionEntry): void;
+	saveSnapshot(options?: SessionSnapshotOptions): void;
+	commitSnapshot(): void;
+	getLeafId(): string | null;
+	setLeafId(leafId: string | null): void;
+	getLeafEntry(): SessionEntry | undefined;
+	getEntry(id: string): SessionEntry | undefined;
+	getChildren(parentId: string): SessionEntry[];
+	getLabel(id: string): string | undefined;
+	getBranch(fromId?: string): SessionEntry[];
+	getTree(): SessionTreeNode[];
+	getSessionName(): string | undefined;
+	getLabelsForEntryIds(entryIds: Set<string>): SessionLabelSnapshot[];
+	hasAssistantMessage(): boolean;
+}

@@ -1,0 +1,77 @@
+import { fauxAssistantMessage } from "@greppleai/grip-ai";
+import { describe, expect, test, vi } from "vitest";
+import triggerCompactExtension from "../examples/extensions/trigger-compact.ts";
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionContext,
+	TurnEndEvent,
+} from "../src/core/extensions/types.ts";
+import { LocalToolOperations } from "../src/core/tools/operations.ts";
+
+function createContext(tokens: number | null, compact = vi.fn()): ExtensionContext {
+	return {
+		hasUI: false,
+		ui: {} as ExtensionContext["ui"],
+		cwd: process.cwd(),
+		toolOperations: new LocalToolOperations(process.cwd()),
+		getToolBackendInfo: () => ({ type: "local", cwd: process.cwd() }),
+		getLspStatus: () => ({
+			owner: "standalone",
+			enabled: false,
+			configuration: { enabled: false, servers: [] },
+			servers: [],
+		}),
+		configureLsp: async () => ({ enabled: false, servers: [] }),
+		execToolBackend: async () => ({ output: "", exitCode: 0, cancelled: false, truncated: false }),
+		session: {} as ExtensionContext["session"],
+		modelRegistry: {} as ExtensionContext["modelRegistry"],
+		model: undefined,
+		isIdle: () => true,
+		signal: undefined,
+		abort: vi.fn(),
+		hasPendingMessages: () => false,
+		shutdown: vi.fn(),
+		getContextUsage: () => ({ tokens, contextWindow: 200_000, percent: tokens === null ? null : tokens / 2000 }),
+		compact,
+		getSystemPrompt: () => "",
+	};
+}
+
+describe("trigger-compact example extension", () => {
+	test("only auto-compacts when context usage crosses the threshold", () => {
+		let turnEndHandler: ((event: TurnEndEvent, ctx: ExtensionContext | ExtensionCommandContext) => void) | undefined;
+
+		const api = {
+			on: (event: string, handler: (event: TurnEndEvent, ctx: ExtensionContext) => void) => {
+				if (event === "turn_end") {
+					turnEndHandler = handler;
+				}
+			},
+			registerCommand: vi.fn(),
+		} as unknown as ExtensionAPI;
+
+		triggerCompactExtension(api);
+		expect(turnEndHandler).toBeDefined();
+
+		const compact = vi.fn();
+		const event: TurnEndEvent = {
+			type: "turn_end",
+			turnIndex: 0,
+			message: fauxAssistantMessage(""),
+			toolResults: [],
+		};
+
+		turnEndHandler?.(event, createContext(110_000, compact));
+		expect(compact).not.toHaveBeenCalled();
+
+		turnEndHandler?.(event, createContext(120_000, compact));
+		expect(compact).not.toHaveBeenCalled();
+
+		turnEndHandler?.(event, createContext(95_000, compact));
+		expect(compact).not.toHaveBeenCalled();
+
+		turnEndHandler?.(event, createContext(105_000, compact));
+		expect(compact).toHaveBeenCalledTimes(1);
+	});
+});

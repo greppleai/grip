@@ -1,0 +1,15 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"paths": {
+			"@greppleai/grip": ["./src/index.ts"],
+			"@greppleai/grip/hooks": ["./src/core/hooks/index.ts"],
+			"@greppleai/grip-tui": ["../tui/src/index.ts"],
+			"@greppleai/grip-ai": ["../ai/src/index.ts"],
+		},
+		"skipLibCheck": true
+	},
+	"include": ["examples/**/*.ts"],
+	"exclude": ["node_modules", "dist"]
+}

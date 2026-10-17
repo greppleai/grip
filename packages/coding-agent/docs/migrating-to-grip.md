@@ -1,0 +1,18 @@
+# Migrating from Pi to Grip
+
+This is a breaking project rename. There is no `pi` executable alias, `PI_*` environment-variable fallback, or automatic lookup, move, or deletion of old `.pi` data. Back up your existing files before migrating; the old installation and data remain yours to manage.
+
+## Install and update integrations
+
+- Replace the `pi` command with `grip` in scripts, shell configuration, editor integrations, and automation. Uninstall the old CLI and install `@greppleai/grip` when that package is available in your registry; reinstall rather than assuming an existing `pi` install supplies `grip`. The project-owned SDK packages are now `@greppleai/grip-ai`, `@greppleai/grip-agent-core`, and `@greppleai/grip-tui`.
+- Update package dependencies, imports, extension code and lockfiles from project-owned `@fleetagent/pi-*` packages to their `@greppleai/grip-*` counterparts. For example, `PiAgent` is now `GripAgent`. Review other imported `Pi*` symbols against the current SDK exports. Third-party `@mariozechner/pi-*` specifiers are not project-owned npm package names; do not blindly rewrite them.
+- Replace `PI_*` variables consumed by this project with their `GRIP_*` equivalents, including `GRIP_CODING_AGENT_DIR` and `GRIP_CODING_AGENT_SESSION_DIR` if you set custom locations. Provider variables such as `ANTHROPIC_API_KEY` are not part of this rename. Review service-specific daemon and sandbox settings before restarting those services.
+
+## Move configuration manually
+
+- The default global agent directory is now `~/.grip/agent` instead of `~/.pi/agent`; project configuration lives in `.grip` instead of `.pi`. After making a backup, copy only the settings, models, themes, extensions, prompts, skills, rules, and other resources you want to keep into their matching new directories. Update absolute and relative references inside settings, package manifests, scripts, and resources. Do not overwrite newer files without reviewing them.
+- Settings are read from `~/.grip/agent/settings.json` and `<project>/.grip/settings.json`. Package resources previously declared under the `pi` key in a package's `package.json` must use `grip`; the coding-agent package configuration key is now `gripConfig` instead of `piConfig`. If you distribute packages, update their package metadata and references as well.
+- Sessions are stored under the new agent directory by default. Existing JSONL sessions in `~/.pi/agent/sessions` are **not** discovered or moved automatically; copy only those you want to continue, preserving their directory structure. Review project-path references and file permissions before opening them. Export or back up sessions separately if you cannot safely reuse them.
+- Authentication credentials in `~/.pi/agent/auth.json` are **not** imported automatically. If you choose to copy credentials to `~/.grip/agent/auth.json`, keep the file private and verify that authentication works; otherwise reauthenticate with `/login` or configure provider API keys. Never paste credentials into public logs or issue reports.
+
+Reinstall extensions or package dependencies that refer to old project-owned package names and restart Grip after updating files. No compatibility aliases or automatic migration are planned. Keep the old directory until you have checked sessions, settings, auth, and extensions in the new installation; do not delete it as part of installation.

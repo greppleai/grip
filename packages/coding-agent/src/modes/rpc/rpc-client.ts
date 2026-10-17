@@ -1,0 +1,969 @@
+/**
+ * RPC Client for programmatic access to the coding agent.
+ *
+ * Spawns the agent in RPC mode and provides a typed API for all operations.
+ */
+
+import { type ChildProcess, spawn } from "node:child_process";
+import type { AgentMessage, AgentToolResult, QueueMode, ThinkingLevel } from "@greppleai/grip-agent-core";
+import type { ImageContent } from "@greppleai/grip-ai";
+import type { Static, TSchema } from "typebox";
+import type {
+	ForkableUserMessage,
+	SessionStats,
+	StructuredResponse,
+	StructuredResponseOptions,
+} from "../../core/agent-session.ts";
+import type { BashResult } from "../../core/bash-executor.ts";
+import type { CompactionResult } from "../../core/compaction/compaction.ts";
+import type { ToolInfo } from "../../core/extensions/types.ts";
+import type { SessionEntry, SessionInfo, SessionTreeNode } from "../../core/session/types.ts";
+import type { ToolBackendInfo } from "../../core/tools/operations.ts";
+import type { JsonAgentSessionEvent } from "../json-event.ts";
+import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
+import type {
+	RpcClientListSessionsResponse,
+	RpcCommand,
+	RpcEntriesResponseData,
+	RpcForkMessagesResponseData,
+	RpcInstructionDefinition,
+	RpcListSessionsOptions,
+	RpcListSessionsResponse,
+	RpcResponse,
+	RpcSessionState,
+	RpcSlashCommand,
+	RpcToolCallRequest,
+	RpcToolDefinition,
+	RpcTreeResponseData,
+} from "./rpc-types.ts";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+/** Distributive Omit that works with union types */
+type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
+
+/** RpcCommand without the id field (for internal send) */
+export type RpcCommandBody = DistributiveOmit<RpcCommand, "id">;
+
+export interface RpcClientStartCommand {
+	/** Executable to spawn. */
+	command: string;
+	/** Arguments passed to the executable. */
+	args: string[];
+}
+
+export interface RpcClientOptions {
+	/** Path to the CLI entry point (default: searches for dist/cli.js) */
+	cliPath?: string;
+	/** Override the process command used to start the RPC agent. */
+	startCommand?: RpcClientStartCommand | ((defaultCommand: RpcClientStartCommand) => RpcClientStartCommand);
+	/** Working directory for the agent */
+	cwd?: string;
+	/** Environment variables */
+	env?: Record<string, string>;
+	/** Provider to use */
+	provider?: string;
+	/** Model ID to use */
+	model?: string;
+	/** Additional CLI arguments */
+	args?: string[];
+}
+
+export interface ModelInfo {
+	provider: string;
+	id: string;
+	contextWindow: number;
+	reasoning: boolean;
+}
+export type RpcEventListener = (event: JsonAgentSessionEvent) => void;
+
+export interface RpcToolHandlerContext {
+	toolName: string;
+	toolCallId: string;
+	signal: AbortSignal;
+}
+
+export interface RpcNewSessionOptions {
+	sessionId?: string;
+	parentSession?: string;
+}
+
+export interface RpcSessionActionResult {
+	cancelled: boolean;
+}
+
+// pi-ignore noNearIdenticalDataStructures: RPC wire model selection and faux-provider test response overrides evolve under separate protocol and fixture ownership.
+export interface RpcModelReference {
+	provider: string;
+	id: string;
+}
+
+export interface RpcModelCycleResult {
+	model: RpcModelReference;
+	thinkingLevel: ThinkingLevel;
+	isScoped: boolean;
+}
+
+export interface RpcThinkingLevelCycleResult {
+	level: ThinkingLevel;
+}
+
+export interface RpcBashOptions {
+	record?: boolean;
+	truncate?: boolean;
+	excludeFromContext?: boolean;
+}
+
+export interface RpcDaemonSandboxOptions {
+	backend: "daemon";
+	url: string;
+	token?: string;
+}
+
+export interface RpcFileTransferResult {
+	bytes: number;
+}
+
+export interface RpcExportHtmlResult {
+	path: string;
+}
+
+export interface RpcForkResult extends RpcSessionActionResult {
+	text: string;
+}
+
+export type RpcEntriesResult = RpcEntriesResponseData;
+
+export type RpcTreeResult = RpcTreeResponseData;
+
+export interface RpcUnregisterResult {
+	unregistered: boolean;
+}
+
+export type RpcToolHandler = (
+	args: unknown,
+	context: RpcToolHandlerContext,
+) => Promise<AgentToolResult<unknown>> | AgentToolResult<unknown>;
+
+// ============================================================================
+// RPC Client
+// ============================================================================
+
+export class RpcClient {
+	private process: ChildProcess | null = null;
+	private stopReadingStdout: (() => void) | null = null;
+	private eventListeners: RpcEventListener[] = [];
+	private terminationListeners = new Set<(error: Error) => void>();
+	private pendingRequests: Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }> =
+		new Map();
+	private toolHandlers: Map<string, RpcToolHandler> = new Map();
+	private activeToolCalls: Map<string, AbortController> = new Map();
+	private requestId = 0;
+	private stderr = "";
+	private exitError: Error | null = null;
+	private options: RpcClientOptions;
+
+	constructor(options: RpcClientOptions = {}) {
+		this.options = options;
+	}
+
+	/**
+	 * Start the RPC agent process.
+	 */
+	async start(): Promise<void> {
+		if (this.process) {
+			throw new Error("Client already started");
+		}
+
+		this.exitError = null;
+
+		const cliPath = this.options.cliPath ?? "dist/cli.ts";
+		const args = ["--mode", "rpc"];
+
+		if (this.options.provider) {
+			args.push("--provider", this.options.provider);
+		}
+		if (this.options.model) {
+			args.push("--model", this.options.model);
+		}
+		if (this.options.args) {
+			args.push(...this.options.args);
+		}
+
+		const defaultStartCommand: RpcClientStartCommand = { command: "node", args: [cliPath, ...args] };
+		const startCommand =
+			typeof this.options.startCommand === "function"
+				? this.options.startCommand(defaultStartCommand)
+				: (this.options.startCommand ?? defaultStartCommand);
+
+		const childProcess = spawn(startCommand.command, startCommand.args, {
+			cwd: this.options.cwd,
+			env: { ...process.env, ...this.options.env },
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		this.process = childProcess;
+
+		// Collect stderr for debugging
+		childProcess.stderr?.on("data", (data) => {
+			this.stderr += data.toString();
+			process.stderr.write(data);
+		});
+
+		childProcess.once("exit", (code, signal) => {
+			if (this.process !== childProcess) return;
+			const error = this.createProcessExitError(code, signal);
+			this.exitError = error;
+			this.rejectPendingRequests(error);
+		});
+		childProcess.once("error", (error) => {
+			if (this.process !== childProcess) return;
+			const processError = new Error(`Agent process error: ${error.message}. Stderr: ${this.stderr}`);
+			this.exitError = processError;
+			this.rejectPendingRequests(processError);
+		});
+		childProcess.stdin?.on("error", (error) => {
+			if (this.process !== childProcess) return;
+			const stdinError =
+				this.exitError ?? new Error(`Agent process stdin error: ${error.message}. Stderr: ${this.stderr}`);
+			this.exitError = stdinError;
+			this.rejectPendingRequests(stdinError);
+		});
+
+		// Set up strict JSONL reader for stdout.
+		this.stopReadingStdout = attachJsonlLineReader(childProcess.stdout!, (line) => {
+			this.handleLine(line);
+		});
+
+		// Wait a moment for process to initialize
+		await new Promise((resolve) => setTimeout(resolve, 100));
+
+		if (this.process.exitCode !== null) {
+			const error = this.exitError ?? this.createProcessExitError(this.process.exitCode, this.process.signalCode);
+			this.exitError = error;
+			throw error;
+		}
+	}
+
+	/**
+	 * Stop the RPC agent process.
+	 */
+	async stop(): Promise<void> {
+		if (!this.process) return;
+
+		this.stopReadingStdout?.();
+		this.stopReadingStdout = null;
+		this.process.kill("SIGTERM");
+
+		// Wait for process to exit
+		await new Promise<void>((resolve) => {
+			const timeout = setTimeout(() => {
+				this.process?.kill("SIGKILL");
+				resolve();
+			}, 1000);
+
+			this.process?.on("exit", () => {
+				clearTimeout(timeout);
+				resolve();
+			});
+		});
+
+		this.process = null;
+		this.pendingRequests.clear();
+		for (const controller of this.activeToolCalls.values()) {
+			controller.abort();
+		}
+		this.activeToolCalls.clear();
+	}
+
+	/**
+	 * Subscribe to agent events.
+	 */
+	onEvent(listener: RpcEventListener): () => void {
+		this.eventListeners.push(listener);
+		return () => {
+			const index = this.eventListeners.indexOf(listener);
+			if (index !== -1) {
+				this.eventListeners.splice(index, 1);
+			}
+		};
+	}
+
+	/**
+	 * Get collected stderr output (useful for debugging).
+	 */
+	getStderr(): string {
+		return this.stderr;
+	}
+
+	// =========================================================================
+	// Command Methods
+	// =========================================================================
+
+	/**
+	 * Send a prompt to the agent.
+	 * Returns immediately after sending; use onEvent() to receive streaming events.
+	 * Use waitForIdle() to wait for completion.
+	 */
+	async prompt(message: string, images?: ImageContent[]): Promise<void> {
+		await this.send({ type: "prompt", message, images });
+	}
+
+	/**
+	 * Extract a structured response from the latest assistant response.
+	 */
+	async getStructuredResponse<TSchemaValue extends TSchema>(
+		options: StructuredResponseOptions<TSchemaValue>,
+	): Promise<StructuredResponse<Static<TSchemaValue>>> {
+		const response = await this.send({ type: "get_structured_response", ...options });
+		return this.getData(response);
+	}
+
+	/**
+	 * Queue a steering message to interrupt the agent mid-run.
+	 */
+	async steer(message: string, images?: ImageContent[]): Promise<void> {
+		await this.send({ type: "steer", message, images });
+	}
+
+	/**
+	 * Queue a follow-up message to be processed after the agent finishes.
+	 */
+	async followUp(message: string, images?: ImageContent[]): Promise<void> {
+		await this.send({ type: "follow_up", message, images });
+	}
+
+	/**
+	 * Abort current operation.
+	 */
+	async abort(): Promise<void> {
+		await this.send({ type: "abort" });
+	}
+
+	/**
+	 * Start a new session, optionally with an explicit id and parent tracking.
+	 * @returns Object with `cancelled: true` if an extension cancelled the new session
+	 */
+	async newSession(options?: string | RpcNewSessionOptions): Promise<RpcSessionActionResult> {
+		const sessionOptions = typeof options === "string" ? { parentSession: options } : options;
+		const response = await this.send({
+			type: "new_session",
+			sessionId: sessionOptions?.sessionId,
+			parentSession: sessionOptions?.parentSession,
+		});
+		return this.getData(response);
+	}
+
+	/**
+	 * List sessions visible to this runtime. Results are paginated to avoid large RPC responses.
+	 */
+	async listSessions(options: RpcListSessionsOptions = {}): Promise<RpcClientListSessionsResponse> {
+		const response = await this.send({ type: "list_sessions", cursor: options.cursor, limit: options.limit });
+		const data = this.getData<RpcListSessionsResponse>(response);
+		return {
+			sessions: data.sessions.map((session) => reviveSessionInfo(session)),
+			nextCursor: data.nextCursor,
+		};
+	}
+
+	/**
+	 * Get current session state.
+	 */
+	async getState(): Promise<RpcSessionState> {
+		const response = await this.send({ type: "get_state" });
+		return this.getData(response);
+	}
+
+	/**
+	 * Set model by provider and ID.
+	 */
+	async setModel(provider: string, modelId: string): Promise<RpcModelReference> {
+		const response = await this.send({ type: "set_model", provider, modelId });
+		return this.getData(response);
+	}
+
+	/**
+	 * Cycle to next model.
+	 */
+	async cycleModel(): Promise<RpcModelCycleResult | null> {
+		const response = await this.send({ type: "cycle_model" });
+		return this.getData(response);
+	}
+
+	/**
+	 * Get list of available models.
+	 */
+	async getAvailableModels(): Promise<ModelInfo[]> {
+		const response = await this.send({ type: "get_available_models" });
+		return this.getData<{ models: ModelInfo[] }>(response).models;
+	}
+
+	/**
+	 * Set thinking level.
+	 */
+	async setThinkingLevel(level: ThinkingLevel): Promise<void> {
+		await this.send({ type: "set_thinking_level", level });
+	}
+
+	/**
+	 * Cycle thinking level.
+	 */
+	async cycleThinkingLevel(): Promise<RpcThinkingLevelCycleResult | null> {
+		const response = await this.send({ type: "cycle_thinking_level" });
+		return this.getData(response);
+	}
+
+	/**
+	 * Set steering mode.
+	 */
+	async setSteeringMode(mode: QueueMode): Promise<void> {
+		await this.send({ type: "set_steering_mode", mode });
+	}
+
+	/**
+	 * Set follow-up mode.
+	 */
+	async setFollowUpMode(mode: QueueMode): Promise<void> {
+		await this.send({ type: "set_follow_up_mode", mode });
+	}
+
+	/**
+	 * Compact session context.
+	 */
+	async compact(customInstructions?: string): Promise<CompactionResult> {
+		const response = await this.send({ type: "compact", customInstructions });
+		return this.getData(response);
+	}
+
+	/**
+	 * Set auto-compaction enabled/disabled.
+	 */
+	async setAutoCompaction(enabled: boolean): Promise<void> {
+		await this.send({ type: "set_auto_compaction", enabled });
+	}
+
+	/**
+	 * Set auto-retry enabled/disabled.
+	 */
+	async setAutoRetry(enabled: boolean): Promise<void> {
+		await this.send({ type: "set_auto_retry", enabled });
+	}
+
+	/**
+	 * Abort in-progress retry.
+	 */
+	async abortRetry(): Promise<void> {
+		await this.send({ type: "abort_retry" });
+	}
+
+	/**
+	 * Execute a bash command.
+	 * Set options.record to false to avoid adding the result to session history.
+	 * Set options.truncate to false to return complete output.
+	 */
+	async bash(command: string, options: RpcBashOptions = {}): Promise<BashResult> {
+		const response = await this.send({
+			type: "bash",
+			command,
+			record: options.record,
+			truncate: options.truncate,
+			excludeFromContext: options.excludeFromContext,
+		});
+		return this.getData(response);
+	}
+
+	/**
+	 * Abort running bash command.
+	 */
+	async abortBash(): Promise<void> {
+		await this.send({ type: "abort_bash" });
+	}
+
+	/**
+	 * Configure or reconfigure the deferred remote sandbox.
+	 */
+	async setRemoteSandbox(options: RpcDaemonSandboxOptions): Promise<ToolBackendInfo> {
+		const response = await this.send({ type: "set_remote_sandbox", ...options });
+		return this.getData(response);
+	}
+
+	/**
+	 * Clear the deferred remote sandbox configuration.
+	 */
+	async clearRemoteSandbox(): Promise<ToolBackendInfo> {
+		const response = await this.send({ type: "clear_remote_sandbox" });
+		return this.getData(response);
+	}
+
+	/**
+	 * Upload a file from the RPC process filesystem to the active sandbox backend.
+	 */
+	async uploadFile(sourcePath: string, destinationPath: string): Promise<RpcFileTransferResult> {
+		const response = await this.send({ type: "upload_file", sourcePath, destinationPath });
+		return this.getData(response);
+	}
+
+	/**
+	 * Download a file from the active sandbox backend to the RPC process filesystem.
+	 */
+	async downloadFile(sourcePath: string, destinationPath: string): Promise<RpcFileTransferResult> {
+		const response = await this.send({ type: "download_file", sourcePath, destinationPath });
+		return this.getData(response);
+	}
+
+	/**
+	 * Get session statistics.
+	 */
+	async getSessionStats(): Promise<SessionStats> {
+		const response = await this.send({ type: "get_session_stats" });
+		return this.getData(response);
+	}
+
+	/**
+	 * Export session to HTML.
+	 */
+	async exportHtml(outputPath?: string): Promise<RpcExportHtmlResult> {
+		const response = await this.send({ type: "export_html", outputPath });
+		return this.getData(response);
+	}
+
+	/**
+	 * Switch to a different session file.
+	 * @returns Object with `cancelled: true` if an extension cancelled the switch
+	 */
+	async switchSession(sessionPath: string): Promise<RpcSessionActionResult> {
+		const response = await this.send({ type: "switch_session", sessionPath });
+		return this.getData(response);
+	}
+
+	/**
+	 * Fork from a specific message.
+	 * @returns Object with `text` (the message text) and `cancelled` (if extension cancelled)
+	 */
+	async fork(entryId: string): Promise<RpcForkResult> {
+		const response = await this.send({ type: "fork", entryId });
+		return this.getData(response);
+	}
+
+	/**
+	 * Clone the current active branch into a new session.
+	 * @returns Object with `cancelled: true` if an extension cancelled the clone
+	 */
+	async clone(): Promise<RpcSessionActionResult> {
+		const response = await this.send({ type: "clone" });
+		return this.getData(response);
+	}
+
+	/**
+	 * Get messages available for forking.
+	 */
+	async getForkMessages(): Promise<ForkableUserMessage[]> {
+		const response = await this.send({ type: "get_fork_messages" });
+		return this.getData<RpcForkMessagesResponseData>(response).messages;
+	}
+
+	/**
+	 * Get session entries in append order, optionally only those after the `since` entry id.
+	 */
+	async getEntries(since?: string): Promise<RpcEntriesResult> {
+		const response = await this.send({ type: "get_entries", since });
+		return this.getData<{ entries: SessionEntry[]; leafId: string | null }>(response);
+	}
+
+	/**
+	 * Get the session entry tree.
+	 */
+	async getTree(): Promise<RpcTreeResult> {
+		const response = await this.send({ type: "get_tree" });
+		return this.getData<{ tree: SessionTreeNode[]; leafId: string | null }>(response);
+	}
+
+	/**
+	 * Get text of last assistant message.
+	 */
+	async getLastAssistantText(): Promise<string | null> {
+		const response = await this.send({ type: "get_last_assistant_text" });
+		return this.getData<{ text: string | null }>(response).text;
+	}
+
+	/**
+	 * Set the session display name.
+	 */
+	async setSessionName(name: string): Promise<void> {
+		await this.send({ type: "set_session_name", name });
+	}
+
+	/**
+	 * Get all messages in the session.
+	 */
+	async getMessages(): Promise<AgentMessage[]> {
+		const response = await this.send({ type: "get_messages" });
+		return this.getData<{ messages: AgentMessage[] }>(response).messages;
+	}
+
+	/**
+	 * Get available commands (extension commands, prompt templates, skills).
+	 */
+	async getCommands(): Promise<RpcSlashCommand[]> {
+		const response = await this.send({ type: "get_commands" });
+		return this.getData<{ commands: RpcSlashCommand[] }>(response).commands;
+	}
+
+	/** Register a session-scoped skill in the active RPC agent session. */
+	async registerSkill(skill: RpcInstructionDefinition): Promise<void> {
+		await this.send({ type: "register_skill", skill });
+	}
+
+	/** Remove a session-scoped skill from the active RPC agent session. */
+	async unregisterSkill(name: string): Promise<RpcUnregisterResult> {
+		const response = await this.send({ type: "unregister_skill", name });
+		return this.getData(response);
+	}
+
+	/** Register a session-scoped rule in the active RPC agent session. */
+	async registerRule(rule: RpcInstructionDefinition): Promise<void> {
+		await this.send({ type: "register_rule", rule });
+	}
+
+	/** Remove a session-scoped rule from the active RPC agent session. */
+	async unregisterRule(name: string): Promise<RpcUnregisterResult> {
+		const response = await this.send({ type: "unregister_rule", name });
+		return this.getData(response);
+	}
+
+	/**
+	 * Register a session-scoped RPC-hosted tool. Lazy tools are advertised in the
+	 * system prompt and become active only after the agent calls load_tool.
+	 */
+	async registerTool(tool: RpcToolDefinition, handler: RpcToolHandler): Promise<void> {
+		this.toolHandlers.set(tool.name, handler);
+		try {
+			await this.send({ type: "register_tool", tool });
+		} catch (error) {
+			this.toolHandlers.delete(tool.name);
+			throw error;
+		}
+	}
+
+	/** Remove a session-scoped RPC-hosted tool from the active RPC agent session. */
+	async unregisterTool(name: string): Promise<RpcUnregisterResult> {
+		this.toolHandlers.delete(name);
+		const response = await this.send({ type: "unregister_tool", name });
+		return this.getData(response);
+	}
+
+	/** List session-scoped RPC-hosted tools registered with the active session. */
+	async getAvailableTools(): Promise<ToolInfo[]> {
+		const response = await this.send({ type: "get_available_tools" });
+		return this.getData<{ tools: ToolInfo[] }>(response).tools;
+	}
+
+	// =========================================================================
+	// Helpers
+	// =========================================================================
+
+	/** Wait for the full session lifecycle to settle. */
+	waitForIdle(timeout = 5 * 60 * 1000): Promise<void> {
+		return new Promise((resolve, reject) => {
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			let finished = false;
+			let unsubscribe = () => {};
+			let unsubscribeTermination = () => {};
+			const finish = (error?: Error) => {
+				if (finished) return;
+				finished = true;
+				if (timer) clearTimeout(timer);
+				unsubscribe();
+				unsubscribeTermination();
+				if (error) reject(error);
+				else resolve();
+			};
+			const resetTimer = () => {
+				if (timer) clearTimeout(timer);
+				timer = setTimeout(
+					() => finish(new Error(`Timeout waiting for agent to become idle. Stderr: ${this.stderr}`)),
+					timeout,
+				);
+			};
+			unsubscribe = this.onEvent((event) => {
+				resetTimer();
+				if (event.type === "agent_settled") finish();
+			});
+			unsubscribeTermination = this.onTermination((error) => finish(error));
+			resetTimer();
+			void this.getState().then(
+				(state) => {
+					if (state.isIdle) finish();
+				},
+				(error: unknown) => finish(error instanceof Error ? error : new Error(String(error))),
+			);
+		});
+	}
+
+	/**
+	 * Collect events until agent becomes idle.
+	 * The timeout is an inactivity timeout that resets each time an event is received.
+	 */
+	collectEvents(timeout = 5 * 60 * 1000): Promise<JsonAgentSessionEvent[]> {
+		return new Promise((resolve, reject) => {
+			const events: JsonAgentSessionEvent[] = [];
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			let finished = false;
+			let unsubscribe = () => {};
+			let unsubscribeTermination = () => {};
+			const finish = (error?: Error) => {
+				if (finished) return;
+				finished = true;
+				if (timer) clearTimeout(timer);
+				unsubscribe();
+				unsubscribeTermination();
+				if (error) reject(error);
+				else resolve(events);
+			};
+			const resetTimer = () => {
+				if (timer) clearTimeout(timer);
+				timer = setTimeout(() => finish(new Error(`Timeout collecting events. Stderr: ${this.stderr}`)), timeout);
+			};
+
+			unsubscribe = this.onEvent((event) => {
+				events.push(event);
+				resetTimer();
+				if (event.type === "agent_settled") finish();
+			});
+			unsubscribeTermination = this.onTermination((error) => finish(error));
+			resetTimer();
+		});
+	}
+
+	/**
+	 * Send prompt and wait for completion, returning all events.
+	 */
+	async promptAndWait(
+		message: string,
+		images?: ImageContent[],
+		timeout = 5 * 60 * 1000,
+	): Promise<JsonAgentSessionEvent[]> {
+		const events: JsonAgentSessionEvent[] = [];
+		let accepted = false;
+		let sawAgentStart = false;
+		let settledAfterStart = false;
+		let finished = false;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let unsubscribe = () => {};
+		let unsubscribeTermination = () => {};
+		let resolveCompletion = (_events: JsonAgentSessionEvent[]) => {};
+		let rejectCompletion = (_error: Error) => {};
+		const completion = new Promise<JsonAgentSessionEvent[]>((resolve, reject) => {
+			resolveCompletion = resolve;
+			rejectCompletion = reject;
+		});
+		const finish = (error?: Error) => {
+			if (finished) return;
+			finished = true;
+			if (timer) clearTimeout(timer);
+			unsubscribe();
+			unsubscribeTermination();
+			if (error) rejectCompletion(error);
+			else resolveCompletion(events);
+		};
+		const resetTimer = () => {
+			if (timer) clearTimeout(timer);
+			timer = setTimeout(() => finish(new Error(`Timeout collecting events. Stderr: ${this.stderr}`)), timeout);
+		};
+		unsubscribe = this.onEvent((event) => {
+			resetTimer();
+			if (!sawAgentStart) {
+				if (event.type !== "agent_start") return;
+				sawAgentStart = true;
+			}
+			events.push(event);
+			if (event.type === "agent_settled") {
+				settledAfterStart = true;
+				if (accepted) finish();
+			}
+		});
+		resetTimer();
+
+		try {
+			await this.prompt(message, images);
+		} catch (error) {
+			finished = true;
+			if (timer) clearTimeout(timer);
+			unsubscribe();
+			throw error;
+		}
+		accepted = true;
+		unsubscribeTermination = this.onTermination((error) => finish(error));
+		if (settledAfterStart) finish();
+		else {
+			void this.getState().then(
+				(state) => {
+					if (state.isIdle && !sawAgentStart) finish();
+				},
+				(error: unknown) => finish(error instanceof Error ? error : new Error(String(error))),
+			);
+		}
+		return completion;
+	}
+
+	// =========================================================================
+	// Internal
+	// =========================================================================
+
+	private handleLine(line: string): void {
+		try {
+			const data = JSON.parse(line);
+
+			if (data.type === "rpc_tool_call") {
+				void this.handleRpcToolCall(data as RpcToolCallRequest);
+				return;
+			}
+
+			// Check if it's a response to a pending request
+			if (data.type === "response" && data.id && this.pendingRequests.has(data.id)) {
+				const pending = this.pendingRequests.get(data.id)!;
+				this.pendingRequests.delete(data.id);
+				pending.resolve(data as RpcResponse);
+				return;
+			}
+
+			// Otherwise it's an event
+			for (const listener of this.eventListeners) {
+				listener(data as JsonAgentSessionEvent);
+			}
+		} catch {
+			// Ignore non-JSON lines
+		}
+	}
+
+	private async handleRpcToolCall(request: RpcToolCallRequest): Promise<void> {
+		const handler = this.toolHandlers.get(request.toolName);
+		if (!handler) {
+			this.writeFireAndForget({
+				type: "rpc_tool_error",
+				requestId: request.requestId,
+				error: `No RPC tool handler registered for ${request.toolName}`,
+			});
+			return;
+		}
+
+		const abortController = new AbortController();
+		this.activeToolCalls.set(request.requestId, abortController);
+		try {
+			const result = await handler(request.args, {
+				toolName: request.toolName,
+				toolCallId: request.toolCallId,
+				signal: abortController.signal,
+			});
+			this.writeFireAndForget({ type: "rpc_tool_result", requestId: request.requestId, result });
+		} catch (error: unknown) {
+			this.writeFireAndForget({
+				type: "rpc_tool_error",
+				requestId: request.requestId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		} finally {
+			this.activeToolCalls.delete(request.requestId);
+		}
+	}
+
+	private createProcessExitError(code: number | null, signal: NodeJS.Signals | null): Error {
+		return new Error(`Agent process exited (code=${code} signal=${signal}). Stderr: ${this.stderr}`);
+	}
+
+	private rejectPendingRequests(error: Error): void {
+		for (const pending of this.pendingRequests.values()) {
+			pending.reject(error);
+		}
+		this.pendingRequests.clear();
+		for (const listener of [...this.terminationListeners]) listener(error);
+	}
+
+	private onTermination(listener: (error: Error) => void): () => void {
+		if (this.exitError) {
+			listener(this.exitError);
+			return () => {};
+		}
+		this.terminationListeners.add(listener);
+		return () => this.terminationListeners.delete(listener);
+	}
+
+	private writeFireAndForget(command: RpcCommandBody): void {
+		const stdin = this.process?.stdin;
+		if (!stdin || stdin.destroyed || !stdin.writable) {
+			return;
+		}
+		stdin.write(serializeJsonLine(command));
+	}
+
+	private async send(command: RpcCommandBody): Promise<RpcResponse> {
+		const childProcess = this.process;
+		const stdin = childProcess?.stdin;
+		if (!childProcess || !stdin) {
+			throw new Error("Client not started");
+		}
+		if (this.exitError) {
+			throw this.exitError;
+		}
+		if (childProcess.exitCode !== null) {
+			const error = this.createProcessExitError(childProcess.exitCode, childProcess.signalCode);
+			this.exitError = error;
+			throw error;
+		}
+		if (stdin.destroyed || !stdin.writable) {
+			const error = new Error(`Agent process stdin is not writable. Stderr: ${this.stderr}`);
+			this.exitError = error;
+			throw error;
+		}
+
+		const id = `req_${++this.requestId}`;
+		const fullCommand = { ...command, id } as RpcCommand;
+
+		return new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => {
+				this.pendingRequests.delete(id);
+				reject(new Error(`Timeout waiting for response to ${command.type}. Stderr: ${this.stderr}`));
+			}, 30000);
+
+			this.pendingRequests.set(id, {
+				resolve: (response) => {
+					clearTimeout(timeout);
+					resolve(response);
+				},
+				reject: (error) => {
+					clearTimeout(timeout);
+					reject(error);
+				},
+			});
+
+			try {
+				stdin.write(serializeJsonLine(fullCommand));
+			} catch (error: unknown) {
+				const writeError = error instanceof Error ? error : new Error(String(error));
+				const pending = this.pendingRequests.get(id);
+				this.pendingRequests.delete(id);
+				pending?.reject(writeError);
+			}
+		});
+	}
+
+	private getData<T>(response: RpcResponse): T {
+		if (!response.success) {
+			const errorResponse = response as Extract<RpcResponse, { success: false }>;
+			throw new Error(errorResponse.error);
+		}
+		// Type assertion: we trust response.data matches T based on the command sent.
+		// This is safe because each public method specifies the correct T for its command.
+		const successResponse = response as Extract<RpcResponse, { success: true; data: unknown }>;
+		return successResponse.data as T;
+	}
+}
+
+function reviveSessionInfo(session: SessionInfo): SessionInfo {
+	return {
+		...session,
+		created: new Date(session.created),
+		modified: new Date(session.modified),
+	};
+}

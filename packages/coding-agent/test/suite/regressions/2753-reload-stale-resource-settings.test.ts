@@ -1,0 +1,81 @@
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { registerFauxProvider } from "@greppleai/grip-ai";
+import { afterEach, describe, expect, it } from "vitest";
+import { AuthStorage } from "../../../src/core/auth-storage.ts";
+import { GripAgent } from "../../../src/core/grip-agent.ts";
+import { LocalSessionManager } from "../../../src/core/session/local-session-manager.ts";
+
+describe("issue #2753 reload stale resource settings", () => {
+	const cleanups: Array<() => void> = [];
+
+	afterEach(() => {
+		while (cleanups.length > 0) {
+			cleanups.pop()?.();
+		}
+	});
+
+	it("applies updated top-level prompt settings on reload after startup", async () => {
+		const tempDir = join(tmpdir(), `pi-2753-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const agentDir = join(tempDir, "agent");
+		const promptsDir = join(agentDir, "prompts");
+		mkdirSync(promptsDir, { recursive: true });
+		writeFileSync(join(promptsDir, "test.md"), "Echo test prompt\n");
+
+		const faux = registerFauxProvider({
+			models: [{ id: "faux-1", reasoning: false }],
+		});
+		const authStorage = AuthStorage.inMemory();
+		authStorage.setRuntimeApiKey(faux.getModel().provider, "faux-key");
+
+		const runtime = await GripAgent.create({
+			cwd: tempDir,
+			agentDir,
+			authStorage,
+			sessionManager: new LocalSessionManager({ cwd: tempDir }),
+			resourceLoaderOptions: {
+				extensionFactories: [
+					(pi) => {
+						pi.registerProvider(faux.getModel().provider, {
+							baseUrl: faux.getModel().baseUrl,
+							apiKey: "faux-key",
+							api: faux.api,
+							models: faux.models.map((registeredModel) => ({
+								id: registeredModel.id,
+								name: registeredModel.name,
+								api: registeredModel.api,
+								reasoning: registeredModel.reasoning,
+								input: registeredModel.input,
+								cost: registeredModel.cost,
+								contextWindow: registeredModel.contextWindow,
+								maxTokens: registeredModel.maxTokens,
+							})),
+						});
+					},
+				],
+				noSkills: true,
+				noThemes: true,
+			},
+			resolveSessionOptions: () => ({ model: faux.getModel() }),
+		});
+		await runtime.createAgentSession();
+
+		cleanups.push(() => {
+			runtime.session.dispose();
+			faux.unregister();
+			if (existsSync(tempDir)) {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+
+		expect(runtime.session.promptTemplates.map((prompt) => prompt.name)).toContain("test");
+
+		writeFileSync(join(agentDir, "settings.json"), `${JSON.stringify({ prompts: ["-prompts/test.md"] }, null, 2)}\n`);
+
+		await runtime.session.reload();
+
+		expect(runtime.services.settingsManager.getGlobalSettings().prompts).toEqual(["-prompts/test.md"]);
+		expect(runtime.session.promptTemplates.map((prompt) => prompt.name)).not.toContain("test");
+	});
+});

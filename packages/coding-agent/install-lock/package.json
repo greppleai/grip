@@ -1,0 +1,18 @@
+{
+	"name": "@greppleai/grip-coding-agent-install",
+	"version": "0.2.15",
+	"private": true,
+	"description": "Lockfile root used by the grip installer and updater.",
+	"dependencies": {
+		"@greppleai/grip": "0.2.15"
+	},
+	"overrides": {
+		"rimraf": "6.1.2",
+		"gaxios": {
+			"rimraf": "6.1.2"
+		}
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}
