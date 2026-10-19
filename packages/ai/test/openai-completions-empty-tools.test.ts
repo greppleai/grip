@@ -6,7 +6,7 @@ import type { MockCompletionPromise } from "./openai-mock-types.ts";
 // Empty tools arrays must NOT be serialized as `tools: []` — some OpenAI-compatible
 // backends (e.g. DashScope / Aliyun Qwen via compatible-mode) reject the request with
 // `"[] is too short - 'tools'"` (HTTP 400) when `--no-tools` produces an empty array.
-// Regression for https://github.com/fleetagent/pi/issues/<issue-number>
+// Regression: omit the empty tools array for backends that reject it.
 
 interface CapturedCompletionMessageRole {
 	role: string;

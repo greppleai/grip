@@ -65,7 +65,7 @@ function adjustBrightness(color: string, factor: number): string {
 	return `rgb(${adjust(parsed.r)}, ${adjust(parsed.g)}, ${adjust(parsed.b)})`;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Derived export fallbacks are complete computed colors, while ThemeExportColors represents optional theme-authored overrides.
+// grip-ignore noNearIdenticalDataStructures: Derived export fallbacks are complete computed colors, while ThemeExportColors represents optional theme-authored overrides.
 interface DerivedExportColors {
 	pageBg: string;
 	cardBg: string;

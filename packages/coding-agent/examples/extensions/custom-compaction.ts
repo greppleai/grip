@@ -14,8 +14,8 @@
  */
 
 import { type AssistantMessage, complete } from "@greppleai/grip-ai";
-import type { ExtensionAPI, ExtensionContext } from "@greppleai/grip-coding-agent";
-import { convertToLlm, serializeConversation } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@greppleai/grip";
+import { convertToLlm, serializeConversation } from "@greppleai/grip";
 
 function extractSummaryText(response: AssistantMessage): string {
 	return response.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("\n");

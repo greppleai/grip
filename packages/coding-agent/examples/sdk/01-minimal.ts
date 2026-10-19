@@ -5,7 +5,7 @@
  * from cwd and ~/.grip/agent. Model chosen from settings or first available.
  */
 
-import { GripAgent } from "@greppleai/grip-coding-agent";
+import { GripAgent } from "@greppleai/grip";
 
 const pi = await GripAgent.create();
 const session = await pi.createAgentSession();

@@ -383,7 +383,7 @@ export class LspClient {
 					},
 				},
 			},
-			clientInfo: this.options.clientInfo ?? { name: "@greppleai/grip-coding-agent" },
+			clientInfo: this.options.clientInfo ?? { name: "@greppleai/grip" },
 			...(this.options.initializationOptions === undefined
 				? {}
 				: { initializationOptions: this.options.initializationOptions }),

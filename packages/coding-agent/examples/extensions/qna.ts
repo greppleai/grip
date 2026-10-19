@@ -8,8 +8,8 @@
  */
 
 import { complete, type StopReason, type TextContent, type UserMessage } from "@greppleai/grip-ai";
-import type { ExtensionAPI, ExtensionContext } from "@greppleai/grip-coding-agent";
-import { BorderedLoader } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@greppleai/grip";
+import { BorderedLoader } from "@greppleai/grip";
 
 const SYSTEM_PROMPT = `You are a question extractor. Given text from a conversation, extract any questions that need answering and format them for the user to fill in.
 

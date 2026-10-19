@@ -26,7 +26,7 @@ import {
 	resolveLspConnectionFactory,
 } from "../src/core/lsp/transport.ts";
 
-// pi-ignore noNearIdenticalDataStructures: Test TCP listen targets follow Node server fixture needs, while daemon endpoints are validated runtime configuration and evolve independently.
+// grip-ignore noNearIdenticalDataStructures: Test TCP listen targets follow Node server fixture needs, while daemon endpoints are validated runtime configuration and evolve independently.
 interface TcpListenOptions {
 	host: string;
 	port: number;

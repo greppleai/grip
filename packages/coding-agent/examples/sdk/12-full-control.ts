@@ -13,7 +13,7 @@ import {
 	ModelRegistry,
 	type ResourceLoader,
 	SettingsManager,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 
 // Custom auth storage location
 const authStorage = AuthStorage.create("/tmp/my-agent/auth.json");

@@ -393,7 +393,7 @@ export function generateDiffString(oldContent: string, newContent: string, conte
 	return { diff: state.output.join("\n"), firstChangedLine: state.firstChangedLine };
 }
 
-// pi-ignore noNearIdenticalDataStructures: Plain line-number diffs and hashline-anchored diffs use distinct rendering formats and evolve independently.
+// grip-ignore noNearIdenticalDataStructures: Plain line-number diffs and hashline-anchored diffs use distinct rendering formats and evolve independently.
 export interface EditDiffResult {
 	diff: string;
 	firstChangedLine: number | undefined;

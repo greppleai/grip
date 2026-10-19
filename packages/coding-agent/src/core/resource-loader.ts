@@ -80,7 +80,7 @@ interface RemoteInstructionResourcePaths {
 	prompts: ResourcePathEntry[];
 }
 
-// pi-ignore noNearIdenticalDataStructures: Resolved reload paths are required runtime inputs, while GripManifest is an optional package declaration with independent validation and evolution.
+// grip-ignore noNearIdenticalDataStructures: Resolved reload paths are required runtime inputs, while GripManifest is an optional package declaration with independent validation and evolution.
 interface ReloadResourcePaths {
 	extensions: string[];
 	skills: string[];

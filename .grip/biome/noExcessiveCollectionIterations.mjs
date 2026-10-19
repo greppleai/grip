@@ -5,7 +5,7 @@ import ts from "typescript";
 
 const RULE_NAME = "noExcessiveCollectionIterations";
 const IGNORE_DIRECTIVE_PATTERN =
-	/(?:\/\/\s*pi-ignore\s+noExcessiveCollectionIterations\s*:\s*([^\r\n]*)|\/\*\s*pi-ignore\s+noExcessiveCollectionIterations\s*:\s*([\s\S]*?)\*\/)\s*$/;
+	/(?:\/\/\s*grip-ignore\s+noExcessiveCollectionIterations\s*:\s*([^\r\n]*)|\/\*\s*grip-ignore\s+noExcessiveCollectionIterations\s*:\s*([\s\S]*?)\*\/)\s*$/;
 const SOURCE_DIRECTORY_NAMES = new Set(["src", "test"]);
 const EXCLUDED_DIRECTORY_NAMES = new Set([".git", ".worktrees", "dist", "node_modules"]);
 const ITERATION_METHODS = new Set([

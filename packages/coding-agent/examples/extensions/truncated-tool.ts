@@ -15,7 +15,7 @@
  */
 
 import { mkdtemp, writeFile } from "node:fs/promises";
-import type { AgentToolResult, ExtensionAPI, Theme } from "@greppleai/grip-coding-agent";
+import type { AgentToolResult, ExtensionAPI, Theme } from "@greppleai/grip";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -23,7 +23,7 @@ import {
 	type TruncationResult,
 	truncateHead,
 	withFileMutationQueue,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 import { Text } from "@greppleai/grip-tui";
 import { execSync } from "child_process";
 import { tmpdir } from "os";

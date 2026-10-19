@@ -4,7 +4,7 @@
  * Control session persistence: in-memory, new file, continue, or open specific.
  */
 
-import { GripAgent, InMemorySessionManager, LocalSessionManager } from "@greppleai/grip-coding-agent";
+import { GripAgent, InMemorySessionManager, LocalSessionManager } from "@greppleai/grip";
 
 const cwd = process.cwd();
 

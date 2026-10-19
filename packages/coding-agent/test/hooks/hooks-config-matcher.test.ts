@@ -6,7 +6,7 @@ import { classifyHookOutput, hookSettingsSources, loadHooks, matchHookValue } fr
 
 describe("Claude-compatible hook configuration", () => {
 	it("additively loads sources, attributes entries, deduplicates exact handlers, and fails open", async () => {
-		const root = await mkdtemp(join(tmpdir(), "pi-hooks-"));
+		const root = await mkdtemp(join(tmpdir(), "grip-hooks-"));
 		const home = join(root, "home");
 		const cwd = join(root, "project");
 		await mkdir(join(home, ".claude"), { recursive: true });
@@ -35,7 +35,7 @@ describe("Claude-compatible hook configuration", () => {
 	});
 
 	it("prefers native grip settings while additively supporting Claude compatibility settings", async () => {
-		const root = await mkdtemp(join(tmpdir(), "pi-hooks-native-"));
+		const root = await mkdtemp(join(tmpdir(), "grip-hooks-native-"));
 		const home = join(root, "home");
 		const cwd = join(root, "project");
 		await mkdir(join(home, ".grip", "agent"), { recursive: true });
@@ -65,7 +65,7 @@ describe("Claude-compatible hook configuration", () => {
 	});
 
 	it("discovers only user hooks by default and requires explicit project/local source selection", async () => {
-		const root = await mkdtemp(join(tmpdir(), "pi-hooks-sources-"));
+		const root = await mkdtemp(join(tmpdir(), "grip-hooks-sources-"));
 		const home = join(root, "home");
 		const cwd = join(root, "project");
 		await mkdir(join(home, ".claude"), { recursive: true });
@@ -84,7 +84,7 @@ describe("Claude-compatible hook configuration", () => {
 	});
 
 	it("applies merged Claude HTTP URL and environment policy", async () => {
-		const root = await mkdtemp(join(tmpdir(), "pi-hooks-http-policy-"));
+		const root = await mkdtemp(join(tmpdir(), "grip-hooks-http-policy-"));
 		const home = join(root, "home");
 		await mkdir(join(home, ".claude"), { recursive: true });
 		await writeFile(
@@ -116,7 +116,7 @@ describe("Claude-compatible hook configuration", () => {
 	});
 
 	it("uses final included-source precedence for disableAllHooks", async () => {
-		const root = await mkdtemp(join(tmpdir(), "pi-hooks-disabled-"));
+		const root = await mkdtemp(join(tmpdir(), "grip-hooks-disabled-"));
 		const home = join(root, "home");
 		const cwd = join(root, "project");
 		await mkdir(join(home, ".claude"), { recursive: true });

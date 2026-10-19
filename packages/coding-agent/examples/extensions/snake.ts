@@ -2,7 +2,7 @@
  * Snake game extension - play snake with /snake command
  */
 
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 import { matchesKey, type TUI, visibleWidth } from "@greppleai/grip-tui";
 
 const GAME_WIDTH = 40;

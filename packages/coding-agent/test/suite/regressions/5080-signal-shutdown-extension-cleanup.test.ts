@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { FullscreenExitOutput } from "../../../src/core/settings-manager.ts";
 import { InteractiveMode, type ShutdownOptions } from "../../../src/modes/interactive/interactive-mode.ts";
 
-// Regression for https://github.com/fleetagent/pi/issues/5080
+// Regression for upstream Pi issue #5080.
 //
 // On SIGTERM/SIGHUP the graceful shutdown must emit `session_shutdown`
 // (runtimeHost.dispose) BEFORE touching the terminal. Extension teardown such

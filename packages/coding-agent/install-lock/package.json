@@ -1,5 +1,5 @@
 {
-	"name": "@greppleai/grip-coding-agent-install",
+	"name": "@greppleai/grip-install",
 	"version": "0.2.15",
 	"private": true,
 	"description": "Lockfile root used by the grip installer and updater.",

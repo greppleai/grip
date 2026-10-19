@@ -17,7 +17,7 @@
  * - setEditorText() - via /rpc-prefill command
  */
 
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 
 export default function (pi: ExtensionAPI) {
 	let turnCount = 0;

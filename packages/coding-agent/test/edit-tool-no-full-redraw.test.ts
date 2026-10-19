@@ -41,7 +41,7 @@ async function waitForRender(): Promise<void> {
 	await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-// pi-ignore noExcessiveCollectionIterations: Each bounded poll returns a new render snapshot that must be searched.
+// grip-ignore noExcessiveCollectionIterations: Each bounded poll returns a new render snapshot that must be searched.
 async function waitForRenderedText(
 	getRender: () => string,
 	expectedText: string,

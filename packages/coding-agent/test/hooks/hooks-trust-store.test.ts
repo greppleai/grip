@@ -14,7 +14,7 @@ interface ProjectHookTrustFixture {
 	project: string;
 }
 async function fixture(name: string): Promise<ProjectHookTrustFixture> {
-	const root = await mkdtemp(join(tmpdir(), `pi-hook-trust-${name}-`));
+	const root = await mkdtemp(join(tmpdir(), `grip-hook-trust-${name}-`));
 	const agentDir = join(root, "agent");
 	const project = join(root, "project");
 	await mkdir(project, { recursive: true });

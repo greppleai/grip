@@ -36,7 +36,7 @@ function createAssistantMessage(text: string): AssistantMessage {
 	};
 }
 
-// pi-ignore noNearIdenticalDataStructures: Agent lifecycle barriers and coding-agent file-mutation barriers belong to separate package test harnesses.
+// grip-ignore noNearIdenticalDataStructures: Agent lifecycle barriers and coding-agent file-mutation barriers belong to separate package test harnesses.
 interface DeferredSignal {
 	promise: Promise<void>;
 	resolve: () => void;

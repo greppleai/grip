@@ -77,7 +77,7 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch {
  * Filter and sort items by fuzzy match quality (best matches first).
  * Supports space-separated tokens: all tokens must match.
  */
-// pi-ignore noExcessiveCollectionIterations: Multi-token filtering must independently score every query token against each candidate item, with short-circuiting on the first failed token.
+// grip-ignore noExcessiveCollectionIterations: Multi-token filtering must independently score every query token against each candidate item, with short-circuiting on the first failed token.
 export function fuzzyFilter<T>(items: T[], query: string, getText: (item: T) => string): T[] {
 	if (!query.trim()) {
 		return items;

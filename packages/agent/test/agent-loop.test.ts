@@ -20,7 +20,7 @@ import type {
 	AgentTool,
 } from "../src/types.ts";
 
-// pi-ignore noNearIdenticalDataStructures: This agent-core mock tool payload is test-owned and evolves independently from the coding-agent file-edit contract.
+// grip-ignore noNearIdenticalDataStructures: This agent-core mock tool payload is test-owned and evolves independently from the coding-agent file-edit contract.
 interface EditReplacement {
 	oldText: string;
 	newText: string;

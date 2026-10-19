@@ -62,7 +62,7 @@ function isOfflineModeEnabled(): boolean {
 	return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
 }
 
-// pi-ignore noNearIdenticalDataStructures: Package paths require fully resolved scope and origin, while synthetic source options may omit them to request source-info defaults.
+// grip-ignore noNearIdenticalDataStructures: Package paths require fully resolved scope and origin, while synthetic source options may omit them to request source-info defaults.
 export interface PathMetadata {
 	source: string;
 	scope: SourceScope;
@@ -204,20 +204,20 @@ interface ResourceAccumulator {
 	themes: ResourceMap;
 }
 
-// pi-ignore noNearIdenticalDataStructures: This private checkout plan is mirrored only by a test facade for private-method verification and must not become a published API.
+// grip-ignore noNearIdenticalDataStructures: This private checkout plan is mirrored only by a test facade for private-method verification and must not become a published API.
 interface GitCheckoutTarget {
 	ref: string;
 	head: string;
 	fetchArgs: string[];
 }
 
-// pi-ignore noNearIdenticalDataStructures: Parsed npm identity/version data and LSP client metadata have unrelated validation and ownership.
+// grip-ignore noNearIdenticalDataStructures: Parsed npm identity/version data and LSP client metadata have unrelated validation and ownership.
 interface ParsedNpmSpec {
 	name: string;
 	version?: string;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Package-manager invocations and RPC client startup commands evolve under separate configuration and process lifecycles.
+// grip-ignore noNearIdenticalDataStructures: Package-manager invocations and RPC client startup commands evolve under separate configuration and process lifecycles.
 interface PackageManagerCommand {
 	command: string;
 	args: string[];

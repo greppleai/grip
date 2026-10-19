@@ -3,7 +3,7 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 	type KeybindingsManager,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 import type { Component, EditorTheme, TUI } from "@greppleai/grip-tui";
 import { truncateToWidth, visibleWidth } from "@greppleai/grip-tui";
 

@@ -16,7 +16,7 @@
  * Then use ctrl+o to toggle between minimal (collapsed) and full (expanded) views.
  */
 
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 import {
 	createBashTool,
 	createEditTool,
@@ -26,7 +26,7 @@ import {
 	createReadTool,
 	createWriteTool,
 	LocalToolOperations,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 import { Text } from "@greppleai/grip-tui";
 import { homedir } from "os";
 

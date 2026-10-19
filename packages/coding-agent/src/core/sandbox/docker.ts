@@ -8,7 +8,7 @@ import { DAEMON_WEBSOCKET_PATH } from "../../daemon/config.ts";
 import { spawnProcess } from "../../utils/child-process.ts";
 import type { SandboxSettings, SettingsManager } from "../settings-manager.ts";
 
-export const DEFAULT_SANDBOX_IMAGE = "ghcr.io/fleetagent/pi-sandbox:latest";
+export const DEFAULT_SANDBOX_IMAGE = "ghcr.io/greppleai/grip-sandbox:latest";
 export const DEFAULT_SANDBOX_WORKSPACE_MOUNT = "/workspace";
 export const DEFAULT_SANDBOX_DAEMON_PORT = 8787;
 export const DEFAULT_SANDBOX_DOCKER_BINARY = "docker";

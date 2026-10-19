@@ -91,7 +91,7 @@ async function collectEvents(stream: AsyncIterable<AssistantMessageEvent>): Prom
 	return events;
 }
 
-// pi-ignore noNearIdenticalDataStructures: This mocked OpenAI chat request payload and the remote-session example's generic runtime narrowing envelope have separate protocol ownership.
+// grip-ignore noNearIdenticalDataStructures: This mocked OpenAI chat request payload and the remote-session example's generic runtime narrowing envelope have separate protocol ownership.
 interface ChatCompletionsRequestMessage {
 	role: string;
 	content?: unknown;

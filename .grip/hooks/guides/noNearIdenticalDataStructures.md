@@ -14,7 +14,7 @@ A finding is a design-review candidate, not proof that two contracts share owner
 4. If the structures have distinct semantics, lifecycle, validation, security, or dependency ownership, keep both and document that decision with a reasoned ignore directive directly above one declaration:
 
    ```ts
-   // pi-ignore noNearIdenticalDataStructures: Wire payload and persisted record evolve independently.
+   // grip-ignore noNearIdenticalDataStructures: Wire payload and persisted record evolve independently. @section:9-22
    interface PersistedRecord {
    ```
 

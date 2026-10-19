@@ -115,7 +115,7 @@ export type FauxResponseFactory = (
 
 export type FauxResponseStep = AssistantMessage | FauxResponseFactory;
 
-// pi-ignore noNearIdenticalDataStructures: Faux token chunk sizing and TUI column layout bounds have unrelated behavior and evolve in separate packages.
+// grip-ignore noNearIdenticalDataStructures: Faux token chunk sizing and TUI column layout bounds have unrelated behavior and evolve in separate packages.
 export interface FauxTokenSizeRange {
 	min?: number;
 	max?: number;

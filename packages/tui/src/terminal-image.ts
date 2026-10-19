@@ -14,7 +14,7 @@ export interface CellDimensions {
 	heightPx: number;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Bitmap dimensions and terminal-cell pixel metrics come from separate measurement sources and serve distinct rendering APIs.
+// grip-ignore noNearIdenticalDataStructures: Bitmap dimensions and terminal-cell pixel metrics come from separate measurement sources and serve distinct rendering APIs.
 export interface ImageDimensions {
 	widthPx: number;
 	heightPx: number;

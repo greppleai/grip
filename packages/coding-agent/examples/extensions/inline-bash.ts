@@ -14,7 +14,7 @@
  *
  * Note: Regular !command syntax (whole-line bash) is preserved and works as before.
  */
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 
 const INLINE_BASH_PATTERN = /!\{([^}]+)\}/g;
 const INLINE_BASH_TIMEOUT_MS = 30000;

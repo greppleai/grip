@@ -290,6 +290,25 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].commands.has("test")).toBe(true);
 	});
 
+	it("loads extensions with canonical Grip package imports", async () => {
+		fs.writeFileSync(
+			path.join(extensionsDir, "canonical-imports.ts"),
+			`import { getAgentDir } from "@greppleai/grip";
+			import { getModel } from "@greppleai/grip-ai";
+			export default function(grip) {
+				if (typeof getAgentDir !== "function" || typeof getModel !== "function") {
+					throw new Error("Grip package imports unavailable");
+				}
+				grip.registerCommand("canonical-imports", { handler: async () => {} });
+			}`,
+		);
+
+		const result = await discoverAndLoadExtensions([], tempDir, tempDir);
+		expect(result.errors).toHaveLength(0);
+		expect(result.extensions).toHaveLength(1);
+		expect(result.extensions[0].commands.has("canonical-imports")).toBe(true);
+	});
+
 	it("loads extensions and registers tools", async () => {
 		fs.writeFileSync(path.join(extensionsDir, "with-tool.ts"), extensionCodeWithTool("my-tool"));
 

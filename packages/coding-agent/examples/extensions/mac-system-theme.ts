@@ -7,7 +7,7 @@
 
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 
 const execAsync = promisify(exec);
 

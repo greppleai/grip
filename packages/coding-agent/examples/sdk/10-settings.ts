@@ -4,7 +4,7 @@
  * Override settings using SettingsManager.
  */
 
-import { GripAgent, InMemorySessionManager, SettingsManager } from "@greppleai/grip-coding-agent";
+import { GripAgent, InMemorySessionManager, SettingsManager } from "@greppleai/grip";
 
 const cwd = process.cwd();
 

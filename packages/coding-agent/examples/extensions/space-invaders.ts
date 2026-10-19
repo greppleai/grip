@@ -3,7 +3,7 @@
  * Uses Kitty keyboard protocol for smooth movement (press/release detection)
  */
 
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 import { isKeyRelease, Key, matchesKey, visibleWidth } from "@greppleai/grip-tui";
 
 const GAME_WIDTH = 60;

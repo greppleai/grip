@@ -11,8 +11,8 @@ import { isLegacyEnvVarNameConfigValue } from "./core/resolve-config-value.ts";
 import { stripJsonComments } from "./utils/json.ts";
 
 const MIGRATION_GUIDE_URL =
-	"https://github.com/fleetagent/pi/blob/main/packages/coding-agent/CHANGELOG.md#extensions-migration";
-const EXTENSIONS_DOC_URL = "https://github.com/fleetagent/pi/blob/main/packages/coding-agent/docs/extensions.md";
+	"https://github.com/greppleai/grip/blob/main/packages/coding-agent/CHANGELOG.md#extensions-migration";
+const EXTENSIONS_DOC_URL = "https://github.com/greppleai/grip/blob/main/packages/coding-agent/docs/extensions.md";
 
 const AUTH_FILE_WRITE_OPTIONS = { encoding: "utf-8", mode: 0o600 } as const;
 
@@ -238,7 +238,7 @@ function migrateExplicitEnvVarConfigValues(): void {
  * ~/.pi/agent/sessions/<encoded-cwd>/. This migration moves them
  * to the correct location based on the cwd in their session header.
  *
- * See: https://github.com/fleetagent/pi/issues/320
+ * See: https://github.com/greppleai/grip/issues/320
  */
 export function migrateSessionsFromAgentRoot(): void {
 	const agentDir = getAgentDir();

@@ -2,7 +2,7 @@ import type { Component } from "./tui.ts";
 
 export const LAYOUT_NODE = Symbol.for("@greppleai/grip-tui/layout-node");
 
-// pi-ignore noNearIdenticalDataStructures: TUI layout viewport constraints and image pixel dimensions evolve independently.
+// grip-ignore noNearIdenticalDataStructures: TUI layout viewport constraints and image pixel dimensions evolve independently.
 export interface LayoutViewport {
 	width: number;
 	height: number;

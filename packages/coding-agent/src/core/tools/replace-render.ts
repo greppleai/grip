@@ -86,7 +86,7 @@ export function fmtCall(args: ReqParams | undefined, state: RRState, expanded: b
 	}
 	return text;
 }
-// pi-ignore noNearIdenticalDataStructures: Replace rendering accepts minimal adapter input, while the test fixture captures streamed tool-update callback content.
+// grip-ignore noNearIdenticalDataStructures: Replace rendering accepts minimal adapter input, while the test fixture captures streamed tool-update callback content.
 interface ReplaceResultContentEntry {
 	type: string;
 	text?: string;

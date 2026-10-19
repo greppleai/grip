@@ -128,13 +128,13 @@ describe("noExcessiveCollectionIterations", () => {
 
 	it("allows a reasoned ignore for intentionally bounded or pairwise algorithms", () => {
 		const diagnostics = analyze(`
-			// pi-ignore noExcessiveCollectionIterations: Matrix dimensions are capped at 4x4 by validated input.
+			// grip-ignore noExcessiveCollectionIterations: Matrix dimensions are capped at 4x4 by validated input.
 			function multiplySmallMatrices(left: number[][], right: number[][]) {
 				for (const row of left) {
 					for (const column of right) console.log(row, column);
 				}
 			}
-			// pi-ignore noExcessiveCollectionIterations:
+			// grip-ignore noExcessiveCollectionIterations:
 			function missingReason(left: number[], right: number[]) {
 				for (const x of left) for (const y of right) console.log(x, y);
 			}

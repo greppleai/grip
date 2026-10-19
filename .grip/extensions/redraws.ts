@@ -4,7 +4,7 @@
  * Exposes /tui to show TUI redraw stats.
  */
 
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 import { Text } from "@greppleai/grip-tui";
 
 export default function (pi: ExtensionAPI) {

@@ -314,7 +314,7 @@ export function stripTerminalSequences(str: string): string {
 	return result;
 }
 
-// pi-ignore noNearIdenticalDataStructures: A grapheme's rendered cell extent is a text-measurement result, while selection columns span and clip an independently managed row selection.
+// grip-ignore noNearIdenticalDataStructures: A grapheme's rendered cell extent is a text-measurement result, while selection columns span and clip an independently managed row selection.
 interface GraphemeCellRange {
 	start: number;
 	end: number;

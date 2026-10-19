@@ -5,7 +5,7 @@
  */
 
 import { getModel } from "@greppleai/grip-ai";
-import { AuthStorage, GripAgent, ModelRegistry } from "@greppleai/grip-coding-agent";
+import { AuthStorage, GripAgent, ModelRegistry } from "@greppleai/grip";
 
 // Set up auth storage and model registry
 const authStorage = AuthStorage.create();

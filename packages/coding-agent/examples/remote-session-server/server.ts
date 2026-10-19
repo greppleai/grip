@@ -13,11 +13,11 @@ import {
 	type SessionEntry,
 	type SessionHeader,
 	type SessionInfo,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 
-// pi-ignore noNearIdenticalDataStructures: The server always emits an ETag, while the client snapshot contract keeps it optional to tolerate compatible remote implementations.
+// grip-ignore noNearIdenticalDataStructures: The server always emits an ETag, while the client snapshot contract keeps it optional to tolerate compatible remote implementations.
 interface RemoteSessionSnapshot {
 	reference: string;
 	id: string;

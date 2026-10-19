@@ -7,8 +7,8 @@
  *   grip -e ./bash-spawn-hook.ts
  */
 
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
-import { createBashTool, LocalToolOperations } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
+import { createBashTool, LocalToolOperations } from "@greppleai/grip";
 
 export default function (pi: ExtensionAPI) {
 	const cwd = process.cwd();

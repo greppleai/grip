@@ -50,5 +50,5 @@ Sections (in order):
 - `### Removed` - Removed features
 
 Attribution:
-- Internal: `Fixed foo ([#123](https://github.com/fleetagent/pi/issues/123))`
-- External: `Added bar ([#456](https://github.com/fleetagent/pi/pull/456) by [@user](https://github.com/user))`
+- Internal: `Fixed foo ([#123](https://github.com/greppleai/grip/issues/123))`
+- External: `Added bar ([#456](https://github.com/greppleai/grip/pull/456) by [@user](https://github.com/user))`

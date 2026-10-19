@@ -6,7 +6,7 @@ import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
 import { formatRulesForPrompt, type Rule } from "./rules.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 
-// pi-ignore noNearIdenticalDataStructures: System-prompt context requires loaded file content, while the interactive status fixture is display-only and permits path-only entries.
+// grip-ignore noNearIdenticalDataStructures: System-prompt context requires loaded file content, while the interactive status fixture is display-only and permits path-only entries.
 export interface SystemPromptContextFile {
 	path: string;
 	content: string;

@@ -4,7 +4,7 @@
  * Escape in editor returns to options, Escape in options cancels
  */
 
-import type { ExtensionAPI, Theme } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI, Theme } from "@greppleai/grip";
 import { Editor, type EditorTheme, Key, matchesKey, Text, truncateToWidth } from "@greppleai/grip-tui";
 import { Type } from "typebox";
 

@@ -1,15 +1,17 @@
 # ADR: Integrated remote workspace daemon
 
-- Status: Accepted for implementation
+- Status: Historical design record (implemented in Grip; current usage is documented in [daemon.md](daemon.md))
 - Date: 2026-07-20
-- Scope: `@fleetagent/pi-coding-agent`, the remote workspace protocol, and retirement of `@fleetagent/pi-daemon`
+- Original scope: the former coding-agent and daemon packages and their remote workspace protocol
+
+> This records the pre-Grip architecture and migration decision. References below to upstream names, commands, package identifiers, and `PiAgent` describe that historical design; use `grip --daemon`, `@greppleai/grip`, and `GripAgent` for current integrations.
 
 ## Context
 
 Pi currently has two independently shaped remote-runtime halves:
 
 - the normal `pi` process owns the agent loop and creates canonical built-in tool definitions around `ToolOperations`;
-- `@fleetagent/pi-daemon` is a side-effect executable with a separate WebSocket parser and separate implementations of shell, filesystem, search, MIME, and file-transfer primitives.
+- the retired standalone Pi daemon package is a side-effect executable with a separate WebSocket parser and separate implementations of shell, filesystem, search, MIME, and file-transfer primitives.
 
 This split keeps provider credentials and the LLM loop local, but it duplicates behavior and prevents the remote runtime from executing canonical Pi tools. The current daemon also advertises a working directory without confining filesystem paths or shell commands to it.
 
@@ -115,7 +117,7 @@ Path comparisons are path-flavor aware. Windows roots compare case-insensitively
 - Children run as the daemon OS user. The daemon does not elevate privileges or implement setuid.
 - Startup as root is refused unless an explicit `--daemon-allow-root` override is supplied.
 - Child environments are deny-by-default. The base contains only `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `TEMP`, `TMP`, `LANG`, `LC_*`, `TERM`, `COLORTERM`, `NO_COLOR`, and, on Windows, `SystemRoot`, `ComSpec`, and `PATHEXT`. Names are matched case-insensitively on Windows.
-- Operators may copy additional startup variables by repeated `--daemon-env <NAME>` or a validated dedicated environment list. Invocation-supplied environment overrides are rejected in the initial protocol. After base, operator, and LSP environments are merged, a final non-bypassable filter removes names case-insensitively if they are `PI_DAEMON_TOKEN`, `PI_REMOTE_TOKEN`, a configured TLS private-key/passphrase variable, begin with `PI_DAEMON_TLS_`, or end in `_API_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_PRIVATE_KEY`, or `_CREDENTIALS`. Thus a base-looking name such as `LC_API_KEY` is still removed. LSP-specific values come only from trusted daemon LSP configuration and pass the same final filter.
+- Operators may copy additional startup variables by repeated `--daemon-env <NAME>` or a validated dedicated environment list. Invocation-supplied environment overrides are rejected in the initial protocol. After base, operator, and LSP environments are merged, a final non-bypassable filter removes names case-insensitively if they are `GRIP_DAEMON_TOKEN`, `GRIP_REMOTE_TOKEN`, a configured TLS private-key/passphrase variable, begin with `GRIP_DAEMON_TLS_`, or end in `_API_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_PRIVATE_KEY`, or `_CREDENTIALS`. Thus a base-looking name such as `LC_API_KEY` is still removed. LSP-specific values come only from trusted daemon LSP configuration and pass the same final filter.
 - Every child is placed in an owned process tree/group where supported. Cancellation, connection loss, deadline, daemon host reload, and shutdown terminate the complete owned tree with a bounded graceful-then-force sequence.
 
 A deployment needing arbitrary host access must choose that through OS privileges and process-exec opt-in; the protocol does not add an unrestricted path mode.
@@ -157,7 +159,7 @@ The WebSocket upgrade endpoint is exactly `/pi/workspace` with no URL user infor
 - Authentication is performed before allocating a full connection runtime.
 - Authentication failures use generic responses and never reveal whether a token prefix was correct.
 
-Server and client credentials are separate inputs. `PI_DAEMON_TOKEN` configures the server's expected token. `PI_REMOTE_TOKEN` supplies the orchestrator client's default token and is never forwarded into daemon child environments. The shared client constructor changes to `createRemoteToolOperations({ url, token })`; string-only construction is removed. Direct `--remote`, interactive `/sandbox --attach`, and the default RPC/SDK paths resolve `PI_REMOTE_TOKEN` unless their typed API supplies a token explicitly. RPC `set_remote_sandbox` gains an optional write-only `token` field; SDK/deferred configuration gains an optional `token`; neither value is returned by status APIs. Interactive commands do not accept a token argument, avoiding editor/session history leakage. A missing token against an authenticated daemon fails with an actionable message naming `PI_REMOTE_TOKEN` or the typed host API, never the token value.
+Server and client credentials are separate inputs. `GRIP_DAEMON_TOKEN` configures the server's expected token. `GRIP_REMOTE_TOKEN` supplies the orchestrator client's default token and is never forwarded into daemon child environments. The shared client constructor changes to `createRemoteToolOperations({ url, token })`; string-only construction is removed. Direct `--remote`, interactive `/sandbox --attach`, and the default RPC/SDK paths resolve `GRIP_REMOTE_TOKEN` unless their typed API supplies a token explicitly. RPC `set_remote_sandbox` gains an optional write-only `token` field; SDK/deferred configuration gains an optional `token`; neither value is returned by status APIs. Interactive commands do not accept a token argument, avoiding editor/session history leakage. A missing token against an authenticated daemon fails with an actionable message naming `GRIP_REMOTE_TOKEN` or the typed host API, never the token value.
 
 Tokens and URLs containing user information or sensitive query keys are redacted in all logs, thrown errors, diagnostics, interactive status, RPC state, and snapshots. The client API stores credentials separately from the display URL. Protocol tracing is off by default and redacts authorization material when enabled.
 
@@ -268,8 +270,8 @@ The current unversioned primitive pi-daemon protocol is not supported by `pi --d
 
 The following orchestrator entry points remain supported, but use the new protocol:
 
-- `pi --remote <url>`, with an optional client token from `PI_REMOTE_TOKEN` or the typed SDK host option;
-- `pi --remote-deferred --remote-cwd <path>` followed by `/sandbox --attach ...`, using `PI_REMOTE_TOKEN` unless configured through the SDK;
+- `grip --remote <url>`, with an optional client token from `GRIP_REMOTE_TOKEN` or the typed SDK host option;
+- `grip --remote-deferred --remote-cwd <path>` followed by `/sandbox --attach ...`, using `GRIP_REMOTE_TOKEN` unless configured through the SDK;
 - RPC `set_remote_sandbox` (including its write-only optional token), `upload_file`, and `download_file`;
 - session replacement and subagents borrowing the PiAgent-owned remote workspace client.
 
@@ -281,7 +283,7 @@ Canonical tool output may change where the old daemon differed from local Pi; th
 
 ### Intentionally breaking migration
 
-- remove the `@fleetagent/pi-daemon` workspace/package/export;
+- remove the standalone daemon workspace/package/export;
 - remove the `pi-daemon` executable with no forwarding shim;
 - replace launch commands with `pi --daemon`;
 - reject the unversioned primitive wire protocol;
@@ -291,7 +293,7 @@ Canonical tool output may change where the old daemon differed from local Pi; th
 - require explicit process-execution opt-in;
 - refuse root and insecure non-loopback operation without explicit overrides.
 
-`PI_DAEMON_HOST`, `PI_DAEMON_PORT`, `PI_DAEMON_CWD`, `PI_DAEMON_TOKEN`, and the existing `PI_DAEMON_MAX_*` names remain as integrated server-command inputs with strict validation and the safer semantics in this ADR. `PI_REMOTE_TOKEN` is the distinct client default. Dedicated boolean/config inputs are added for process execution, root, insecure transport, origins, TLS files, environment allowlisting, and daemon LSP. Generic `HOST`/`PORT` aliases are removed. Keeping selected names is configuration continuity, not a package or protocol compatibility promise.
+`GRIP_DAEMON_HOST`, `GRIP_DAEMON_PORT`, `GRIP_DAEMON_CWD`, `GRIP_DAEMON_TOKEN`, and the existing `GRIP_DAEMON_MAX_*` names are integrated server-command inputs with strict validation and the safer semantics in this ADR. `GRIP_REMOTE_TOKEN` is the distinct client default. Dedicated boolean/config inputs are added for process execution, root, insecure transport, origins, TLS files, environment allowlisting, and daemon LSP. Generic `HOST`/`PORT` aliases are removed.
 
 ## Lifecycle, bounds, and shutdown
 

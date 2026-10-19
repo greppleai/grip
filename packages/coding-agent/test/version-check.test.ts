@@ -39,7 +39,7 @@ describe("version checks", () => {
 		vi.stubGlobal("fetch", fetchMock);
 
 		await expect(checkForNewGripVersion("1.2.3")).resolves.toBeUndefined();
-		await expect(checkForNewGripVersion("1.2.2")).resolves.toEqual({ packageName: PACKAGE_NAME, version: "1.2.3" });
+		await expect(checkForNewGripVersion("1.2.2")).resolves.toEqual({ version: "1.2.3" });
 	});
 
 	it("uses the npm package metadata api with a pi user agent", async () => {
@@ -58,19 +58,13 @@ describe("version checks", () => {
 		);
 	});
 
-	it("returns the active package metadata from the version check api", async () => {
+	it("ignores package redirects in npm metadata", async () => {
 		const fetchMock = vi.fn(async () =>
-			Response.json({
-				"dist-tags": { latest: "1.2.4" },
-				packageName: "@new-scope/pi",
-			}),
+			Response.json({ "dist-tags": { latest: "1.2.4" }, packageName: "@unrelated/foreign-package" }),
 		);
 		vi.stubGlobal("fetch", fetchMock);
 
-		await expect(getLatestGripRelease("1.2.3")).resolves.toEqual({
-			packageName: "@new-scope/pi",
-			version: "1.2.4",
-		});
+		await expect(getLatestGripRelease("1.2.3")).resolves.toEqual({ version: "1.2.4" });
 	});
 
 	it("returns update notes from the version check api", async () => {
@@ -79,7 +73,6 @@ describe("version checks", () => {
 
 		await expect(getLatestGripRelease("1.2.3")).resolves.toEqual({
 			note: "**Read this**",
-			packageName: PACKAGE_NAME,
 			version: "1.2.4",
 		});
 	});

@@ -3,7 +3,7 @@ import { generateImages } from "../src/images.ts";
 import type { ImagesContext, ImagesModel } from "../src/types.ts";
 import type { MockOpenAIRequestPromise } from "./openai-mock-types.ts";
 
-// pi-ignore noNearIdenticalDataStructures: This OpenRouter image request wire block is unrelated to coding-agent tool update and replace-result rendering entries.
+// grip-ignore noNearIdenticalDataStructures: This OpenRouter image request wire block is unrelated to coding-agent tool update and replace-result rendering entries.
 interface OpenRouterImageRequestTextContent {
 	type: string;
 	text?: string;

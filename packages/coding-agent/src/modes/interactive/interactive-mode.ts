@@ -4479,10 +4479,9 @@ export class InteractiveMode {
 
 	showNewVersionNotification(release: LatestGripRelease): void {
 		const action = theme.fg("accent", `${APP_NAME} update`);
-		const packageName = release.packageName ?? PACKAGE_NAME;
 		const updateInstruction =
-			theme.fg("muted", `New ${packageName} version ${release.version} is available. Run `) + action;
-		const changelogUrl = "https://github.com/fleetagent/pi/blob/main/packages/coding-agent/CHANGELOG.md";
+			theme.fg("muted", `New ${PACKAGE_NAME} version ${release.version} is available. Run `) + action;
+		const changelogUrl = "https://github.com/greppleai/grip/blob/main/packages/coding-agent/CHANGELOG.md";
 		const changelogLink = getCapabilities().hyperlinks
 			? hyperlink(theme.fg("accent", "open changelog"), changelogUrl)
 			: theme.fg("accent", changelogUrl);

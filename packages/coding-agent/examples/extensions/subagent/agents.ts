@@ -4,7 +4,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type AgentListFormatResult, getAgentDir, parseFrontmatter } from "@greppleai/grip-coding-agent";
+import { type AgentListFormatResult, getAgentDir, parseFrontmatter } from "@greppleai/grip";
 
 export type AgentScope = "user" | "project" | "both";
 export type AgentConfigSource = "user" | "project";
@@ -19,7 +19,7 @@ export interface AgentConfig {
 	filePath: string;
 }
 
-// pi-ignore noNearIdenticalDataStructures: The example owns user/project-only discovery, while core discovery also supports bundled/session agents and backend-aware loading.
+// grip-ignore noNearIdenticalDataStructures: The example owns user/project-only discovery, while core discovery also supports bundled/session agents and backend-aware loading.
 export interface AgentDiscoveryResult {
 	agents: AgentConfig[];
 	projectAgentsDir: string | null;

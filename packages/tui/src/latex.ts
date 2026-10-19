@@ -755,7 +755,7 @@ function padLayoutLine(line: string, width: number, centered = false): string {
 	return `${" ".repeat(left)}${line}${" ".repeat(padding - left)}`;
 }
 
-// pi-ignore noExcessiveCollectionIterations: Every output row must concatenate every layout segment; rows are capped at 200 and parsed layout nodes at 256.
+// grip-ignore noExcessiveCollectionIterations: Every output row must concatenate every layout segment; rows are capped at 200 and parsed layout nodes at 256.
 function joinLayouts(layouts: readonly Layout[]): Layout {
 	if (layouts.length === 0) {
 		return { lines: [""], width: 0, baseline: 0 };

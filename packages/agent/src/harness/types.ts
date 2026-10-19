@@ -259,7 +259,7 @@ export interface ExecutionEnvExecOptions {
 }
 
 /** Successful result from {@link Shell.exec}. */
-// pi-ignore noNearIdenticalDataStructures: A successful harness execution always has a numeric exit code, while the coding-agent Docker runner models signal termination with null.
+// grip-ignore noNearIdenticalDataStructures: A successful harness execution always has a numeric exit code, while the coding-agent Docker runner models signal termination with null.
 export interface ExecutionEnvExecResult {
 	stdout: string;
 	stderr: string;
@@ -353,7 +353,7 @@ export interface Shell {
 /** Filesystem and process execution environment used by the harness. */
 export interface ExecutionEnv extends FileSystem, Shell {}
 
-// pi-ignore noNearIdenticalDataStructures: The agent package owns its backend-neutral session tree schema independently from the coding-agent package's persisted session format.
+// grip-ignore noNearIdenticalDataStructures: The agent package owns its backend-neutral session tree schema independently from the coding-agent package's persisted session format.
 export interface SessionTreeEntryBase {
 	type: string;
 	id: string;
@@ -446,13 +446,13 @@ export interface SessionMoveSummary {
 	fromHook?: boolean;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Agent-harness session state and coding-agent persisted session context are separate package APIs with independent storage lifecycles.
+// grip-ignore noNearIdenticalDataStructures: Agent-harness session state and coding-agent persisted session context are separate package APIs with independent storage lifecycles.
 export interface SessionModelReference {
 	provider: string;
 	modelId: string;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Harness context and coding-agent session context belong to separate package APIs and session implementations.
+// grip-ignore noNearIdenticalDataStructures: Harness context and coding-agent session context belong to separate package APIs and session implementations.
 export interface SessionContext {
 	messages: AgentMessage[];
 	thinkingLevel: string;
@@ -565,7 +565,7 @@ export interface BeforeAgentStartEvent<
 	resources: AgentHarnessResources<TSkill, TPromptTemplate>;
 }
 
-// pi-ignore noNearIdenticalDataStructures: This harness lifecycle event is distinct from the coding-agent extension event API despite sharing its current payload.
+// grip-ignore noNearIdenticalDataStructures: This harness lifecycle event is distinct from the coding-agent extension event API despite sharing its current payload.
 export interface ContextEvent {
 	type: "context";
 	messages: AgentMessage[];
@@ -584,7 +584,7 @@ export interface BeforeProviderPayloadEvent {
 	payload: unknown;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Provider responses are surfaced independently by the harness and coding-agent extension lifecycle APIs.
+// grip-ignore noNearIdenticalDataStructures: Provider responses are surfaced independently by the harness and coding-agent extension lifecycle APIs.
 export interface AfterProviderResponseEvent {
 	type: "after_provider_response";
 	status: number;
@@ -622,7 +622,7 @@ export interface SessionCompactEvent {
 	fromHook: boolean;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Harness tree navigation uses the agent session model, while coding-agent extensions use the coding-agent session model.
+// grip-ignore noNearIdenticalDataStructures: Harness tree navigation uses the agent session model, while coding-agent extensions use the coding-agent session model.
 export interface SessionBeforeTreeEvent {
 	type: "session_before_tree";
 	preparation: TreePreparation;
@@ -646,7 +646,7 @@ export interface ModelSelectEvent {
 	source: HarnessModelSelectionSource;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Thinking-level selection is independently owned by the harness and coding-agent extension event APIs.
+// grip-ignore noNearIdenticalDataStructures: Thinking-level selection is independently owned by the harness and coding-agent extension event APIs.
 export interface ThinkingLevelSelectEvent {
 	type: "thinking_level_select";
 	level: ThinkingLevel;
@@ -723,13 +723,13 @@ export interface SessionBeforeCompactResult {
 	compaction?: CompactResult;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Agent-harness tree summaries and coding-agent extension summaries belong to independent package lifecycle APIs.
+// grip-ignore noNearIdenticalDataStructures: Agent-harness tree summaries and coding-agent extension summaries belong to independent package lifecycle APIs.
 export interface SessionBeforeTreeSummary {
 	summary: string;
 	details?: unknown;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Agent-harness tree hook results and coding-agent extension hook results evolve with separate event contracts.
+// grip-ignore noNearIdenticalDataStructures: Agent-harness tree hook results and coding-agent extension hook results evolve with separate event contracts.
 export interface SessionBeforeTreeResult {
 	cancel?: boolean;
 	summary?: SessionBeforeTreeSummary;
@@ -775,7 +775,7 @@ export interface CompactResult {
 	details?: unknown;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Harness navigation options are a lower-level API distinct from coding-agent session and extension command options.
+// grip-ignore noNearIdenticalDataStructures: Harness navigation options are a lower-level API distinct from coding-agent session and extension command options.
 export interface NavigateTreeOptions {
 	summarize?: boolean;
 	customInstructions?: string;

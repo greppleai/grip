@@ -124,7 +124,7 @@ interface BeforeAgentStartCombinedResult {
 	systemPrompt?: string;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Mutable extension dispatch state tracks optional in-flight attachments, while ProcessedFiles is the completed CLI file-loading result.
+// grip-ignore noNearIdenticalDataStructures: Mutable extension dispatch state tracks optional in-flight attachments, while ProcessedFiles is the completed CLI file-loading result.
 interface InputDispatchState {
 	text: string;
 	images: ImageContent[] | undefined;

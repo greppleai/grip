@@ -2,7 +2,7 @@
 
 `grip --daemon` starts Grip as a remote workspace runtime. A normal local Grip process remains the orchestrator: it owns provider credentials, model calls, prompts, sessions, compaction, extensions, subagents, RPC, and UI. The daemon owns one configured workspace and executes canonical workspace tools, primitive project-resource operations, streamed file transfers, optional process execution, and optional colocated LSP.
 
-The retired `@fleetagent/pi-daemon` package and `pi-daemon` binary are not supported. Use `@greppleai/grip` and start the daemon with `grip --daemon`. Verify package availability before installing from a registry; a local packaged build can be used instead.
+Grip integrates the daemon into `@greppleai/grip`; start it with `grip --daemon`. Verify package availability before installing from a registry; a local packaged build can be used instead.
 
 ## Start a daemon
 
@@ -93,17 +93,16 @@ GRIP_REMOTE_TOKEN=dev-token-dev-token-dev-token-dev-token ./grip-test.sh --remot
 
 ## Migration from `pi-daemon`
 
-Replace global installs and commands:
+First list global packages with `npm ls -g --depth=0`. If the retired standalone daemon package is installed, uninstall it by its exact name from that list with `npm uninstall -g PACKAGE_NAME` (replace `PACKAGE_NAME` before running). Then install Grip:
 
 ```bash
-npm uninstall -g @fleetagent/pi-daemon
 npm install -g --ignore-scripts @greppleai/grip
 grip --daemon --daemon-cwd /workspace --daemon-port 8787
 ```
 
 Breaking changes from the retired daemon:
 
-- no `@fleetagent/pi-daemon` package, `pi-daemon` binary, compatibility shim, or old unversioned protocol;
+- no separate daemon package, `pi-daemon` binary, compatibility shim, or old unversioned protocol;
 - no query-string or userinfo tokens; use `Authorization: Bearer` via `GRIP_REMOTE_TOKEN`;
 - no `HOST`/`PORT` aliases; use `GRIP_DAEMON_HOST`/`GRIP_DAEMON_PORT` or CLI flags;
 - workspace paths, symlinks, transfers, subprocess cwd, temporary outputs, resources, and LSP paths are confined;

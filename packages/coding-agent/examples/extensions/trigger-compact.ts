@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@greppleai/grip";
 
 const COMPACT_THRESHOLD_TOKENS = 100_000;
 

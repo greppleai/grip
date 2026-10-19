@@ -9,7 +9,7 @@
  * - ctrl+c, ctrl+d, etc. work in both modes
  */
 
-import { CustomEditor, type ExtensionAPI } from "@greppleai/grip-coding-agent";
+import { CustomEditor, type ExtensionAPI } from "@greppleai/grip";
 import { matchesKey, truncateToWidth, visibleWidth } from "@greppleai/grip-tui";
 
 type ModalEditorMode = "normal" | "insert";

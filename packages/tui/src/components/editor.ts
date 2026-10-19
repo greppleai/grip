@@ -21,7 +21,7 @@ const PASTE_MARKER_REGEX = /\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]/g;
 
 /** Non-global version for single-segment testing. */
 const PASTE_MARKER_SINGLE = /^\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]$/;
-// pi-ignore noNearIdenticalDataStructures: Paste marker UTF-16 offsets are parser spans, distinct from terminal-cell and selection-column coordinates.
+// grip-ignore noNearIdenticalDataStructures: Paste marker UTF-16 offsets are parser spans, distinct from terminal-cell and selection-column coordinates.
 interface PasteMarkerSpan {
 	start: number;
 	end: number;

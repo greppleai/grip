@@ -81,7 +81,7 @@ The sandbox service mounts the current workspace at `/workspace`, uses Docker br
 
 ## Notes
 
-- The image uses the integrated `grip --daemon` command from `@greppleai/grip-coding-agent`.
+- The image uses the integrated `grip --daemon` command from `@greppleai/grip`.
 - The mounted workspace is read/write. Files created by the container are owned by uid `1000` unless Docker is run with a different user policy.
 - `/tmp` is writable container-local scratch storage and is not mounted from the host by default.
 - Bridge networking and loopback-only daemon publication avoid exposing host loopback services to the container.

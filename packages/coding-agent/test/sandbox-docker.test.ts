@@ -108,7 +108,7 @@ describe("Docker sandbox core", () => {
 	});
 
 	it("builds docker run arguments without putting daemon token in argv", () => {
-		const config = resolveSandboxConfig(undefined, {}, { image: "pi-sandbox:test" });
+		const config = resolveSandboxConfig(undefined, {}, { image: "grip-sandbox:test" });
 		const invocation = buildDockerRunInvocation(
 			config,
 			{ workspaceRoot: "/tmp/My Project", sessionId: "session-1" },
@@ -129,7 +129,7 @@ describe("Docker sandbox core", () => {
 				"type=bind,source=/tmp/My Project,target=/workspace",
 				"--env",
 				"GRIP_DAEMON_TOKEN",
-				"pi-sandbox:test",
+				"grip-sandbox:test",
 				"grip",
 				"--daemon",
 				"--daemon-host",
@@ -148,7 +148,7 @@ describe("Docker sandbox core", () => {
 	});
 
 	it("formats IPv6 daemon publication and connection hosts", async () => {
-		const config = resolveSandboxConfig(undefined, {}, { image: "pi-sandbox:test", daemonHostBind: "::1" });
+		const config = resolveSandboxConfig(undefined, {}, { image: "grip-sandbox:test", daemonHostBind: "::1" });
 		const invocation = buildDockerRunInvocation(
 			config,
 			{ workspaceRoot: "/tmp/ipv6-workspace", sessionId: "ipv6-session" },
@@ -163,13 +163,13 @@ describe("Docker sandbox core", () => {
 			readinessWaiter: async () => {},
 			portAllocator: async (_host, preferredPort) => preferredPort,
 		});
-		const result = await service.start({ workspaceRoot: "/tmp/ipv6-workspace", image: "pi-sandbox:test" });
+		const result = await service.start({ workspaceRoot: "/tmp/ipv6-workspace", image: "grip-sandbox:test" });
 		expect(result).toMatchObject({ daemonUrl: "ws://[::1]:8787/grip/workspace" });
 		await service.stop({ workspaceRoot: "/tmp/ipv6-workspace", currentContainerId: result.containerId });
 	});
 
 	it("uses a unique container name for repeated starts of the same session", () => {
-		const config = resolveSandboxConfig(undefined, {}, { image: "pi-sandbox:test" });
+		const config = resolveSandboxConfig(undefined, {}, { image: "grip-sandbox:test" });
 		const options = { workspaceRoot: "/tmp/project", sessionId: "01a02823-75fe-7ae1-967b-c724c363ca90" };
 		const first = buildDockerRunInvocation(config, options, "first-token");
 		const second = buildDockerRunInvocation(config, options, "second-token");
@@ -190,8 +190,8 @@ describe("Docker sandbox core", () => {
 		});
 
 		const [first, second] = await Promise.all([
-			service.start({ workspaceRoot: "/tmp/workspace", image: "pi-sandbox:test" }),
-			service.start({ workspaceRoot: "/tmp/workspace", image: "pi-sandbox:test" }),
+			service.start({ workspaceRoot: "/tmp/workspace", image: "grip-sandbox:test" }),
+			service.start({ workspaceRoot: "/tmp/workspace", image: "grip-sandbox:test" }),
 		]);
 
 		expect(first).toMatchObject({
@@ -212,8 +212,8 @@ describe("Docker sandbox core", () => {
 	it("removes stopped containers started by another service during managed shutdown", async () => {
 		const runningRow = JSON.stringify({
 			ID: "managed",
-			Names: "pi-sandbox-workspace-hash",
-			Image: "pi-sandbox:test",
+			Names: "grip-sandbox-workspace-hash",
+			Image: "grip-sandbox:test",
 			State: "exited",
 			Labels: `${SANDBOX_LABEL_ENABLED}=true,${SANDBOX_LABEL_DAEMON_PORT}=49200`,
 		});
@@ -237,7 +237,7 @@ describe("Docker sandbox core", () => {
 			managedContainers,
 		});
 
-		await service.start({ workspaceRoot: "/tmp/managed-workspace", image: "pi-sandbox:test" });
+		await service.start({ workspaceRoot: "/tmp/managed-workspace", image: "grip-sandbox:test" });
 		await shutdownService.stopManagedContainers();
 		await shutdownService.stopManagedContainers();
 
@@ -264,8 +264,8 @@ describe("Docker sandbox core", () => {
 	it("retains failed-readiness ports until the surviving container is cleaned up", async () => {
 		const runningRow = JSON.stringify({
 			ID: "failed123",
-			Names: "pi-sandbox-workspace-hash",
-			Image: "pi-sandbox:test",
+			Names: "grip-sandbox-workspace-hash",
+			Image: "grip-sandbox:test",
 			State: "running",
 			Labels: `${SANDBOX_LABEL_ENABLED}=true,${SANDBOX_LABEL_DAEMON_PORT}=49300`,
 		});
@@ -293,10 +293,10 @@ describe("Docker sandbox core", () => {
 		});
 
 		await expect(
-			service.start({ workspaceRoot: "/tmp/failed-workspace", image: "pi-sandbox:test", daemonPort: 49300 }),
+			service.start({ workspaceRoot: "/tmp/failed-workspace", image: "grip-sandbox:test", daemonPort: 49300 }),
 		).rejects.toThrow("Sandbox readiness and cleanup both failed");
 		await expect(
-			service.start({ workspaceRoot: "/tmp/other-workspace", image: "pi-sandbox:test", daemonPort: 49300 }),
+			service.start({ workspaceRoot: "/tmp/other-workspace", image: "grip-sandbox:test", daemonPort: 49300 }),
 		).rejects.toThrow("stop after observing fallback allocation");
 		expect(preferredPorts).toEqual([49300, 0]);
 
@@ -323,8 +323,8 @@ describe("Docker sandbox core", () => {
 			ok(
 				`${JSON.stringify({
 					ID: "abc123",
-					Names: "pi-sandbox-workspace-hash",
-					Image: "pi-sandbox:test",
+					Names: "grip-sandbox-workspace-hash",
+					Image: "grip-sandbox:test",
 					Status: "Up 3 seconds",
 					State: "running",
 					Labels: `${SANDBOX_LABEL_ENABLED}=true,${SANDBOX_LABEL_WORKSPACE_MOUNT}=/workspace`,
@@ -341,17 +341,18 @@ describe("Docker sandbox core", () => {
 		);
 		expect(runner.calls[0].args.join(" ")).toContain(`label=${SANDBOX_LABEL_WORKSPACE_HASH}=`);
 		expect(containers).toHaveLength(1);
-		expect(containers[0]).toMatchObject({ id: "abc123", name: "pi-sandbox-workspace-hash", state: "running" });
+		expect(containers[0]).toMatchObject({ id: "abc123", name: "grip-sandbox-workspace-hash", state: "running" });
 		expect(redactSecrets("Authorization: Bearer secret GRIP_DAEMON_TOKEN=secret")).toBe(
 			"Authorization: Bearer [REDACTED] GRIP_DAEMON_TOKEN=[REDACTED]",
 		);
+		expect(redactSecrets("PI_DAEMON_TOKEN=legacy-secret")).toBe("PI_DAEMON_TOKEN=[REDACTED]");
 	});
 
 	it("stops only selected Grip-owned sandbox containers and handles missing or already stopped targets", async () => {
 		const runningRow = JSON.stringify({
 			ID: "abc123",
-			Names: "pi-sandbox-workspace-hash",
-			Image: "pi-sandbox:test",
+			Names: "grip-sandbox-workspace-hash",
+			Image: "grip-sandbox:test",
 			State: "running",
 			Labels: `${SANDBOX_LABEL_ENABLED}=true`,
 		});
@@ -383,16 +384,16 @@ describe("Docker sandbox core", () => {
 			JSON.stringify([
 				{
 					Id: "abcdef",
-					Name: "/pi-sandbox-workspace-hash",
-					Config: { Image: "pi-sandbox:test", Labels: { [SANDBOX_LABEL_WORKSPACE_MOUNT]: "/workspace" } },
+					Name: "/grip-sandbox-workspace-hash",
+					Config: { Image: "grip-sandbox:test", Labels: { [SANDBOX_LABEL_WORKSPACE_MOUNT]: "/workspace" } },
 					State: { Status: "running", Running: true, StartedAt: "2026-01-01T00:00:00Z" },
 					Mounts: [{ Type: "bind", Source: "/host/workspace", Destination: "/workspace" }],
 					NetworkSettings: { Ports: { "8787/tcp": [{ HostIp: "0.0.0.0", HostPort: "49153" }] } },
 				},
 				{
 					Id: "ipv6",
-					Name: "/pi-sandbox-ipv6",
-					Config: { Image: "pi-sandbox:test", Labels: {} },
+					Name: "/grip-sandbox-ipv6",
+					Config: { Image: "grip-sandbox:test", Labels: {} },
 					State: { Status: "running", Running: true, StartedAt: "2026-01-01T00:00:00Z" },
 					Mounts: [],
 					NetworkSettings: { Ports: { "8787/tcp": [{ HostIp: "::", HostPort: "49154" }] } },
@@ -402,7 +403,7 @@ describe("Docker sandbox core", () => {
 
 		expect(inspect[0]).toMatchObject({
 			id: "abcdef",
-			name: "pi-sandbox-workspace-hash",
+			name: "grip-sandbox-workspace-hash",
 			workspaceRoot: "/host/workspace",
 			daemonEndpoint: "ws://127.0.0.1:49153/grip/workspace",
 		});

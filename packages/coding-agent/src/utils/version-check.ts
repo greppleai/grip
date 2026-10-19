@@ -6,7 +6,6 @@ const DEFAULT_VERSION_CHECK_TIMEOUT_MS = 10000;
 
 export interface LatestGripRelease {
 	version: string;
-	packageName?: string;
 	note?: string;
 }
 
@@ -20,7 +19,6 @@ interface NpmRegistryDistributionTags {
 interface NpmRegistryPackageMetadata {
 	"dist-tags"?: NpmRegistryDistributionTags;
 	note?: unknown;
-	packageName?: unknown;
 	version?: unknown;
 }
 
@@ -99,12 +97,9 @@ export async function getLatestGripRelease(
 	if (!version) {
 		return undefined;
 	}
-	const packageName =
-		typeof data.packageName === "string" && data.packageName.trim() ? data.packageName.trim() : PACKAGE_NAME;
 	const note = typeof data.note === "string" && data.note.trim() ? data.note.trim() : undefined;
 	return {
 		version,
-		packageName,
 		...(note ? { note } : {}),
 	};
 }

@@ -14,7 +14,7 @@
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import type { ExtensionAPI, ExtensionContext } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@greppleai/grip";
 
 interface ConflictBlock {
 	file: string;

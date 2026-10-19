@@ -835,7 +835,7 @@ Content`,
 				join(ext1Dir, "index.ts"),
 				`
 import type { ExtensionAPI,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 import {
 	Type } from "typebox";
 export default function(pi: ExtensionAPI) {
@@ -852,7 +852,7 @@ export default function(pi: ExtensionAPI) {
 				join(ext2Dir, "index.ts"),
 				`
 import type { ExtensionAPI,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 import {
 	Type } from "typebox";
 export default function(pi: ExtensionAPI) {
@@ -881,7 +881,7 @@ export default function(pi: ExtensionAPI) {
 				join(globalExtDir, "global.ts"),
 				`
 import type { ExtensionAPI,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 import {
 	Type } from "typebox";
 export default function(pi: ExtensionAPI) {
@@ -903,7 +903,7 @@ export default function(pi: ExtensionAPI) {
 				explicitExtPath,
 				`
 import type { ExtensionAPI,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 import { Type } from "typebox";
 export default function(pi: ExtensionAPI) {
   pi.registerTool({

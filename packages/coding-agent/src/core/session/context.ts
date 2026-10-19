@@ -33,7 +33,7 @@ export function sessionEntryToContextMessages(entry: SessionEntry): AgentMessage
 	return [];
 }
 
-// pi-ignore noNearIdenticalDataStructures: Coding-agent persisted entries and agent harness storage entries use package-owned context pipelines that evolve independently.
+// grip-ignore noNearIdenticalDataStructures: Coding-agent persisted entries and agent harness storage entries use package-owned context pipelines that evolve independently.
 interface SessionPathState {
 	thinkingLevel: string;
 	model: SessionContext["model"];

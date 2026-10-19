@@ -48,7 +48,7 @@ const jsonSystemMessageScript =
 
 describe("hook execution", () => {
 	it("uses direct argv when args is present, sends JSON stdin, bounds output, and strips credentials", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-exec-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-exec-"));
 		const script =
 			"let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(JSON.parse(s).tool_name+'|'+process.argv[1]+'|'+process.env.OTEL_TOKEN+'|'+process.env.PI_AUTH_TOKEN+'|xxxxxxxx'))";
 		const result = await executeHook(
@@ -65,7 +65,7 @@ describe("hook execution", () => {
 	});
 
 	it("routes project command hooks through the active sandbox backend with backend stdin and cwd", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-workspace-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-workspace-"));
 		let decodedInput: HookInput | undefined;
 		const exec = vi.fn(async (command: string, options: ToolExecOptions) => {
 			const encoded = /'([A-Za-z0-9+/=]+)'$/.exec(command)?.[1];
@@ -109,7 +109,7 @@ describe("hook execution", () => {
 	});
 
 	it("executes the workspace wrapper with backend cwd, stdin, streams, and sanitized environment", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-workspace-wrapper-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-workspace-wrapper-"));
 		const backendOperations = new LocalToolOperations(cwd);
 		const previousSecret = process.env.GRIP_WORKSPACE_TEST_TOKEN;
 		process.env.GRIP_WORKSPACE_TEST_TOKEN = "secret";
@@ -151,7 +151,7 @@ describe("hook execution", () => {
 	});
 
 	it("aborts bounded workspace execution on oversized unframed backend output", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-workspace-unframed-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-workspace-unframed-"));
 		const result = await executeHook(
 			loaded({ type: "command", command: "node", args: ["hook.js"] }, 0, {
 				kind: "project",
@@ -187,7 +187,7 @@ describe("hook execution", () => {
 	});
 
 	it("blocks project HTTP hooks on sandbox backends without using host fetch", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-workspace-http-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-workspace-http-"));
 		const fetch = vi.fn<typeof globalThis.fetch>();
 		const result = await executeHook(
 			loaded({ type: "http", url: "https://example.test/hook" }, 0, { kind: "project", path: "/settings.json" }),
@@ -207,7 +207,7 @@ describe("hook execution", () => {
 	});
 
 	it("runs matching handlers in parallel and treats timeout as fail-open", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-timeout-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-timeout-"));
 		const hooks = [0, 1].map((order) =>
 			loaded(
 				{ type: "command", command: process.execPath, args: ["-e", "setTimeout(()=>{},1000)"], timeout: 0.05 },
@@ -224,7 +224,7 @@ describe("hook execution", () => {
 	it.skipIf(process.platform === "win32")(
 		"kills the process group when the direct child exits but a descendant holds stdio",
 		async () => {
-			const cwd = await mkdtemp(join(tmpdir(), "pi-hook-descendant-"));
+			const cwd = await mkdtemp(join(tmpdir(), "grip-hook-descendant-"));
 			const script =
 				"const {spawn}=require('child_process');const c=spawn(process.execPath,['-e','setTimeout(()=>{},5000)'],{stdio:'inherit'});c.unref()";
 			const started = Date.now();
@@ -238,7 +238,7 @@ describe("hook execution", () => {
 	);
 
 	it("posts JSON to HTTP hooks and aggregates a structured deny", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-http-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-http-"));
 		let body = "";
 		const server = createServer((request, response) => {
 			request.on("data", (chunk) => {
@@ -269,7 +269,7 @@ describe("hook execution", () => {
 	});
 
 	it("classifies exit 2 by event and never executes unsupported handlers", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-exit-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-exit-"));
 		const blocked = await executeHook(
 			loaded({
 				type: "command",
@@ -284,7 +284,7 @@ describe("hook execution", () => {
 	});
 
 	it("ignores actionable structured output from failed commands", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-failed-output-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-failed-output-"));
 		const eventInput = input(cwd);
 		const failed = await executeHook(
 			loaded({
@@ -303,7 +303,7 @@ describe("hook execution", () => {
 	});
 
 	it("never applies structured output retained from truncated command or HTTP responses", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-truncated-output-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-truncated-output-"));
 		const eventInput = input(cwd);
 		const actionable = JSON.stringify({
 			hookSpecificOutput: {
@@ -332,7 +332,7 @@ describe("hook execution", () => {
 	});
 
 	it("does not spawn pre-aborted commands and enforces host HTTP URL restrictions", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-abort-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-abort-"));
 		const marker = join(cwd, "spawned");
 		const controller = new AbortController();
 		controller.abort();
@@ -387,7 +387,7 @@ describe("hook execution", () => {
 	});
 
 	it("treats aggregate termination separately from Stop continuation and ignores malformed object output", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-aggregate-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-aggregate-"));
 		const stopInput: HookInput = {
 			session_id: "s",
 			transcript_path: "",
@@ -422,7 +422,7 @@ describe("hook execution", () => {
 		expect(aggregateHookResults(malformedInput, [malformed]).additionalContext).toEqual([]);
 	});
 	it("aggregates nonnegative Stop continuation progress", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-stop-progress-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-stop-progress-"));
 		const stopInput: HookInput = {
 			session_id: "s",
 			transcript_path: "",
@@ -457,7 +457,7 @@ describe("hook execution", () => {
 	});
 
 	it("applies one longest-explicit SessionEnd budget to every matching handler", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-session-end-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-session-end-"));
 		const endInput: HookInput = {
 			session_id: "s",
 			transcript_path: "",
@@ -483,7 +483,7 @@ describe("hook execution", () => {
 	});
 
 	it("aggregates systemMessage for lifecycle events that cannot add model context", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-system-message-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-system-message-"));
 		const eventInputs: HookInput[] = [
 			{ session_id: "s", transcript_path: "", cwd, hook_event_name: "StopFailure", error: "failed" },
 			{
@@ -518,7 +518,7 @@ describe("hook execution", () => {
 	});
 
 	it("uses bounded Windows taskkill process-tree fallback", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-windows-kill-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-windows-kill-"));
 		const pids: number[] = [];
 		const result = await executeHook(
 			loaded({ type: "command", command: process.execPath, args: ["-e", "setTimeout(()=>{},1000)"], timeout: 0.02 }),
@@ -536,7 +536,7 @@ describe("hook execution", () => {
 	});
 
 	it("rejects redirects and ignores HTTP 2xx plain text", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-http-safe-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-http-safe-"));
 		const promptInput = input(cwd, "UserPromptSubmit");
 		let redirectMode: RequestRedirect | undefined;
 		const redirect = await executeHook(
@@ -561,7 +561,7 @@ describe("hook execution", () => {
 	});
 
 	it("requires matching hookSpecificOutput event names and caps each model-visible field", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-output-safety-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-output-safety-"));
 		const eventInput = input(cwd);
 		const mismatch = await executeHook(
 			loaded({
@@ -596,7 +596,7 @@ describe("hook execution", () => {
 	});
 
 	it("only accepts updatedMCPToolOutput for mcp__ tools", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "pi-hook-mcp-output-"));
+		const cwd = await mkdtemp(join(tmpdir(), "grip-hook-mcp-output-"));
 		const makeInput = (toolName: string): HookInput => ({
 			session_id: "s",
 			transcript_path: "",
@@ -629,9 +629,15 @@ describe("hook execution", () => {
 		);
 	});
 
-	it("sanitizes only telemetry and Grip credential variables", () => {
+	it("sanitizes telemetry and both canonical and legacy project credentials", () => {
 		expect(
-			sanitizedHookEnvironment({ OTEL_EXPORTER: "x", GRIP_API_KEY: "y", GRIP_THEME: "dark", PATH: "/bin" }),
+			sanitizedHookEnvironment({
+				OTEL_EXPORTER: "x",
+				GRIP_API_KEY: "y",
+				PI_DAEMON_TOKEN: "legacy-secret",
+				GRIP_THEME: "dark",
+				PATH: "/bin",
+			}),
 		).toEqual({ GRIP_THEME: "dark", PATH: "/bin" });
 	});
 });

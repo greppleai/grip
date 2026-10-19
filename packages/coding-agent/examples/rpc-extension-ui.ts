@@ -18,7 +18,7 @@ import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import * as readline from "node:readline";
 import { fileURLToPath } from "node:url";
-import type { ExtensionNotificationType } from "@greppleai/grip-coding-agent";
+import type { ExtensionNotificationType } from "@greppleai/grip";
 import {
 	type Component,
 	Container,

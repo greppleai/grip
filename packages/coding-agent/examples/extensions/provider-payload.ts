@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 
 export default function (pi: ExtensionAPI) {
 	const logFile = join(process.cwd(), ".grip", "provider-payload.log");

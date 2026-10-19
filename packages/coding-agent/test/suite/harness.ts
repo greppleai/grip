@@ -28,7 +28,7 @@ import {
 	createTestResourceLoader,
 } from "../utilities.ts";
 
-// pi-ignore noNearIdenticalDataStructures: The harness parses arbitrary session-message content, while the component fixture captures streamed tool-update content.
+// grip-ignore noNearIdenticalDataStructures: The harness parses arbitrary session-message content, while the component fixture captures streamed tool-update content.
 interface HarnessMessageContentPart {
 	type: string;
 	text?: string;

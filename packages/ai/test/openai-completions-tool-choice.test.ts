@@ -12,7 +12,7 @@ interface MockCompletionChoice {
 	usage?: unknown;
 }
 
-// pi-ignore noNearIdenticalDataStructures: The mock stream fixture schema is owned by this test, while provider token details accept independently evolving vendor payloads.
+// grip-ignore noNearIdenticalDataStructures: The mock stream fixture schema is owned by this test, while provider token details accept independently evolving vendor payloads.
 interface MockPromptTokensDetails {
 	cached_tokens: number;
 	cache_write_tokens?: number;
@@ -37,7 +37,7 @@ interface InstructionMessagePayload {
 	role?: string;
 }
 
-// pi-ignore noNearIdenticalDataStructures: This normalized assertion view is test-owned and intentionally independent from provider requests and remote-session wire envelopes.
+// grip-ignore noNearIdenticalDataStructures: This normalized assertion view is test-owned and intentionally independent from provider requests and remote-session wire envelopes.
 interface NormalizedMessagePayload {
 	role?: string;
 	content?: unknown;

@@ -138,7 +138,7 @@ async function downloadFile(url: string, dest: string): Promise<void> {
 	await pipeline(Readable.fromWeb(response.body as any), fileStream);
 }
 
-// pi-ignore noExcessiveCollectionIterations: Each discovered directory is visited once, so traversal is linear in archive entries.
+// grip-ignore noExcessiveCollectionIterations: Each discovered directory is visited once, so traversal is linear in archive entries.
 function findBinaryRecursively(rootDir: string, binaryFileName: string): string | null {
 	const stack: string[] = [rootDir];
 

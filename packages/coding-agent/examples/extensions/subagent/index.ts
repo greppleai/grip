@@ -27,7 +27,7 @@ import {
 	type Theme,
 	type ThemeColor,
 	withFileMutationQueue,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 import { Container, Markdown, Spacer, Text } from "@greppleai/grip-tui";
 import { type Static, Type } from "typebox";
 import { type AgentConfig, type AgentConfigSource, type AgentScope, discoverAgents } from "./agents.ts";

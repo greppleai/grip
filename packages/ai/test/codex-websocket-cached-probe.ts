@@ -2,7 +2,7 @@
 /**
  * Live probe for OpenAI Codex Responses websocket-cached mode.
  *
- * Runs a simple tool loop directly against the pi-ai provider source so it does not
+ * Runs a simple tool loop directly against the grip-ai provider source so it does not
  * depend on built dist packages or coding-agent SDK wiring.
  */
 
@@ -48,7 +48,7 @@ function parseArgs(argv: string[]): Args {
 	let transport: Transport = "websocket-cached";
 	let maxTokens = DEFAULT_MAX_TOKENS;
 	let reasoning: ThinkingLevel = "low";
-	let sessionId = `pi-ai-codex-ws-cached-probe-${Date.now()}`;
+	let sessionId = `grip-ai-codex-ws-cached-probe-${Date.now()}`;
 
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -218,7 +218,7 @@ function formatStatsDelta(
 	return `ws requests ${after.requests - (before?.requests ?? 0)} | new/reused ${after.connectionsCreated - (before?.connectionsCreated ?? 0)}/${after.connectionsReused - (before?.connectionsReused ?? 0)} | cached ${after.cachedContextRequests - (before?.cachedContextRequests ?? 0)} | store ${after.storeTrueRequests - (before?.storeTrueRequests ?? 0)} | full/delta ${after.fullContextRequests - (before?.fullContextRequests ?? 0)}/${after.deltaRequests - (before?.deltaRequests ?? 0)}`;
 }
 
-// pi-ignore noExcessiveCollectionIterations: Each request scans only its newly returned content, then executes that response's tool calls once after logging and stop-reason validation; work is linear per response.
+// grip-ignore noExcessiveCollectionIterations: Each request scans only its newly returned content, then executes that response's tool calls once after logging and stop-reason validation; work is linear per response.
 async function runProbeTurn(turn: number, args: Args, setup: ProbeSetup): Promise<number> {
 	setup.context.messages.push({ role: "user", content: buildPrompt(turn), timestamp: Date.now() });
 	const beforeStats = getOpenAICodexWebSocketDebugStats(args.sessionId);

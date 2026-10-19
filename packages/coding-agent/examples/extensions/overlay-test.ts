@@ -8,7 +8,7 @@
  * - Edge case tests (wide chars, styled text, emoji)
  */
 
-import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@greppleai/grip";
 import { CURSOR_MARKER, type Focusable, matchesKey, visibleWidth } from "@greppleai/grip-tui";
 
 interface OverlayTestResult {

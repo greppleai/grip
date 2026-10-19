@@ -11,7 +11,7 @@ import {
 	getAgentDir,
 	InMemorySessionManager,
 	type PromptTemplate,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 
 // Define custom templates
 const deployTemplate: PromptTemplate = {

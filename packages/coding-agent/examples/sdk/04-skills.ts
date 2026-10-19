@@ -12,7 +12,7 @@ import {
 	getAgentDir,
 	InMemorySessionManager,
 	type Skill,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 
 // Or define custom skills inline
 const customSkill: Skill = {

@@ -18,7 +18,7 @@
  */
 
 import { StringEnum } from "@greppleai/grip-ai";
-import type { ExtensionAPI, ExtensionContext, Theme, ToolExecutionMode } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme, ToolExecutionMode } from "@greppleai/grip";
 import { type Component, matchesKey, Text, truncateToWidth, visibleWidth } from "@greppleai/grip-tui";
 import { Type } from "typebox";
 
@@ -403,7 +403,7 @@ function renderBoardContentRow(context: BoardRenderContext, gridRow: number, lin
 	return centerPad(contentRow, context.maxWidth);
 }
 
-// pi-ignore noExcessiveCollectionIterations: The board is fixed at 3x3; each of its three rows renders exactly three content lines plus four borders.
+// grip-ignore noExcessiveCollectionIterations: The board is fixed at 3x3; each of its three rows renders exactly three content lines plus four borders.
 function renderBoard(opts: BoardRenderOpts): string[] {
 	const context = createBoardRenderContext(opts);
 	const lines: string[] = [];

@@ -41,7 +41,7 @@ type OpenRouterImageGenerationResponse = ChatCompletion & {
 	choices: OpenRouterImageGenerationChoice[];
 };
 
-// pi-ignore noNearIdenticalDataStructures: OpenRouter image responses and OpenAI-compatible completion streams are separate provider wire payloads and may evolve independently.
+// grip-ignore noNearIdenticalDataStructures: OpenRouter image responses and OpenAI-compatible completion streams are separate provider wire payloads and may evolve independently.
 interface OpenRouterPromptTokenDetails {
 	cached_tokens?: number;
 	cache_write_tokens?: number;

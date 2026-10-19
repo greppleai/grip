@@ -11,7 +11,7 @@
  */
 
 import { StringEnum } from "@greppleai/grip-ai";
-import type { AgentToolResult, ExtensionAPI, ExtensionContext, Theme } from "@greppleai/grip-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionContext, Theme } from "@greppleai/grip";
 import { matchesKey, Text, truncateToWidth } from "@greppleai/grip-tui";
 import { Type } from "typebox";
 

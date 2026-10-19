@@ -144,7 +144,7 @@ interface CachedContext {
 	generatedAt: string;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Test-only flattened message offsets and terminal selection columns have independent ownership and evolution.
+// grip-ignore noNearIdenticalDataStructures: Test-only flattened message offsets and terminal selection columns have independent ownership and evolution.
 interface ContextMessageRange {
 	start: number;
 	end: number;

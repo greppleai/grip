@@ -4,7 +4,7 @@
  * Configure API key resolution via AuthStorage and ModelRegistry.
  */
 
-import { AuthStorage, GripAgent, InMemorySessionManager, ModelRegistry } from "@greppleai/grip-coding-agent";
+import { AuthStorage, GripAgent, InMemorySessionManager, ModelRegistry } from "@greppleai/grip";
 
 interface AuthExampleOptions {
 	authStorage: AuthStorage;

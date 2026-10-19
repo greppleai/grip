@@ -5,7 +5,7 @@
  * Demonstrates how extensions can use ctx.shutdown() to exit grip cleanly.
  */
 
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 import { Type } from "typebox";
 
 export default function (pi: ExtensionAPI) {

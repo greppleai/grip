@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 import { Type } from "typebox";
 
 export default function lazyToolsTest(pi: ExtensionAPI) {

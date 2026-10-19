@@ -267,10 +267,10 @@ export class LimaSandboxService {
 		if (check.exitCode === 0) return;
 		if (!managed) {
 			throw new Error(
-				`Lima instance ${name} does not provide grip; install @greppleai/grip-coding-agent in the VM first`,
+				`Lima instance ${name} does not provide grip; install @greppleai/grip in the VM first`,
 			);
 		}
-		const packageSpec = `@greppleai/grip-coding-agent@${VERSION}`;
+		const packageSpec = `@greppleai/grip@${VERSION}`;
 		const script = `set -eu; sudo apt-get update; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs npm; sudo npm install -g ${shellQuote(packageSpec)}`;
 		const args = ["shell", "--tty=false", name, "sh", "-lc", script];
 		ensureLimaSuccessful(config.limaBinary, await this.runner.run(config.limaBinary, args), args);

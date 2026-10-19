@@ -137,7 +137,7 @@ function createSubmitContext(): SubmitContext {
 function createStartResult(): SandboxStartResult {
 	return {
 		containerId: "abc123",
-		containerName: "pi-sandbox-project-hash",
+		containerName: "grip-sandbox-project-hash",
 		workspaceRoot: "/host/project",
 		workspaceMountPath: "/workspace",
 		daemonUrl: "ws://127.0.0.1:49153/pi/workspace",
@@ -150,8 +150,8 @@ function createStartResult(): SandboxStartResult {
 function createContainer(): SandboxContainer {
 	return {
 		id: "abc123",
-		name: "pi-sandbox-project-hash",
-		image: "pi-sandbox:test",
+		name: "grip-sandbox-project-hash",
+		image: "grip-sandbox:test",
 		status: "Up 1s",
 		state: "running",
 		createdAt: "2026-01-01T00:00:00Z",
@@ -233,7 +233,7 @@ describe("hidden sandbox command", () => {
 		expect(
 			formatSandboxStartResult({
 				containerId: "abc123",
-				containerName: "pi-sandbox-project-hash",
+				containerName: "grip-sandbox-project-hash",
 				workspaceRoot: "/host/project",
 				workspaceMountPath: "/workspace",
 				daemonUrl: "ws://127.0.0.1:49153/pi/workspace",
@@ -241,13 +241,13 @@ describe("hidden sandbox command", () => {
 				token: "secret-token",
 				labels: {},
 			}),
-		).toContain("Sandbox started: pi-sandbox-project-hash (abc123)");
+		).toContain("Sandbox started: grip-sandbox-project-hash (abc123)");
 		expect(
 			formatSandboxList([
 				{
 					id: "abc123",
-					name: "pi-sandbox-project-hash",
-					image: "pi-sandbox:test",
+					name: "grip-sandbox-project-hash",
+					image: "grip-sandbox:test",
 					status: "Up 1s",
 					state: "running",
 					createdAt: "2026-01-01T00:00:00Z",
@@ -258,15 +258,15 @@ describe("hidden sandbox command", () => {
 					labels: {},
 				},
 			]),
-		).toContain("abc123\tpi-sandbox-project-hash\trunning\tpi-sandbox:test");
+		).toContain("abc123\tgrip-sandbox-project-hash\trunning\tgrip-sandbox:test");
 		expect(formatSandboxList([])).toBe("No Grip sandboxes found for this workspace.");
 		expect(
 			formatSandboxStopResult({
 				status: "already-stopped",
 				container: {
 					id: "abc123",
-					name: "pi-sandbox-project-hash",
-					image: "pi-sandbox:test",
+					name: "grip-sandbox-project-hash",
+					image: "grip-sandbox:test",
 					status: "Exited",
 					state: "exited",
 					createdAt: undefined,
@@ -277,7 +277,7 @@ describe("hidden sandbox command", () => {
 					labels: {},
 				},
 			}),
-		).toBe("Sandbox already stopped: pi-sandbox-project-hash (abc123)");
+		).toBe("Sandbox already stopped: grip-sandbox-project-hash (abc123)");
 	});
 
 	it("dispatches /sandbox through the interactive submit path without queueing it as a prompt", async () => {
@@ -496,13 +496,13 @@ describe("hidden sandbox command", () => {
 		};
 		Object.setPrototypeOf(context, InteractiveMode.prototype);
 
-		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start --image pi-sandbox:test");
+		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start --image grip-sandbox:test");
 		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox list");
 		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox stop abc123");
 
 		expect(start).toHaveBeenCalledWith({
 			workspaceRoot: "/host/project",
-			image: "pi-sandbox:test",
+			image: "grip-sandbox:test",
 			sessionId: "session-a",
 		});
 		expect(activateSandboxDaemon).toHaveBeenCalledWith({
@@ -517,7 +517,7 @@ describe("hidden sandbox command", () => {
 			currentContainerId: "abc123",
 		});
 		expect(showStatus.mock.calls.map((call) => call[0]).join("\n")).toContain("Sandbox started");
-		expect(showStatus.mock.calls.map((call) => call[0]).join("\n")).toContain("pi-sandbox:test");
+		expect(showStatus.mock.calls.map((call) => call[0]).join("\n")).toContain("grip-sandbox:test");
 		expect(showStatus.mock.calls.map((call) => call[0]).join("\n")).toContain("Sandbox stopped");
 		expect(clearRemoteSandbox).toHaveBeenCalledOnce();
 	});

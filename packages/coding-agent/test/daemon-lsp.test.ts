@@ -139,11 +139,15 @@ describe("daemon LSP ownership", () => {
 		const environment = runtime.operations.createChildEnvironment({
 			SAFE_VALUE: "ok",
 			LC_API_KEY: "secret",
+			GRIP_DAEMON_TOKEN: "secret",
+			GRIP_DAEMON_TLS_KEY: "secret",
 			PI_REMOTE_TOKEN: "secret",
 			PI_DAEMON_TLS_KEY: "secret",
 		});
 		expect(environment).toEqual(expect.objectContaining({ SAFE_VALUE: "ok" }));
 		expect(environment).not.toHaveProperty("LC_API_KEY");
+		expect(environment).not.toHaveProperty("GRIP_DAEMON_TOKEN");
+		expect(environment).not.toHaveProperty("GRIP_DAEMON_TLS_KEY");
 		expect(environment).not.toHaveProperty("PI_REMOTE_TOKEN");
 		expect(environment).not.toHaveProperty("PI_DAEMON_TLS_KEY");
 		await runtime.dispose();

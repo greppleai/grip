@@ -21,7 +21,7 @@ import * as _bundledTypeboxCompile from "typebox/compile";
 import * as _bundledTypeboxValue from "typebox/value";
 import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.ts";
 // NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
-// avoiding a circular dependency. Extensions can import from @greppleai/grip-coding-agent.
+// avoiding a circular dependency. Extensions can import from @greppleai/grip.
 import * as _bundledGripCodingAgent from "../../index.ts";
 import { parseFrontmatter } from "../../utils/frontmatter.ts";
 import { resolvePath } from "../../utils/paths.ts";
@@ -61,12 +61,8 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"@greppleai/grip-tui": _bundledGripTui,
 	"@greppleai/grip-ai": _bundledGripAi,
 	"@greppleai/grip-ai/oauth": _bundledGripAiOauth,
-	"@greppleai/grip-coding-agent": _bundledGripCodingAgent,
-	"@mariozechner/pi-agent-core": _bundledGripAgentCore,
-	"@mariozechner/pi-tui": _bundledGripTui,
-	"@mariozechner/pi-ai": _bundledGripAi,
-	"@mariozechner/pi-ai/oauth": _bundledGripAiOauth,
-	"@mariozechner/pi-coding-agent": _bundledGripCodingAgent,
+	"@greppleai/grip": _bundledGripCodingAgent,
+	"@greppleai/grip-coding-agent": _bundledGripCodingAgent, // Pre-release extension compatibility.
 };
 
 const require = createRequire(import.meta.url);
@@ -106,16 +102,12 @@ function getAliases(): Record<string, string> {
 	const gripAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@greppleai/grip-ai/oauth");
 
 	_aliases = {
-		"@greppleai/grip-coding-agent": gripCodingAgentEntry,
+		"@greppleai/grip": gripCodingAgentEntry,
+		"@greppleai/grip-coding-agent": gripCodingAgentEntry, // Pre-release extension compatibility.
 		"@greppleai/grip-agent-core": gripAgentCoreEntry,
 		"@greppleai/grip-tui": gripTuiEntry,
 		"@greppleai/grip-ai": gripAiEntry,
 		"@greppleai/grip-ai/oauth": gripAiOauthEntry,
-		"@mariozechner/pi-coding-agent": gripCodingAgentEntry,
-		"@mariozechner/pi-agent-core": gripAgentCoreEntry,
-		"@mariozechner/pi-tui": gripTuiEntry,
-		"@mariozechner/pi-ai": gripAiEntry,
-		"@mariozechner/pi-ai/oauth": gripAiOauthEntry,
 		typebox: typeboxEntry,
 		"typebox/compile": typeboxCompileEntry,
 		"typebox/value": typeboxValueEntry,

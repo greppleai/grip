@@ -64,11 +64,11 @@ afterEach(() => {
 	}
 });
 
-function createNpmPrefixInstall(template = "pi-prefix-"): NpmPrefixInstallFixture {
+function createNpmPrefixInstall(template = "grip-prefix-"): NpmPrefixInstallFixture {
 	const prefix = mkdtempSync(join(tmpdir(), template));
 	const root = join(prefix, "lib", "node_modules");
 	const scopeDir = join(root, "@greppleai");
-	const packageDir = join(scopeDir, "grip-coding-agent");
+	const packageDir = join(scopeDir, "grip");
 	mkdirSync(packageDir, { recursive: true });
 	tempDir = prefix;
 	process.env.GRIP_PACKAGE_DIR = packageDir;
@@ -77,10 +77,10 @@ function createNpmPrefixInstall(template = "pi-prefix-"): NpmPrefixInstallFixtur
 }
 
 function createPnpmGlobalInstall(): PnpmGlobalInstallFixture {
-	const temp = mkdtempSync(join(tmpdir(), "pi-pnpm-"));
+	const temp = mkdtempSync(join(tmpdir(), "grip-pnpm-"));
 	const binDir = join(temp, "bin");
 	const root = join(temp, "pnpm", "global", "5", "node_modules");
-	const packageDir = join(root, "@mariozechner", "pi-coding-agent");
+	const packageDir = join(root, "@greppleai", "grip");
 	mkdirSync(packageDir, { recursive: true });
 	mkdirSync(binDir, { recursive: true });
 	writeFileSync(join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm"), createFakePnpmScript(root));
@@ -88,26 +88,15 @@ function createPnpmGlobalInstall(): PnpmGlobalInstallFixture {
 	tempDir = temp;
 	process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
 	process.env.GRIP_PACKAGE_DIR = packageDir;
-	setExecPath(
-		join(
-			root,
-			".pnpm",
-			"@mariozechner+pi-coding-agent@0.0.0",
-			"node_modules",
-			"@mariozechner",
-			"pi-coding-agent",
-			"dist",
-			"cli.ts",
-		),
-	);
+	setExecPath(join(root, ".pnpm", "@greppleai+grip@0.0.0", "node_modules", "@greppleai", "grip", "dist", "cli.ts"));
 	return { root, packageDir };
 }
 
 function createYarnGlobalInstall(): YarnGlobalInstallFixture {
-	const temp = mkdtempSync(join(tmpdir(), "pi-yarn-"));
+	const temp = mkdtempSync(join(tmpdir(), "grip-yarn-"));
 	const binDir = join(temp, "bin");
 	const globalDir = join(temp, "yarn", "global");
-	const packageDir = join(globalDir, "node_modules", "@mariozechner", "pi-coding-agent");
+	const packageDir = join(globalDir, "node_modules", "@greppleai", "grip");
 	mkdirSync(packageDir, { recursive: true });
 	mkdirSync(binDir, { recursive: true });
 	writeFileSync(join(binDir, process.platform === "win32" ? "yarn.cmd" : "yarn"), createFakeYarnScript(globalDir));
@@ -115,17 +104,17 @@ function createYarnGlobalInstall(): YarnGlobalInstallFixture {
 	tempDir = temp;
 	process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
 	process.env.GRIP_PACKAGE_DIR = packageDir;
-	setExecPath(join(globalDir, ".yarn", "@mariozechner", "pi-coding-agent", "dist", "cli.ts"));
+	setExecPath(join(globalDir, ".yarn", "@greppleai", "grip", "dist", "cli.ts"));
 	return { globalDir, packageDir };
 }
 
 function createBunGlobalInstall(): PackageInstallFixture {
-	const temp = mkdtempSync(join(tmpdir(), "pi-bun-"));
+	const temp = mkdtempSync(join(tmpdir(), "grip-bun-"));
 	const prefix = join(temp, ".bun");
 	const bunBin = join(prefix, "bin");
 	const root = join(prefix, "install", "global", "node_modules");
 	const scopeDir = join(root, "@greppleai");
-	const packageDir = join(scopeDir, "grip-coding-agent");
+	const packageDir = join(scopeDir, "grip");
 	mkdirSync(packageDir, { recursive: true });
 	mkdirSync(bunBin, { recursive: true });
 	writeFileSync(join(bunBin, process.platform === "win32" ? "bun.cmd" : "bun"), createFakeBunScript(bunBin));
@@ -164,12 +153,12 @@ function createFakeBunScript(bunBin: string): string {
 describe("detectInstallMethod", () => {
 	test("detects pnpm from Windows .pnpm install paths", () => {
 		setExecPath(
-			"C:\\Users\\Admin\\Documents\\pnpm-repository\\global\\5\\.pnpm\\@greppleai+grip-coding-agent@0.67.68\\node_modules\\@greppleai\\grip-coding-agent\\dist\\cli.ts",
+			"C:\\Users\\Admin\\Documents\\pnpm-repository\\global\\5\\.pnpm\\@greppleai+grip@0.67.68\\node_modules\\@greppleai\\grip\\dist\\cli.ts",
 		);
 
 		expect(detectInstallMethod()).toBe("pnpm");
-		expect(getUpdateInstruction("@greppleai/grip-coding-agent")).toBe(
-			"Run: pnpm install -g --ignore-scripts --config.minimumReleaseAge=0 @greppleai/grip-coding-agent",
+		expect(getUpdateInstruction("@greppleai/grip")).toBe(
+			"Run: pnpm install -g --ignore-scripts --config.minimumReleaseAge=0 @greppleai/grip",
 		);
 	});
 
@@ -177,81 +166,41 @@ describe("detectInstallMethod", () => {
 		setExecPath("/usr/local/bin/node");
 
 		expect(detectInstallMethod()).toBe("unknown");
-		expect(getSelfUpdateCommand("@greppleai/grip-coding-agent")).toBeUndefined();
-		expect(getUpdateInstruction("@greppleai/grip-coding-agent")).toBe(
-			"Update @greppleai/grip-coding-agent using the package manager, wrapper, or source checkout that provides this installation.",
+		expect(getSelfUpdateCommand("@greppleai/grip")).toBeUndefined();
+		expect(getUpdateInstruction("@greppleai/grip")).toBe(
+			"Update @greppleai/grip using the package manager, wrapper, or source checkout that provides this installation.",
 		);
 	});
 
 	test("self-updates npm installs from custom prefixes", () => {
 		const { prefix } = createNpmPrefixInstall();
 
-		const command = getSelfUpdateCommand("@greppleai/grip-coding-agent");
+		const command = getSelfUpdateCommand("@greppleai/grip");
 
 		expect(detectInstallMethod()).toBe("npm");
 		expect(command).toEqual({
 			command: "npm",
-			args: [
-				"--prefix",
-				prefix,
-				"install",
-				"-g",
-				"--ignore-scripts",
-				"--min-release-age=0",
-				"@greppleai/grip-coding-agent",
-			],
-			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @greppleai/grip-coding-agent`,
-		});
-	});
-
-	test("self-updates renamed packages from the current install prefix", () => {
-		const { prefix } = createNpmPrefixInstall();
-
-		const command = getSelfUpdateCommand("@mariozechner/pi-coding-agent", undefined, "@new-scope/pi");
-
-		expect(command).toEqual({
-			command: "npm",
-			args: ["--prefix", prefix, "install", "-g", "--ignore-scripts", "--min-release-age=0", "@new-scope/pi"],
-			display: `npm --prefix ${prefix} uninstall -g @mariozechner/pi-coding-agent && npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @new-scope/pi`,
-			steps: [
-				{
-					command: "npm",
-					args: ["--prefix", prefix, "uninstall", "-g", "@mariozechner/pi-coding-agent"],
-					display: `npm --prefix ${prefix} uninstall -g @mariozechner/pi-coding-agent`,
-				},
-				{
-					command: "npm",
-					args: ["--prefix", prefix, "install", "-g", "--ignore-scripts", "--min-release-age=0", "@new-scope/pi"],
-					display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @new-scope/pi`,
-				},
-			],
+			args: ["--prefix", prefix, "install", "-g", "--ignore-scripts", "--min-release-age=0", "@greppleai/grip"],
+			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @greppleai/grip`,
 		});
 	});
 
 	test("self-update respects configured npmCommand", () => {
 		const { prefix } = createNpmPrefixInstall();
 
-		const command = getSelfUpdateCommand("@greppleai/grip-coding-agent", ["npm", "--prefix", prefix]);
+		const command = getSelfUpdateCommand("@greppleai/grip", ["npm", "--prefix", prefix]);
 
 		expect(command).toEqual({
 			command: "npm",
-			args: [
-				"--prefix",
-				prefix,
-				"install",
-				"-g",
-				"--ignore-scripts",
-				"--min-release-age=0",
-				"@greppleai/grip-coding-agent",
-			],
-			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @greppleai/grip-coding-agent`,
+			args: ["--prefix", prefix, "install", "-g", "--ignore-scripts", "--min-release-age=0", "@greppleai/grip"],
+			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @greppleai/grip`,
 		});
 	});
 
 	test("self-update treats empty npmCommand as unset", () => {
 		const { prefix } = createNpmPrefixInstall();
 
-		const command = getSelfUpdateCommand("@greppleai/grip-coding-agent", []);
+		const command = getSelfUpdateCommand("@greppleai/grip", []);
 
 		expect(command?.args).toEqual([
 			"--prefix",
@@ -260,76 +209,62 @@ describe("detectInstallMethod", () => {
 			"-g",
 			"--ignore-scripts",
 			"--min-release-age=0",
-			"@greppleai/grip-coding-agent",
+			"@greppleai/grip",
 		]);
 	});
 
 	test("quotes npm self-update display paths", () => {
 		const { prefix } = createNpmPrefixInstall("pi prefix ");
 
-		const command = getSelfUpdateCommand("@greppleai/grip-coding-agent");
+		const command = getSelfUpdateCommand("@greppleai/grip");
 
 		expect(command?.display).toBe(
-			`npm --prefix "${prefix}" install -g --ignore-scripts --min-release-age=0 @greppleai/grip-coding-agent`,
+			`npm --prefix "${prefix}" install -g --ignore-scripts --min-release-age=0 @greppleai/grip`,
 		);
 	});
 
 	test("does not infer Windows npm custom prefixes from package paths", () => {
-		const packageDir = "C:\\Users\\Admin\\npm prefix\\node_modules\\@greppleai\\grip-coding-agent";
+		const packageDir = "C:\\Users\\Admin\\npm prefix\\node_modules\\@greppleai\\grip";
 		process.env.GRIP_PACKAGE_DIR = packageDir;
 		setExecPath(`${packageDir}\\dist\\cli.js`);
 
 		expect(detectInstallMethod()).toBe("npm");
-		expect(getUpdateInstruction("@greppleai/grip-coding-agent")).toBe(
-			"Run: npm install -g --ignore-scripts --min-release-age=0 @greppleai/grip-coding-agent",
+		expect(getUpdateInstruction("@greppleai/grip")).toBe(
+			"Run: npm install -g --ignore-scripts --min-release-age=0 @greppleai/grip",
 		);
 	});
 
 	test("self-updates bun global installs from bun pm bin", () => {
 		createBunGlobalInstall();
 
-		const command = getSelfUpdateCommand("@greppleai/grip-coding-agent");
+		const command = getSelfUpdateCommand("@greppleai/grip");
 
 		expect(detectInstallMethod()).toBe("bun");
 		expect(command).toEqual({
 			command: "bun",
-			args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@greppleai/grip-coding-agent"],
-			display: "bun install -g --ignore-scripts --minimum-release-age=0 @greppleai/grip-coding-agent",
+			args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@greppleai/grip"],
+			display: "bun install -g --ignore-scripts --minimum-release-age=0 @greppleai/grip",
 		});
 	});
 
-	test("self-updates renamed pnpm global installs by removing the old package first", () => {
+	test("self-updates pnpm global installs without uninstalling", () => {
 		createPnpmGlobalInstall();
-
-		const command = getSelfUpdateCommand("@mariozechner/pi-coding-agent", undefined, "@new-scope/pi");
+		const command = getSelfUpdateCommand("@greppleai/grip");
 
 		expect(detectInstallMethod()).toBe("pnpm");
 		expect(command).toEqual({
 			command: "pnpm",
-			args: ["install", "-g", "--ignore-scripts", "--config.minimumReleaseAge=0", "@new-scope/pi"],
-			display:
-				"pnpm remove -g @mariozechner/pi-coding-agent && pnpm install -g --ignore-scripts --config.minimumReleaseAge=0 @new-scope/pi",
-			steps: [
-				{
-					command: "pnpm",
-					args: ["remove", "-g", "@mariozechner/pi-coding-agent"],
-					display: "pnpm remove -g @mariozechner/pi-coding-agent",
-				},
-				{
-					command: "pnpm",
-					args: ["install", "-g", "--ignore-scripts", "--config.minimumReleaseAge=0", "@new-scope/pi"],
-					display: "pnpm install -g --ignore-scripts --config.minimumReleaseAge=0 @new-scope/pi",
-				},
-			],
+			args: ["install", "-g", "--ignore-scripts", "--config.minimumReleaseAge=0", "@greppleai/grip"],
+			display: "pnpm install -g --ignore-scripts --config.minimumReleaseAge=0 @greppleai/grip",
 		});
 	});
 
 	test("self-updates pnpm v11 global installs resolved through the store", () => {
-		const temp = mkdtempSync(join(tmpdir(), "pi-pnpm11-"));
+		const temp = mkdtempSync(join(tmpdir(), "grip-pnpm11-"));
 		const binDir = join(temp, "bin");
 		const root = join(temp, "Library", "pnpm", "global", "v11");
-		const packageName = "@greppleai/grip-coding-agent";
-		const globalPackageDir = join(root, "11e9a", "node_modules", "@greppleai", "grip-coding-agent");
+		const packageName = "@greppleai/grip";
+		const globalPackageDir = join(root, "11e9a", "node_modules", "@greppleai", "grip");
 		const storePackageDir = join(
 			temp,
 			"Library",
@@ -338,12 +273,12 @@ describe("detectInstallMethod", () => {
 			"v11",
 			"links",
 			"@greppleai",
-			"grip-coding-agent",
+			"grip",
 			"0.75.0",
 			"hash",
 			"node_modules",
 			"@greppleai",
-			"grip-coding-agent",
+			"grip",
 		);
 		mkdirSync(globalPackageDir, { recursive: true });
 		mkdirSync(storePackageDir, { recursive: true });
@@ -367,54 +302,15 @@ describe("detectInstallMethod", () => {
 		});
 	});
 
-	test("self-updates renamed yarn global installs by removing the old package first", () => {
+	test("self-updates yarn global installs without uninstalling", () => {
 		createYarnGlobalInstall();
-
-		const command = getSelfUpdateCommand("@mariozechner/pi-coding-agent", undefined, "@new-scope/pi");
+		const command = getSelfUpdateCommand("@greppleai/grip");
 
 		expect(detectInstallMethod()).toBe("yarn");
 		expect(command).toEqual({
 			command: "yarn",
-			args: ["global", "add", "--ignore-scripts", "@new-scope/pi"],
-			display: "yarn global remove @mariozechner/pi-coding-agent && yarn global add --ignore-scripts @new-scope/pi",
-			steps: [
-				{
-					command: "yarn",
-					args: ["global", "remove", "@mariozechner/pi-coding-agent"],
-					display: "yarn global remove @mariozechner/pi-coding-agent",
-				},
-				{
-					command: "yarn",
-					args: ["global", "add", "--ignore-scripts", "@new-scope/pi"],
-					display: "yarn global add --ignore-scripts @new-scope/pi",
-				},
-			],
-		});
-	});
-
-	test("self-updates renamed bun global installs by removing the old package first", () => {
-		createBunGlobalInstall();
-
-		const command = getSelfUpdateCommand("@mariozechner/pi-coding-agent", undefined, "@new-scope/pi");
-
-		expect(detectInstallMethod()).toBe("bun");
-		expect(command).toEqual({
-			command: "bun",
-			args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@new-scope/pi"],
-			display:
-				"bun uninstall -g @mariozechner/pi-coding-agent && bun install -g --ignore-scripts --minimum-release-age=0 @new-scope/pi",
-			steps: [
-				{
-					command: "bun",
-					args: ["uninstall", "-g", "@mariozechner/pi-coding-agent"],
-					display: "bun uninstall -g @mariozechner/pi-coding-agent",
-				},
-				{
-					command: "bun",
-					args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@new-scope/pi"],
-					display: "bun install -g --ignore-scripts --minimum-release-age=0 @new-scope/pi",
-				},
-			],
+			args: ["global", "add", "--ignore-scripts", "@greppleai/grip"],
+			display: "yarn global add --ignore-scripts @greppleai/grip",
 		});
 	});
 
@@ -422,9 +318,7 @@ describe("detectInstallMethod", () => {
 		const { packageDir } = createNpmPrefixInstall();
 		chmodSync(packageDir, 0o500);
 
-		expect(getSelfUpdateCommand("@greppleai/grip-coding-agent")).toBeUndefined();
-		expect(getSelfUpdateUnavailableInstruction("@greppleai/grip-coding-agent")).toContain(
-			"the install path is not writable",
-		);
+		expect(getSelfUpdateCommand("@greppleai/grip")).toBeUndefined();
+		expect(getSelfUpdateUnavailableInstruction("@greppleai/grip")).toContain("the install path is not writable");
 	});
 });

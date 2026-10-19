@@ -4,7 +4,7 @@
  * Usage: grip --extension ./examples/extensions/rainbow-editor.ts
  */
 
-import { CustomEditor, type ExtensionAPI } from "@greppleai/grip-coding-agent";
+import { CustomEditor, type ExtensionAPI } from "@greppleai/grip";
 
 // Base colors (coral → yellow → green → teal → blue → purple → pink)
 const COLORS: [number, number, number][] = [

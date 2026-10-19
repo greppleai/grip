@@ -4,7 +4,7 @@
  * Shows how to replace or modify the default system prompt.
  */
 
-import { DefaultResourceLoader, GripAgent, getAgentDir, InMemorySessionManager } from "@greppleai/grip-coding-agent";
+import { DefaultResourceLoader, GripAgent, getAgentDir, InMemorySessionManager } from "@greppleai/grip";
 
 const cwd = process.cwd();
 const agentDir = getAgentDir();

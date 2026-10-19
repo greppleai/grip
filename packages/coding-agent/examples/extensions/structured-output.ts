@@ -5,7 +5,7 @@
  * without paying for an extra follow-up LLM turn.
  */
 
-import { defineTool, type ExtensionAPI } from "@greppleai/grip-coding-agent";
+import { defineTool, type ExtensionAPI } from "@greppleai/grip";
 import { Text } from "@greppleai/grip-tui";
 import { Type } from "typebox";
 

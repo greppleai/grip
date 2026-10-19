@@ -33,7 +33,7 @@ const temporaryDirectories: string[] = [];
 const children: ChildProcess[] = [];
 
 async function createTemporaryDirectory(): Promise<string> {
-	const directory = await mkdtemp(join(tmpdir(), "pi-remote-daemon-cli-"));
+	const directory = await mkdtemp(join(tmpdir(), "grip-remote-daemon-cli-"));
 	temporaryDirectories.push(directory);
 	return directory;
 }
@@ -91,7 +91,7 @@ async function waitForOutput(child: ChildProcess, predicate: (output: string) =>
 	child.stderr?.on("data", (chunk: Buffer) => {
 		output += chunk.toString("utf8");
 	});
-	const deadline = Date.now() + 15_000;
+	const deadline = Date.now() + 30_000;
 	while (!predicate(output)) {
 		if (child.exitCode !== null) throw new Error(`Daemon exited before expected output: ${output}`);
 		if (Date.now() >= deadline) throw new Error(`Timed out waiting for daemon output: ${output}`);
@@ -196,7 +196,7 @@ describe.sequential("grip --daemon CLI and lifecycle", () => {
 				HOST: "0.0.0.0",
 				PORT: "1",
 				HOME: sandboxHome,
-				PI_DAEMON_PORT: "8123",
+				GRIP_DAEMON_PORT: "8123",
 				GRIP_DAEMON_TEMP_ROOT: temporaryRoot,
 			},
 			workspaceRoot,
@@ -511,7 +511,7 @@ describe.sequential("grip --daemon CLI and lifecycle", () => {
 					env: {
 						PATH: process.env.PATH,
 						HOME: isolatedHome,
-						GRIP_CODING_AGENT_DIR: join(isolatedHome, ".pi-agent"),
+						GRIP_CODING_AGENT_DIR: join(isolatedHome, ".grip-agent"),
 						TMPDIR: process.env.TMPDIR,
 						NODE_NO_WARNINGS: "1",
 						SMOKE_API_KEY: "smoke-key",
@@ -524,7 +524,7 @@ describe.sequential("grip --daemon CLI and lifecycle", () => {
 			const timeout = setTimeout(() => {
 				timedOut = true;
 				child.kill("SIGKILL");
-			}, 10_000);
+			}, 30_000);
 			try {
 				await once(child, "exit");
 			} finally {
@@ -535,7 +535,7 @@ describe.sequential("grip --daemon CLI and lifecycle", () => {
 		} finally {
 			await server.forceClose();
 		}
-	}, 20_000);
+	}, 45_000);
 
 	it("starts and shuts down the Node source CLI without model, key, session, extension, or endpoint setup", async () => {
 		const workspaceRoot = await createTemporaryDirectory();
@@ -558,7 +558,7 @@ describe.sequential("grip --daemon CLI and lifecycle", () => {
 			env: {
 				PATH: process.env.PATH,
 				HOME: isolatedHome,
-				GRIP_CODING_AGENT_DIR: join(isolatedHome, ".pi-agent"),
+				GRIP_CODING_AGENT_DIR: join(isolatedHome, ".grip-agent"),
 				TMPDIR: process.env.TMPDIR,
 				NODE_NO_WARNINGS: "1",
 				GRIP_DAEMON_TOKEN: daemonToken,

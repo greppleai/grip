@@ -5,7 +5,7 @@
  * Uses the last assistant message to generate a commit message.
  */
 
-import type { ExtensionAPI, SessionEntry } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@greppleai/grip";
 
 function findLastAssistantText(entries: SessionEntry[]): string {
 	for (let index = entries.length - 1; index >= 0; index--) {

@@ -16,7 +16,7 @@ import type {
 	ParsedOAuthAuthorizationInput,
 } from "./types.ts";
 
-// pi-ignore noNearIdenticalDataStructures: Browser callback values are state-validated and required; manually parsed OAuth input remains partial and untrusted.
+// grip-ignore noNearIdenticalDataStructures: Browser callback values are state-validated and required; manually parsed OAuth input remains partial and untrusted.
 interface AuthorizationCallbackResult {
 	code: string;
 	state: string;
@@ -247,7 +247,7 @@ async function exchangeAuthorizationCode(
 	};
 }
 
-// pi-ignore noNearIdenticalDataStructures: Authorization selection is state-validated and may be empty before prompt fallback; parsed OAuth input remains partial and untrusted.
+// grip-ignore noNearIdenticalDataStructures: Authorization selection is state-validated and may be empty before prompt fallback; parsed OAuth input remains partial and untrusted.
 interface AuthorizationSelection {
 	code?: string;
 	state?: string;

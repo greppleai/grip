@@ -1,4 +1,4 @@
-import { DynamicBorder, type ExtensionAPI, type ExtensionContext } from "@greppleai/grip-coding-agent";
+import { DynamicBorder, type ExtensionAPI, type ExtensionContext } from "@greppleai/grip";
 import { Container, Text } from "@greppleai/grip-tui";
 
 const PR_PROMPT_PATTERN = /^\s*You are given one or more GitHub PR URLs:\s*(\S+)/im;

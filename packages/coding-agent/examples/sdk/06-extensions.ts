@@ -13,7 +13,7 @@
  *   export default function (pi: ExtensionAPI) { ... }
  */
 
-import { DefaultResourceLoader, GripAgent, getAgentDir, InMemorySessionManager } from "@greppleai/grip-coding-agent";
+import { DefaultResourceLoader, GripAgent, getAgentDir, InMemorySessionManager } from "@greppleai/grip";
 
 // Extensions are discovered automatically from standard locations.
 // You can also add paths via settings.json or DefaultResourceLoader options.
@@ -52,7 +52,7 @@ try {
 
 // Example extension file (./my-logging-extension.ts):
 /*
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 
 export default function (pi: ExtensionAPI) {
 	pi.on("agent_start", async () => {

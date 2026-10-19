@@ -59,7 +59,7 @@ import {
 	type ToolCall,
 	type ToolResultMessage,
 } from "@greppleai/grip-ai";
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 
 // =============================================================================
 // OAuth Implementation (copied from packages/ai/src/utils/oauth/anthropic.ts)

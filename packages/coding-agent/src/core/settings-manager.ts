@@ -14,7 +14,7 @@ import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dis
 import type { LspConfigurationLayer } from "./lsp/config.ts";
 import type { SandboxCleanupBehavior, SandboxRuntime } from "./sandbox/docker.ts";
 
-// pi-ignore noNearIdenticalDataStructures: Persisted overrides permit omitted fields so settings layering can apply defaults independently of the fully resolved harness runtime contract.
+// grip-ignore noNearIdenticalDataStructures: Persisted overrides permit omitted fields so settings layering can apply defaults independently of the fully resolved harness runtime contract.
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
 	reserveTokens?: number; // default: 16384

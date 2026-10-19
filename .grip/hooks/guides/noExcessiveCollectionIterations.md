@@ -21,7 +21,7 @@ The check reports candidates such as nested traversal over outer-invariant colle
 Some algorithms are inherently pairwise, operate on strictly bounded inputs, or are clearer as a small number of sequential passes. Keep those implementations and add a specific directive directly above the function:
 
 ```ts
-// pi-ignore noExcessiveCollectionIterations: Grid dimensions are validated to at most 4x4.
+// grip-ignore noExcessiveCollectionIterations: Grid dimensions are validated to at most 4x4. @section:19-29
 function evaluateGrid(grid: Cell[][]): Score {
 ```
 

@@ -4,7 +4,7 @@
  * Context files provide project-specific instructions loaded into the system prompt.
  */
 
-import { DefaultResourceLoader, GripAgent, getAgentDir, InMemorySessionManager } from "@greppleai/grip-coding-agent";
+import { DefaultResourceLoader, GripAgent, getAgentDir, InMemorySessionManager } from "@greppleai/grip";
 
 // Disable context files entirely by returning an empty list in agentsFilesOverride.
 const cwd = process.cwd();

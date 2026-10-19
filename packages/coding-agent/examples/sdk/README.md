@@ -40,7 +40,7 @@ import {
   ModelRegistry,
   GripAgent,
   SettingsManager,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 
 const authStorage = AuthStorage.create();
 const modelRegistry = ModelRegistry.create(authStorage);

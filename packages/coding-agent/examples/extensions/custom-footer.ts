@@ -9,7 +9,7 @@
  */
 
 import type { AssistantMessage } from "@greppleai/grip-ai";
-import type { ExtensionAPI, SessionEntry } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@greppleai/grip";
 import { truncateToWidth, visibleWidth } from "@greppleai/grip-tui";
 
 interface FooterUsage {

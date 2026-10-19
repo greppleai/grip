@@ -864,7 +864,7 @@ export class Markdown implements Component {
 		});
 	}
 
-	// pi-ignore noExcessiveCollectionIterations: Every rendered table line must format each column once, so this rectangular traversal is linear in the emitted cell slots.
+	// grip-ignore noExcessiveCollectionIterations: Every rendered table line must format each column once, so this rectangular traversal is linear in the emitted cell slots. @class:229-925
 	private appendTableRow(lines: string[], cellLines: string[][], columnWidths: number[], bold: boolean): void {
 		const lineCount = Math.max(...cellLines.map((cell) => cell.length));
 		for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {

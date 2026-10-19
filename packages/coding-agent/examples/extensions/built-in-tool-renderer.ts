@@ -31,14 +31,14 @@ import type {
 	ExtensionAPI,
 	ReadToolDetails,
 	Theme,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 import {
 	createBashTool,
 	createEditTool,
 	createReadTool,
 	createWriteTool,
 	LocalToolOperations,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 import { Text } from "@greppleai/grip-tui";
 
 function appendExpandedBashOutput(summary: string, output: string, theme: Theme): string {

@@ -10,7 +10,7 @@ npm install --ignore-scripts
 npm run build
 ```
 
-The former source repository URL `https://github.com/fleetagent/pi` is not a verified Grip remote. Obtain the source from a trusted, confirmed location; do not substitute a guessed repository address.
+Use a trusted Grip checkout. The package metadata names the project repository, but verify the source and remote before running installation scripts.
 
 Run from source:
 

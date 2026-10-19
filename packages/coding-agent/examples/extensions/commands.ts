@@ -15,7 +15,7 @@ import type {
 	ExtensionCommandContext,
 	SlashCommandInfo,
 	SlashCommandSource,
-} from "@greppleai/grip-coding-agent";
+} from "@greppleai/grip";
 
 interface CommandSourceGroup {
 	key: SlashCommandSource;

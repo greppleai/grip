@@ -65,7 +65,7 @@ describe("noNearIdenticalDataStructures", () => {
 	it("supports a reasoned declaration-level ignore for intentionally distinct domains", () => {
 		const diagnostics = analyze(`
 			interface Person { id: string; age: number; }
-			// pi-ignore noNearIdenticalDataStructures: External user identity has separate lifecycle ownership.
+			// grip-ignore noNearIdenticalDataStructures: External user identity has separate lifecycle ownership.
 			interface User { age: number | null; id?: string; }
 		`);
 		assert.deepEqual(diagnostics, []);
@@ -74,9 +74,9 @@ describe("noNearIdenticalDataStructures", () => {
 	it("does not accept an ignore directive without a reason", () => {
 		const diagnostics = analyze(`
 			interface Person { id: string; age: number; }
-			// pi-ignore noNearIdenticalDataStructures:
+			// grip-ignore noNearIdenticalDataStructures:
 			interface User { age: number | null; id?: string; }
-			/* pi-ignore noNearIdenticalDataStructures: */
+			/* grip-ignore noNearIdenticalDataStructures: */
 			interface Account { id: string | undefined; age?: number; }
 		`);
 		assert.equal(diagnostics.length, 3);

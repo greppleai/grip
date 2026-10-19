@@ -35,7 +35,7 @@ describe("Input component", () => {
 	});
 
 	describe("render", () => {
-		// pi-ignore noExcessiveCollectionIterations: The four fixed text fixtures must each be rendered at all three fixed cursor positions, for exactly 12 combinations.
+		// grip-ignore noExcessiveCollectionIterations: The four fixed text fixtures must each be rendered at all three fixed cursor positions, for exactly 12 combinations. @func:37-86
 		function assertWideTextRenderingsFitViewport(): void {
 			const width = 93;
 			const cases = [

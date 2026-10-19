@@ -158,7 +158,7 @@ let nextImageId = 9000;
 
 function createHarness(): Harness {
 	const terminal = new NullTerminal();
-	const tui = new TuiAltScreen(terminal, false, "/tmp/pi-tui-bench");
+	const tui = new TuiAltScreen(terminal, false, "/tmp/grip-tui-bench");
 	const transcript = buildTranscript();
 	const editor = new EditorSim();
 	const image = new ImageSim(nextImageId++);

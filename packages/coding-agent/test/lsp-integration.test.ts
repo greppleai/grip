@@ -1183,7 +1183,7 @@ describe("LSP manager lifecycle", () => {
 });
 
 describe("LSP tool formatting", () => {
-	// pi-ignore noExcessiveCollectionIterations: The schema matrix is fixed at 30 primary position checks and 6 code-action range checks.
+	// grip-ignore noExcessiveCollectionIterations: The schema matrix is fixed at 30 primary position checks and 6 code-action range checks. @func:1185-2267
 	function validatePositiveIntegerPositionSchemas(): void {
 		const state = (): LspRuntimeState => {
 			throw new Error("schema validation must not access runtime state");

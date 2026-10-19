@@ -702,7 +702,7 @@ describe("Editor component", () => {
 	});
 
 	describe("Scroll indicators", () => {
-		/* pi-ignore noExcessiveCollectionIterations: Four fixed width cases each inspect at most the 20 configured content rows. */
+		/* grip-ignore noExcessiveCollectionIterations: Four fixed width cases each inspect at most the 20 configured content rows. */
 		function verifyBoundedScrollIndicators(): void {
 			const borderColor = (text: string) => `\x1b[35m${text}\x1b[39m`;
 			const cases = [
@@ -768,7 +768,7 @@ describe("Editor component", () => {
 			}
 		});
 
-		/* pi-ignore noExcessiveCollectionIterations: Two fixed five-character samples are rendered at width 8. */
+		/* grip-ignore noExcessiveCollectionIterations: Two fixed five-character samples are rendered at width 8. */
 		function verifyThaiAndLaoClusterWidths(): void {
 			for (const text of ["ำabc", "ຳabc"]) {
 				const editor = new Editor(createTestTUI(), defaultEditorTheme);
@@ -849,7 +849,7 @@ describe("Editor component", () => {
 			}
 		});
 
-		/* pi-ignore noExcessiveCollectionIterations: Two padding variants each replay exactly nine initial keystrokes. */
+		/* grip-ignore noExcessiveCollectionIterations: Two padding variants each replay exactly nine initial keystrokes. */
 		function verifyCursorWrapBoundaries(): void {
 			const width = 10;
 			for (const paddingX of [0, 1]) {

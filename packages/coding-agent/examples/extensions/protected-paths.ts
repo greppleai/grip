@@ -5,7 +5,7 @@
  * Useful for preventing accidental modifications to sensitive files.
  */
 
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 
 const PROTECTED_PATH_PATTERN = /(?:\.env|\.git\/|node_modules\/)/;
 export default function (pi: ExtensionAPI) {

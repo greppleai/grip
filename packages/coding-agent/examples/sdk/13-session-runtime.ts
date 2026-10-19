@@ -9,7 +9,7 @@
  * any session-local subscriptions and extension bindings to `pi.session`.
  */
 
-import { GripAgent, LocalSessionManager } from "@greppleai/grip-coding-agent";
+import { GripAgent, LocalSessionManager } from "@greppleai/grip";
 
 const pi = await GripAgent.create({
 	cwd: process.cwd(),

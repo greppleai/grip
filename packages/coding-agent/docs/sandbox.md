@@ -68,7 +68,7 @@ Sandbox bash calls receive the current `GRIP_SESSION_ID`, `GRIP_SESSION_FILE`, `
 
 ## Image and configuration
 
-The current default image is `ghcr.io/fleetagent/pi-sandbox:latest`, an upstream image, **not a verified Grip image**. To run a Grip daemon, build a reviewed local image below or configure a verified compatible replacement; do not assume the upstream image provides `grip`. The local example image uses integrated `grip --daemon` from `@greppleai/grip`. The retired upstream `@fleetagent/pi-daemon` package and `pi-daemon` binary are not used or supported.
+The configured default image is `ghcr.io/greppleai/grip-sandbox:latest`, but its publication has not been verified. Until it is available, build a reviewed local image below or configure a verified compatible replacement; do not assume the default image can be pulled. The local example image uses integrated `grip --daemon` from `@greppleai/grip`. There is no separate Grip daemon package or binary.
 
 When a sandbox daemon connects, Grip also loads `~/.grip/AGENTS.md` from the daemon user's home directory as user-scoped context. This is separate from the orchestrator's global instructions and lets custom Docker images or Lima users define instructions that apply only inside the sandbox. Create or update the file inside the sandbox, then run `/reload` to refresh context.
 Configuration precedence for a start is:

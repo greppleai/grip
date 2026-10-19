@@ -267,7 +267,7 @@ export interface ToolCall {
 	thoughtSignature?: string; // Google-specific: opaque signature for reusing thought context
 }
 
-// pi-ignore noNearIdenticalDataStructures: UsageCost stores monetary amounts, while AgentSession token totals store token counts and evolve with session accounting.
+// grip-ignore noNearIdenticalDataStructures: UsageCost stores monetary amounts, while AgentSession token totals store token counts and evolve with session accounting.
 export interface UsageCost {
 	input: number;
 	output: number;
@@ -519,7 +519,7 @@ export interface OpenRouterMaxPrice {
 	request?: number | string;
 }
 
-// pi-ignore noNearIdenticalDataStructures: Throughput thresholds are minimum tokens/second, while latency thresholds are maximum seconds and have independent routing semantics.
+// grip-ignore noNearIdenticalDataStructures: Throughput thresholds are minimum tokens/second, while latency thresholds are maximum seconds and have independent routing semantics.
 export interface OpenRouterThroughputPercentiles {
 	/** Minimum tokens/second at the 50th percentile. */
 	p50?: number;

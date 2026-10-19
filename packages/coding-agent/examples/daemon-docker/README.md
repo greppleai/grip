@@ -9,7 +9,7 @@ docker build -f packages/coding-agent/examples/daemon-docker/Dockerfile -t grip-
 docker run --rm -p 8787:8787 --name grip-remote-daemon-test grip-remote-daemon-test
 ```
 
-The image installs the packaged `@greppleai/grip-coding-agent` tarball and starts `grip --daemon`. It uses a fixed development token, enables process execution for shell-tool testing, and binds to `0.0.0.0` inside the container.
+The image installs the packaged `@greppleai/grip` tarball and starts `grip --daemon`. It uses a fixed development token, enables process execution for shell-tool testing, and binds to `0.0.0.0` inside the container.
 
 In another terminal, start Grip directly against the container:
 

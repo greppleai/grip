@@ -193,7 +193,7 @@ Global and project `tools` settings merge per tool name, so a project can overri
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `sandbox.image` | string | `"ghcr.io/fleetagent/pi-sandbox:latest"` (upstream default; not a verified Grip image) | Docker image used by `/sandbox start`; specify a reviewed image before running the sandbox |
+| `sandbox.image` | string | `"ghcr.io/greppleai/grip-sandbox:latest"` (not yet verified as published) | Docker image used by `/sandbox start`; override with a reviewed available image until the Grip image is published |
 | `sandbox.dockerBinary` | string | `"docker"` | Docker executable |
 | `sandbox.workspaceMountPath` | string | `"/workspace"` | Container path for the mounted current workspace |
 | `sandbox.containerNamePrefix` | string | `"grip-sandbox"` | Prefix for generated container names |

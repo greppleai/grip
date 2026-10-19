@@ -9,8 +9,8 @@
  * 2. Use /tools to open the tool selector
  */
 
-import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@greppleai/grip-coding-agent";
-import { getSettingsListTheme } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@greppleai/grip";
+import { getSettingsListTheme } from "@greppleai/grip";
 import { Container, type SettingItem, SettingsList } from "@greppleai/grip-tui";
 
 // State persisted to session

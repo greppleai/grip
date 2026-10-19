@@ -94,7 +94,7 @@ export interface RpcSessionActionResult {
 	cancelled: boolean;
 }
 
-// pi-ignore noNearIdenticalDataStructures: RPC wire model selection and faux-provider test response overrides evolve under separate protocol and fixture ownership.
+// grip-ignore noNearIdenticalDataStructures: RPC wire model selection and faux-provider test response overrides evolve under separate protocol and fixture ownership.
 export interface RpcModelReference {
 	provider: string;
 	id: string;

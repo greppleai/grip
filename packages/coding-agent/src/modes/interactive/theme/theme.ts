@@ -753,8 +753,8 @@ export function getDefaultTheme(): string {
 // ============================================================================
 
 // Use globalThis to share theme across module loaders (tsx + jiti in dev mode)
-const THEME_KEY = Symbol.for("@greppleai/grip-coding-agent:theme");
-const THEME_KEY_OLD = Symbol.for("@mariozechner/pi-coding-agent:theme");
+const THEME_KEY = Symbol.for("@greppleai/grip:theme");
+const THEME_KEY_PREVIOUS = Symbol.for("@greppleai/grip-coding-agent:theme");
 
 // Export theme as a getter that reads from globalThis
 // This ensures all module instances (tsx, jiti) see the same theme
@@ -768,7 +768,7 @@ export const theme: Theme = new Proxy({} as Theme, {
 
 function setGlobalTheme(t: Theme): void {
 	(globalThis as Record<symbol, Theme>)[THEME_KEY] = t;
-	(globalThis as Record<symbol, Theme>)[THEME_KEY_OLD] = t;
+	(globalThis as Record<symbol, Theme>)[THEME_KEY_PREVIOUS] = t;
 }
 
 let currentThemeName: string | undefined;

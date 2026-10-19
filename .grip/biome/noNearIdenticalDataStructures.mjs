@@ -5,7 +5,7 @@ import ts from "typescript";
 
 const RULE_NAME = "noNearIdenticalDataStructures";
 const IGNORE_DIRECTIVE_PATTERN =
-	/(?:\/\/\s*pi-ignore\s+noNearIdenticalDataStructures\s*:\s*([^\r\n]*)|\/\*\s*pi-ignore\s+noNearIdenticalDataStructures\s*:\s*([\s\S]*?)\*\/)\s*$/;
+	/(?:\/\/\s*grip-ignore\s+noNearIdenticalDataStructures\s*:\s*([^\r\n]*)|\/\*\s*grip-ignore\s+noNearIdenticalDataStructures\s*:\s*([\s\S]*?)\*\/)\s*$/;
 const SOURCE_DIRECTORY_NAMES = new Set(["src", "test"]);
 const EXCLUDED_DIRECTORY_NAMES = new Set([".git", ".worktrees", "dist", "node_modules"]);
 
@@ -183,7 +183,7 @@ function diagnosticForRecord(record, matches) {
 	return {
 		category: "plugin",
 		severity: "error",
-		message: `[${RULE_NAME}] ${record.name} has the same normalized member structure as ${candidateText}. Reuse or merge the owning contract when semantics match; otherwise add a reasoned pi-ignore directive.`,
+		message: `[${RULE_NAME}] ${record.name} has the same normalized member structure as ${candidateText}. Reuse or merge the owning contract when semantics match; otherwise add a reasoned grip-ignore directive.`,
 		location: {
 			path: record.path,
 			span: [record.start, record.end],

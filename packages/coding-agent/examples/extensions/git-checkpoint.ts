@@ -5,7 +5,7 @@
  * When forking, offers to restore code to that point in history.
  */
 
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
 
 export default function (pi: ExtensionAPI) {
 	const checkpoints = new Map<string, string>();

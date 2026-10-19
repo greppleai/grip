@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-describe("pi-ai OAuth CLI credential writes", () => {
+describe("grip-ai OAuth CLI credential writes", () => {
 	it("applies mode 0600 at file creation and corrects existing permissions", () => {
 		const source = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf-8");
 		expect(source).toContain(

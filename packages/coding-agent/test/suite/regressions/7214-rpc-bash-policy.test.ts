@@ -68,7 +68,7 @@ function removeAddedEndListeners(existing: Array<() => void>): void {
 	}
 }
 
-// Regression for https://github.com/fleetagent/pi/pull/7214
+// Regression for upstream Pi PR #7214.
 // RPC bash must take the same extension policy path as interactive !/!! commands.
 describe("RPC bash user_bash policy (#7214)", () => {
 	let harness: Harness | undefined;

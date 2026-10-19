@@ -102,7 +102,7 @@ export type ToolBackendInfo =
 			workspace: WorkspaceIdentity;
 	  };
 
-// pi-ignore noNearIdenticalDataStructures: Remote backend invocations require host-normalized execution options, while public host invocations accept omitted options and apply defaults.
+// grip-ignore noNearIdenticalDataStructures: Remote backend invocations require host-normalized execution options, while public host invocations accept omitted options and apply defaults.
 export interface WorkspaceToolRemoteInvocation {
 	toolCallId: string;
 	arguments: unknown;

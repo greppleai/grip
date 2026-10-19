@@ -52,7 +52,7 @@ async function createReloadableResourceLoader(factory: ExtensionFactory, eventBu
 	return resourceLoader;
 }
 
-// Regression for https://github.com/fleetagent/pi/issues/7193
+// Regression for upstream Pi issue #7193.
 describe("extension event-bus lifecycle (#7193)", () => {
 	const harnesses: Harness[] = [];
 

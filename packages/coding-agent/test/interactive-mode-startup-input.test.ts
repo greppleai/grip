@@ -5,13 +5,13 @@ interface SubmitDefaultEditor {
 	onSubmit?: (text: string) => void;
 }
 
-// pi-ignore noNearIdenticalDataStructures: This startup-input editor fixture models only that test's private method surface and may diverge from sandbox-command fixtures.
+// grip-ignore noNearIdenticalDataStructures: This startup-input editor fixture models only that test's private method surface and may diverge from sandbox-command fixtures.
 interface SubmitEditor {
 	addToHistory?: (text: string) => void;
 	setText: (text: string) => void;
 }
 
-// pi-ignore noNearIdenticalDataStructures: This startup-input session fixture follows startup queue behavior independently from sandbox-command submission tests.
+// grip-ignore noNearIdenticalDataStructures: This startup-input session fixture follows startup queue behavior independently from sandbox-command submission tests.
 interface SubmitSession {
 	isCompacting: boolean;
 	isStreaming: boolean;

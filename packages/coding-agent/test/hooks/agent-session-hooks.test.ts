@@ -216,7 +216,7 @@ describe("AgentSession Claude-compatible hooks", () => {
 	});
 
 	it("disables subsequent hooks without cancelling an active execution", async () => {
-		const cwd = mkdtempSync(join(tmpdir(), "pi-hook-toggle-"));
+		const cwd = mkdtempSync(join(tmpdir(), "grip-hook-toggle-"));
 		const started = join(cwd, "started");
 		const gate = join(cwd, "gate");
 		const runs = join(cwd, "runs");
@@ -249,7 +249,7 @@ describe("AgentSession Claude-compatible hooks", () => {
 	});
 
 	it("keeps prior hooks when resolution fails and preserves disabled state across reload", async () => {
-		const cwd = mkdtempSync(join(tmpdir(), "pi-hook-reload-"));
+		const cwd = mkdtempSync(join(tmpdir(), "grip-hook-reload-"));
 		const runs = join(cwd, "runs");
 		const script = (label: string) =>
 			`process.stdin.resume();process.stdin.on('end',()=>require('fs').appendFileSync(${JSON.stringify(runs)},${JSON.stringify(`${label}\n`)}))`;
@@ -309,8 +309,8 @@ describe("AgentSession Claude-compatible hooks", () => {
 	});
 
 	it("routes approved project hooks into the sandbox after a backend switch", async () => {
-		const cwd = mkdtempSync(join(tmpdir(), "pi-hook-backend-transition-"));
-		const log = join(cwd, `pi-hook-backend-transition-${Date.now()}-${Math.random()}.log`);
+		const cwd = mkdtempSync(join(tmpdir(), "grip-hook-backend-transition-"));
+		const log = join(cwd, `grip-hook-backend-transition-${Date.now()}-${Math.random()}.log`);
 		let backend: "local" | "remote" = "local";
 		let workspaceInput: HookInput | undefined;
 		const exec = vi.fn(async (command: string, options: ToolExecOptions) => {
@@ -353,7 +353,7 @@ describe("AgentSession Claude-compatible hooks", () => {
 	});
 
 	it("admits one first prompt before a gated SessionStart and cannot bypass termination", async () => {
-		const prefix = join(tmpdir(), `pi-hook-session-start-gate-${Date.now()}-${Math.random()}`);
+		const prefix = join(tmpdir(), `grip-hook-session-start-gate-${Date.now()}-${Math.random()}`);
 		const started = `${prefix}.started`;
 		const gate = `${prefix}.gate`;
 		const script = `const fs=require('fs');process.stdin.resume();process.stdin.on('end',()=>{fs.writeFileSync(${JSON.stringify(started)},'started');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(gate)})){clearInterval(timer);process.stdout.write(JSON.stringify({continue:false,stopReason:'session-stop'}))}},5)})`;
@@ -576,7 +576,7 @@ describe("AgentSession Claude-compatible hooks", () => {
 	});
 
 	it("skips Stop lifecycle hooks for user-aborted runs and sends accurate StopFailure input", async () => {
-		const abortLog = join(tmpdir(), `pi-hook-abort-${Date.now()}-${Math.random()}`);
+		const abortLog = join(tmpdir(), `grip-hook-abort-${Date.now()}-${Math.random()}`);
 		const appendScript = `let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>require('fs').appendFileSync(${JSON.stringify(abortLog)},s+'\\n'))`;
 		const aborted = await createHarness({
 			loadedHooks: hooks([
@@ -589,7 +589,7 @@ describe("AgentSession Claude-compatible hooks", () => {
 		await aborted.session.prompt("cancel");
 		expect(existsSync(abortLog)).toBe(false);
 
-		const failureLog = join(tmpdir(), `pi-hook-failure-${Date.now()}-${Math.random()}`);
+		const failureLog = join(tmpdir(), `grip-hook-failure-${Date.now()}-${Math.random()}`);
 		const failureScript = `let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>require('fs').writeFileSync(${JSON.stringify(failureLog)},s))`;
 		const failed = await createHarness({ loadedHooks: hooks([{ event: "StopFailure", script: failureScript }]) });
 		harnesses.push(failed);
@@ -647,7 +647,7 @@ describe("AgentSession Claude-compatible hooks", () => {
 		).toBe(true);
 	});
 	it("continues beyond eight Stop calls while reported work makes progress", async () => {
-		const progressPath = join(tmpdir(), `pi-hook-progress-${Date.now()}-${Math.random()}`);
+		const progressPath = join(tmpdir(), `grip-hook-progress-${Date.now()}-${Math.random()}`);
 		const progressValues = [12, 11, 10, 13, 9, 8, 10, 7, 6, 8, 5];
 		const script = `let input='';process.stdin.on('data',chunk=>input+=chunk);process.stdin.on('end',()=>{const fs=require('node:fs');const path=${JSON.stringify(progressPath)};const count=fs.existsSync(path)?Number(fs.readFileSync(path,'utf8')):0;fs.writeFileSync(path,String(count+1));const values=${JSON.stringify(progressValues)};const progress=values[count];const output=progress===undefined?{}:{decision:'block',reason:'continue progress',hookSpecificOutput:{hookEventName:'Stop',additionalContext:'continue progress',continuationProgress:progress}};process.stdout.write(JSON.stringify(output));})`;
 		const harness = await createHarness({ loadedHooks: hooks([{ event: "Stop", script }]) });
@@ -729,7 +729,7 @@ describe("AgentSession Claude-compatible hooks", () => {
 	] as const)(
 		"does not adapt remote ~ %s input with %s pre/post hooks",
 		async (toolName, args, _hookState, loadedHooks) => {
-			const cwd = join(tmpdir(), `pi-hook-remote-${toolName}-${Date.now()}-${Math.random()}`);
+			const cwd = join(tmpdir(), `grip-hook-remote-${toolName}-${Date.now()}-${Math.random()}`);
 			const toolOperations = {
 				cwd,
 				getBackendInfo: () => ({
@@ -773,7 +773,7 @@ describe("AgentSession Claude-compatible hooks", () => {
 
 	it("preserves a successful remote file result when an unresolved ~ path skips PostToolUse", async () => {
 		const diagnostics: string[] = [];
-		const cwd = join(tmpdir(), `pi-hook-remote-read-${Date.now()}-${Math.random()}`);
+		const cwd = join(tmpdir(), `grip-hook-remote-read-${Date.now()}-${Math.random()}`);
 		const toolOperations = {
 			cwd,
 			getBackendInfo: () => ({

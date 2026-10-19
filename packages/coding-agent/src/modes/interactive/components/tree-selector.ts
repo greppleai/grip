@@ -59,7 +59,7 @@ interface VisibleChildLayout {
 	gutters: GutterInfo[];
 	branched: boolean;
 }
-// pi-ignore noNearIdenticalDataStructures: Viewport slice indices and terminal selection cell columns evolve independently.
+// grip-ignore noNearIdenticalDataStructures: Viewport slice indices and terminal selection cell columns evolve independently.
 interface VisibleNodeRange {
 	start: number;
 	end: number;

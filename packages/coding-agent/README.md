@@ -1,18 +1,4 @@
-<!-- The upstream Pi logo, community links and donated-domain credit below are historical attribution, not Grip destinations. -->
-<p align="center">
-  <a href="https://pi.dev">
-    <img alt="Historical upstream Pi logo" src="https://pi.dev/logo-auto.svg" width="128">
-  </a>
-</p>
-<p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Upstream Pi Discord community" src="https://img.shields.io/badge/discord-upstream%20Pi%20community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-  <a href="https://www.npmjs.com/package/@fleetagent/pi-coding-agent"><img alt="Historical upstream Pi npm package" src="https://img.shields.io/npm/v/@fleetagent/pi-coding-agent?style=flat-square" /></a>
-</p>
-<p align="center">
-  <a href="https://pi.dev">pi.dev</a> domain graciously donated by
-  <br /><br />
-  <a href="https://exe.dev"><img src="docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
-</p>
+# Grip
 
 > New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
@@ -321,7 +307,7 @@ Connect from a local Grip process:
 GRIP_REMOTE_TOKEN='replace-with-a-random-token-at-least-32-bytes-long' grip --remote ws://127.0.0.1:8787/grip/workspace
 ```
 
-The retired upstream `@fleetagent/pi-daemon` package and `pi-daemon` binary are not supported; there is no separate Grip daemon package or executable. See [docs/daemon.md](docs/daemon.md) for topology, security, configuration, Docker, LSP/resources/extensions behavior, troubleshooting, and migration.
+There is no separate Grip daemon package or executable. See [docs/daemon.md](docs/daemon.md) for topology, security, configuration, Docker, LSP/resources/extensions behavior, troubleshooting, and migration.
 
 ---
 

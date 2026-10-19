@@ -19,8 +19,8 @@ COPY scripts ./scripts
 
 RUN npm ci --ignore-scripts \
 	&& npm run build \
-	&& npm pack --workspace @greppleai/grip-coding-agent --pack-destination /tmp/grip-pack \
-	&& npm install -g --ignore-scripts /tmp/grip-pack/greppleai-grip-coding-agent-*.tgz \
+	&& npm pack --workspace @greppleai/grip --pack-destination /tmp/grip-pack \
+	&& npm install -g --ignore-scripts /tmp/grip-pack/greppleai-grip-*.tgz \
 	&& rm -rf /tmp/grip-pack
 
 RUN mkdir -p /workspace/src /workspace/.grip/skills /workspace/.grip/skills/remote-container \

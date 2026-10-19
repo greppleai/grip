@@ -10,7 +10,7 @@
  * extensions system using pi.registerTool().
  */
 
-import { GripAgent, InMemorySessionManager } from "@greppleai/grip-coding-agent";
+import { GripAgent, InMemorySessionManager } from "@greppleai/grip";
 
 interface ToolSessionOptions {
 	cwd?: string;

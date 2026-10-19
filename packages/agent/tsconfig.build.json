@@ -3,8 +3,8 @@
 	"compilerOptions": {
 		"outDir": "./dist",
 		"paths": {
-			"@fleetagent/pi-ai": ["../ai/dist/index.d.ts"],
-			"@fleetagent/pi-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"]
+			"@greppleai/grip-ai": ["../ai/dist/index.d.ts"],
+			"@greppleai/grip-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"]
 		},
 		"rootDir": "./src"
 	},

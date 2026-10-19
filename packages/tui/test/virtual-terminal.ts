@@ -167,7 +167,7 @@ export class VirtualTerminal implements Terminal {
 	}
 
 	/** Snapshot every visible cell, including width, color, and style state. */
-	// pi-ignore noExcessiveCollectionIterations: A complete terminal snapshot must visit each visible row-column cell exactly once, so work is linear in viewport cells.
+	// grip-ignore noExcessiveCollectionIterations: A complete terminal snapshot must visit each visible row-column cell exactly once, so work is linear in viewport cells. @class:34-276
 	getCellSnapshot(): VirtualTerminalCell[][] {
 		const buffer = this.xterm.buffer.active;
 		const reusableCell = buffer.getNullCell();

@@ -3,7 +3,7 @@
  */
 
 import { Type } from "@greppleai/grip-ai";
-import { defineTool, type ExtensionAPI } from "@greppleai/grip-coding-agent";
+import { defineTool, type ExtensionAPI } from "@greppleai/grip";
 
 const helloTool = defineTool({
 	name: "hello",

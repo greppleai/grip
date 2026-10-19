@@ -45,8 +45,8 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
-import type { ExtensionAPI } from "@greppleai/grip-coding-agent";
-import { createBashTool, getAgentDir, LocalToolOperations } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI } from "@greppleai/grip";
+import { createBashTool, getAgentDir, LocalToolOperations } from "@greppleai/grip";
 
 interface SandboxConfig extends SandboxRuntimeConfig {
 	enabled?: boolean;

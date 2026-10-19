@@ -5,7 +5,7 @@
  * Multiple questions: tab bar navigation between questions
  */
 
-import type { AgentToolResult, ExtensionAPI } from "@greppleai/grip-coding-agent";
+import type { AgentToolResult, ExtensionAPI } from "@greppleai/grip";
 import { Editor, type EditorTheme, Key, matchesKey, type SelectItem, Text, truncateToWidth } from "@greppleai/grip-tui";
 import { Type } from "typebox";
 

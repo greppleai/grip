@@ -61,7 +61,7 @@ function sampledByteLimits(input: string): number[] {
 	return [...new Set(candidates.filter((value) => value >= 0))].sort((a, b) => a - b);
 }
 
-/* pi-ignore noExcessiveCollectionIterations: Exhaustive coverage is bounded to a 15-character alphabet at depth 3, and randomized coverage to 1,000 strings of at most 79 characters. */
+/* grip-ignore noExcessiveCollectionIterations: Exhaustive coverage is bounded to a 15-character alphabet at depth 3, and randomized coverage to 1,000 strings of at most 79 characters. */
 function verifyDeterministicTailFuzzCases(): void {
 	const alphabet = [
 		"a",

@@ -19,7 +19,7 @@
  *   /overlay-streaming  - Multiple input panels with simulated streaming (Tab to cycle focus)
  */
 
-import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@greppleai/grip";
 import type { Component, OverlayAnchor, OverlayHandle, OverlayOptions, TUI } from "@greppleai/grip-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@greppleai/grip-tui";
 import { spawn } from "child_process";

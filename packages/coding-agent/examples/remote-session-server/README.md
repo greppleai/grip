@@ -42,7 +42,7 @@ GRIP_REMOTE_SESSION_TOKEN=dev-token \
 ## Use from the SDK
 
 ```ts
-import { GripAgent, RemoteSessionManager } from "@greppleai/grip-coding-agent";
+import { GripAgent, RemoteSessionManager } from "@greppleai/grip";
 
 const sessionManager = new RemoteSessionManager({
   baseUrl: "http://localhost:8787",

@@ -5,8 +5,8 @@
  * (logo + keybinding hints) with a custom component showing the pi mascot.
  */
 
-import type { ExtensionAPI, Theme } from "@greppleai/grip-coding-agent";
-import { VERSION } from "@greppleai/grip-coding-agent";
+import type { ExtensionAPI, Theme } from "@greppleai/grip";
+import { VERSION } from "@greppleai/grip";
 
 // --- PI MASCOT ---
 // Based on pi_mascot.ts - the pi agent character
