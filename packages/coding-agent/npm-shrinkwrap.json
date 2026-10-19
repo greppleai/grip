@@ -1,12 +1,12 @@
 {
 	"name": "@greppleai/grip",
-	"version": "0.2.15",
+	"version": "0.0.1",
 	"lockfileVersion": 3,
 	"requires": true,
 	"packages": {
 		"": {
 			"name": "@greppleai/grip",
-			"version": "0.2.15",
+			"version": "0.0.1",
 			"license": "MIT",
 			"dependencies": {
 				"@greppleai/grip-agent-core": "^0.2.15",
