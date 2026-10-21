@@ -1,9 +1,10 @@
 import type { TextContent } from "@greppleai/grip-ai";
 import type { Component } from "@greppleai/grip-tui";
-import { Box, Container, Markdown, type MarkdownTheme, Spacer, Text } from "@greppleai/grip-tui";
+import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@greppleai/grip-tui";
 import type { MessageRenderer } from "../../../core/extensions/types.ts";
 import type { CustomMessage } from "../../../core/messages.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
+import { MessageCard } from "./message-card.ts";
 
 /**
  * Component that renders a custom message entry from extensions.
@@ -12,7 +13,7 @@ import { getMarkdownTheme, theme } from "../theme/theme.ts";
 export class CustomMessageComponent extends Container {
 	private message: CustomMessage<unknown>;
 	private customRenderer?: MessageRenderer;
-	private box: Box;
+	private box: MessageCard;
 	private customComponent?: Component;
 	private markdownTheme: MarkdownTheme;
 	private _expanded = false;
@@ -29,10 +30,8 @@ export class CustomMessageComponent extends Container {
 
 		this.addChild(new Spacer(1));
 
-		// State summaries use the success palette to distinguish them from other custom messages.
-		this.box = new Box(1, 1, (t) =>
-			theme.bg(this.message.customType === "compress_context" ? "toolSuccessBg" : "customMessageBg", t),
-		);
+		// State summaries keep their success-colored label without coloring the whole card.
+		this.box = new MessageCard(1, 1);
 
 		this.rebuild();
 	}

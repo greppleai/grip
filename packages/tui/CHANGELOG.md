@@ -11,3 +11,7 @@ All notable changes to `@greppleai/grip-tui` are documented in this file.
 * release 0.0.1 ([31883b2](https://github.com/greppleai/grip/commit/31883b22bd3cd782d58db5f641da69f5921e68a8))
 
 ## [Unreleased]
+
+### Changed
+
+- Stopped forwarding OSC 133 zone markers to main-screen terminals to prevent terminal-drawn gutter marks; alt-screen navigation remains available.

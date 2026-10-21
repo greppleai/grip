@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { Text, type TUI } from "@greppleai/grip-tui";
+import { Text, type TUI, visibleWidth } from "@greppleai/grip-tui";
 import { Type } from "typebox";
 import { beforeAll, describe, expect, test } from "vitest";
 import { getReadmePath } from "../src/config.ts";
@@ -9,7 +9,7 @@ import { LocalToolOperations } from "../src/core/tools/operations.ts";
 import { createReadTool, createReadToolDefinition } from "../src/core/tools/read.ts";
 import { createWriteToolDefinition } from "../src/core/tools/write.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
-import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
 interface CapturedToolUpdateContent {
@@ -39,6 +39,61 @@ function createFakeTui(): TUI {
 describe("ToolExecutionComponent parity", () => {
 	beforeAll(() => {
 		initTheme("dark");
+	});
+
+	test("renders a state-colored background cell without tinted panels or trailing padding", () => {
+		const component = new ToolExecutionComponent(
+			"edit",
+			"tool-status-line",
+			{ path: "notes.ts", oldText: "old", newText: "new" },
+			{},
+			undefined,
+			createFakeTui(),
+			process.cwd(),
+		);
+		const pending = component.render(40).slice(1);
+		expect(pending.length).toBeGreaterThan(1);
+		expect(pending.every((line) => line.startsWith(theme.bgFromFg("muted", " ")))).toBe(true);
+		expect(pending[0]).toBe(theme.bgFromFg("muted", " "));
+		expect(stripAnsi(pending[0])).toBe(" ");
+		expect(pending.every((line) => visibleWidth(line) <= 40)).toBe(true);
+
+		component.updateResult({ content: [], details: {}, isError: false }, false);
+		const success = component.render(40).slice(1);
+		expect(success.every((line) => line.startsWith(theme.bgFromFg("success", " ")))).toBe(true);
+
+		component.updateResult({ content: [], details: {}, isError: true }, false);
+		const error = component.render(40).slice(1);
+		expect(error.every((line) => line.startsWith(theme.bgFromFg("error", " ")))).toBe(true);
+		expect(new Set([pending[0], success[0], error[0]]).size).toBe(3);
+		for (const lines of [pending, success, error]) {
+			expect(lines.every((line) => !line.endsWith(" "))).toBe(true);
+			expect(lines.every((line) => (line.match(/\x1b\[48;/g)?.length ?? 0) === 1)).toBe(true);
+			expect(lines.some((line) => visibleWidth(line) < 40)).toBe(true);
+		}
+		expect(
+			component
+				.render(1)
+				.slice(1)
+				.every((line) => visibleWidth(line) <= 1),
+		).toBe(true);
+	});
+
+	test("renders the same status line before generic tool output", () => {
+		const component = new ToolExecutionComponent(
+			"custom_tool",
+			"tool-generic-line",
+			{ foo: "bar" },
+			{},
+			undefined,
+			createFakeTui(),
+			process.cwd(),
+		);
+		const rendered = component.render(40).slice(1);
+		expect(rendered.every((line) => line.startsWith(theme.bgFromFg("muted", " ")))).toBe(true);
+		expect(rendered.every((line) => !line.endsWith(" "))).toBe(true);
+		expect(rendered.some((line) => line.includes("custom_tool"))).toBe(true);
+		expect(rendered.every((line) => (line.match(/\x1b\[48;/g)?.length ?? 0) === 1)).toBe(true);
 	});
 
 	test("stacks custom call and result renderers like the old implementation", () => {
@@ -128,6 +183,35 @@ describe("ToolExecutionComponent parity", () => {
 		await promise;
 	});
 
+	test("colors bash commands separately from elapsed time and backend details", () => {
+		const operations = new LocalToolOperations(process.cwd());
+		const component = new ToolExecutionComponent(
+			"bash",
+			"tool-bash-colors",
+			{ command: "echo hello" },
+			{},
+			createBashToolDefinition(operations),
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.markExecutionStarted();
+		expect(component.render(120).join("\n")).toContain(theme.fg("accent", theme.bold("echo hello")));
+
+		component.updateResult(
+			{ content: [{ type: "text", text: "working" }], details: undefined, isError: false },
+			true,
+		);
+		expect(component.render(120).join("\n")).toContain(`${theme.getFgAnsi("muted")}Elapsed `);
+
+		component.updateResult({ content: [{ type: "text", text: "done" }], details: undefined, isError: false }, false);
+		const success = component.render(120).join("\n");
+		expect(success).toContain(`${theme.getFgAnsi("success")}Took `);
+		expect(success).toContain(theme.fg("muted", ` [local ${operations.cwd}]`));
+
+		component.updateResult({ content: [{ type: "text", text: "failed" }], details: undefined, isError: true }, false);
+		expect(component.render(120).join("\n")).toContain(`${theme.getFgAnsi("error")}Took `);
+	});
+
 	test("bash renderer does not duplicate final full output truncation details", async () => {
 		const operations = new LocalToolOperations(process.cwd());
 		operations.exec = async (_command, { onData }) => {
@@ -156,7 +240,14 @@ describe("ToolExecutionComponent parity", () => {
 		component.setExpanded(true);
 		component.updateResult({ ...result, isError: false }, false);
 
-		const rendered = stripAnsi(component.render(200).join("\n"));
+		const renderedLines = component.render(200);
+		const marker = theme.bgFromFg("success", " ");
+		expect(renderedLines.slice(1).every((line) => line.startsWith(marker))).toBe(true);
+		const rendered = stripAnsi(
+			renderedLines
+				.map((line) => (line.startsWith(marker) ? line.slice(marker.length).replace(/^ /, "") : line))
+				.join("\n"),
+		);
 		expect(rendered.match(/Full output:/g)?.length ?? 0).toBe(1);
 		expect(rendered).toMatch(/line-4000[^\n]*\n[^\S\n]*\n \[Full output:/);
 		expect(rendered).not.toMatch(/line-4000[^\n]*\n[^\S\n]*\n[^\S\n]*\n \[Full output:/);

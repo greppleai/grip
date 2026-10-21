@@ -1,19 +1,20 @@
-import { Box, Markdown, type MarkdownTheme, Spacer, Text } from "@greppleai/grip-tui";
+import { Markdown, type MarkdownTheme, Spacer, Text } from "@greppleai/grip-tui";
 import type { CompactionSummaryMessage } from "../../../core/messages.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { keyText } from "./keybinding-hints.ts";
+import { MessageCard } from "./message-card.ts";
 
 /**
  * Component that renders a compaction message with collapsed/expanded state.
- * Uses same background color as custom messages for visual consistency.
+ * Uses a colored label to distinguish it without filling the whole card background.
  */
-export class CompactionSummaryMessageComponent extends Box {
+export class CompactionSummaryMessageComponent extends MessageCard {
 	private expanded = false;
 	private message: CompactionSummaryMessage;
 	private markdownTheme: MarkdownTheme;
 
 	constructor(message: CompactionSummaryMessage, markdownTheme: MarkdownTheme = getMarkdownTheme()) {
-		super(1, 1, (t) => theme.bg("customMessageBg", t));
+		super(1, 1);
 		this.message = message;
 		this.markdownTheme = markdownTheme;
 		this.updateDisplay();

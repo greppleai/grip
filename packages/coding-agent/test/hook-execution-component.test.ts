@@ -48,6 +48,8 @@ describe("HookExecutionComponent", () => {
 		expect(text).toContain("1 completed");
 		expect(text).toContain("ctrl+o to expand");
 		expectHiddenDetails(text);
+		expect(component.render(120).every((line) => !line.endsWith(" "))).toBe(true);
+		expect(component.render(120).join("\n")).not.toMatch(/\x1b\[48;/);
 	});
 
 	it("renders full details when expanded and hides them again when collapsed", () => {
@@ -60,7 +62,8 @@ describe("HookExecutionComponent", () => {
 		expect(text).toContain("completed, exit 0, 42ms");
 		expect(text).toContain("Returned prompt");
 		expect(text.match(/Fix the reported issue\./g)).toHaveLength(1);
-		expect(rendered).toMatch(/\u001b\[48;(?:2|5);/);
+		expect(rendered).not.toMatch(/\x1b\[48;/);
+		expect(component.render(120).every((line) => !line.endsWith(" "))).toBe(true);
 		component.setExpanded(false);
 		expectHiddenDetails(render(component));
 	});

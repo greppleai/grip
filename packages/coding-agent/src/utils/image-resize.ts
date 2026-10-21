@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import type { ImageResizeOptions, ResizedImage } from "./image-resize-core.ts";
 
@@ -19,6 +20,10 @@ function isResizeImageWorkerResponse(value: unknown): value is ResizeImageWorker
 }
 
 function createResizeWorker(): Worker {
+	const embeddedAssetDir = process.env.GRIP_EMBEDDED_ASSET_DIR;
+	if (embeddedAssetDir) {
+		return new Worker(join(embeddedAssetDir, "image-resize-worker.js"));
+	}
 	const isTypeScriptRuntime = import.meta.url.endsWith(".ts");
 	const workerUrl = new URL(
 		isTypeScriptRuntime ? "./image-resize-worker.ts" : "./image-resize-worker.js",

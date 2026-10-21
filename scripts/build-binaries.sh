@@ -121,17 +121,19 @@ else
     PLATFORMS=(darwin-arm64 darwin-x64 linux-x64 linux-arm64 windows-x64 windows-arm64)
 fi
 
+bun build --target=bun ./dist/utils/image-resize-worker.js --outfile ./dist/bun/image-resize-worker.js
 for platform in "${PLATFORMS[@]}"; do
     echo "Building for $platform..."
     node ../../scripts/prepare-binary-assets.mjs "$platform"
-    # Keep the worker as an explicit entrypoint; embed resources with Bun's --asset.
+    # The worker is bundled into the extracted assets because Bun cannot resolve
+    # an executable's virtual /$bunfs/root path as a worker entrypoint.
     binary="$OUTPUT_DIR/$platform/grip"
     asset="grip-$platform"
     if [[ "$platform" == windows-* ]]; then
         binary="$binary.exe"
         asset="$asset.exe"
     fi
-    bun build --compile --target=bun-$platform --asset=./dist/bun/grip-assets.blob ./dist/bun/cli.js ./dist/utils/image-resize-worker.js --outfile "$binary"
+    bun build --compile --target=bun-$platform --asset=./dist/bun/grip-assets.blob ./dist/bun/cli.js --outfile "$binary"
     cp "$binary" "$OUTPUT_DIR/$asset"
     (cd "$OUTPUT_DIR" && sha256sum "$asset" > "$asset.sha256")
 done

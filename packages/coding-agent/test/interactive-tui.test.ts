@@ -647,7 +647,7 @@ describe("createInteractiveTui", () => {
 		const boundedRender = stripTerminalSequences(context.chatContainer.render(100).join("\n"));
 		expect(boundedRender).not.toContain("Hook · PreToolUse");
 		expect(boundedRender).not.toContain("hook feedback\n");
-		expect(boundedRender).toContain("hook feedback 1 ");
+		expect(boundedRender).toContain("hook feedback 1\n");
 		expect(boundedRender).toContain("hook feedback 200");
 
 		context.activeSession = { getSessionId: () => "shared-session-id" };

@@ -79,6 +79,28 @@ function getCellItalic(terminal: VirtualTerminal, row: number, col: number): num
 }
 
 describe("TUI render scheduling", () => {
+	it("does not emit OSC 133 zones to the main-screen terminal", async () => {
+		const terminal = new LoggingVirtualTerminal(40, 10);
+		const tui = new TuiMainScreen(terminal);
+		const component = new TestComponent();
+		const start = "\x1b]133;A\x07";
+		const end = "\x1b]133;B\x07\x1b]133;C\x07";
+		component.lines = [`${start}Assistant`, `${end}Done`];
+		tui.addChild(component);
+		tui.start();
+		await terminal.waitForRender();
+		assert.ok(!terminal.getWrites().includes("\x1b]133;"));
+		assert.deepStrictEqual(terminal.getViewport().slice(0, 2), ["Assistant", "Done"]);
+
+		terminal.clearWrites();
+		component.lines = [`${start}Updated`, `${end}Done`];
+		tui.requestRender();
+		await terminal.waitForRender();
+		assert.ok(!terminal.getWrites().includes("\x1b]133;"));
+		assert.deepStrictEqual(terminal.getViewport().slice(0, 2), ["Updated", "Done"]);
+		tui.stop();
+	});
+
 	it("renders coalesced keyboard input without waiting for a throttled frame", async () => {
 		const terminal = new VirtualTerminal(40, 10);
 		const tui = new TuiMainScreen(terminal);

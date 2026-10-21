@@ -1,7 +1,8 @@
-import { Box, Container, Markdown, type MarkdownTheme } from "@greppleai/grip-tui";
+import { Container, Markdown, type MarkdownTheme } from "@greppleai/grip-tui";
 import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { createMarkdownTransform } from "./markdown-transform.ts";
+import { MessageCard } from "./message-card.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
@@ -36,7 +37,7 @@ export class UserMessageComponent extends Container {
 
 	private rebuild(): void {
 		this.clear();
-		const contentBox = new Box(this.outputPad, 1, (content: string) => theme.bg("userMessageBg", content));
+		const contentBox = new MessageCard(this.outputPad, 1);
 		contentBox.addChild(
 			new Markdown(
 				this.text,

@@ -330,6 +330,7 @@ export class Theme {
 	readonly sourcePath?: string;
 	sourceInfo?: SourceInfo;
 	private fgColors: Map<ThemeColor, string>;
+	private fgBgColors: Map<ThemeColor, string>;
 	private bgColors: Map<ThemeBg, string>;
 	private mode: ColorMode;
 
@@ -344,8 +345,10 @@ export class Theme {
 		this.sourceInfo = options.sourceInfo;
 		this.mode = mode;
 		this.fgColors = new Map();
+		this.fgBgColors = new Map();
 		for (const [key, value] of Object.entries(fgColors) as [ThemeColor, string | number][]) {
 			this.fgColors.set(key, fgAnsi(value, mode));
+			this.fgBgColors.set(key, bgAnsi(value, mode));
 		}
 		this.bgColors = new Map();
 		for (const [key, value] of Object.entries(bgColors) as [ThemeBg, string | number][]) {
@@ -363,6 +366,13 @@ export class Theme {
 		const ansi = this.bgColors.get(color);
 		if (!ansi) throw new Error(`Unknown theme background color: ${color}`);
 		return `${ansi}${text}\x1b[49m`; // Reset only background color
+	}
+
+	/** Render a background using a foreground theme color without adding a new theme token. */
+	bgFromFg(color: ThemeColor, text: string): string {
+		const ansi = this.fgBgColors.get(color);
+		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
+		return `${ansi}${text}\x1b[49m`;
 	}
 
 	bold(text: string): string {

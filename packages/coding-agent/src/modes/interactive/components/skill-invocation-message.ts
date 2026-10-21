@@ -1,20 +1,21 @@
-import { Box, Markdown, type MarkdownTheme, Text } from "@greppleai/grip-tui";
+import { Markdown, type MarkdownTheme, Text } from "@greppleai/grip-tui";
 import type { ParsedSkillBlock } from "../../../core/agent-session.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { keyText } from "./keybinding-hints.ts";
+import { MessageCard } from "./message-card.ts";
 
 /**
  * Component that renders a skill invocation message with collapsed/expanded state.
- * Uses same background color as custom messages for visual consistency.
+ * Uses a colored label to distinguish it without filling the whole card background.
  * Only renders the skill block itself - user message is rendered separately.
  */
-export class SkillInvocationMessageComponent extends Box {
+export class SkillInvocationMessageComponent extends MessageCard {
 	private expanded = false;
 	private skillBlock: ParsedSkillBlock;
 	private markdownTheme: MarkdownTheme;
 
 	constructor(skillBlock: ParsedSkillBlock, markdownTheme: MarkdownTheme = getMarkdownTheme()) {
-		super(1, 1, (t) => theme.bg("customMessageBg", t));
+		super(1, 1);
 		this.skillBlock = skillBlock;
 		this.markdownTheme = markdownTheme;
 		this.updateDisplay();

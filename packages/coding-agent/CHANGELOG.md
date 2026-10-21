@@ -25,6 +25,14 @@ All notable changes to Grip are documented in this file.
 
 - Added `/sandbox start --name <vm> --update` to replace a verified shared Lima guest binary and restart its daemon after disconnecting attached clients.
 
+### Changed
+
+- Replaced tinted tool execution backgrounds with single-cell state-colored indicators and removed trailing display padding.
+- Removed full-width backgrounds and trailing padding from hook, compaction, branch, skill, and default custom-message cards; their colored labels remain.
+- Removed the full-width user-message background and trailing padding while preserving message spacing and alt-screen navigation markers.
+- Colored bash command text with the accent color and elapsed time by execution state, leaving backend location details muted.
+
 ### Fixed
 
 - Fixed the `tools:` backend indicator disappearing from the footer after `/reload`.
+- Fixed image loading in standalone binaries by extracting the image resize worker from the executable.

@@ -5,6 +5,7 @@ import { type RenderedCursorPosition, type TUI, TuiBase, type TuiStopOptions } f
 import { visibleWidth } from "./utils.ts";
 
 const KITTY_SEQUENCE_PREFIX = "\x1b_G";
+const OSC133_ZONE_PREFIX = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+/;
 
 interface KittyImageHeader {
 	ids: number[];
@@ -212,7 +213,9 @@ export class TuiMainScreen extends TuiBase implements TUI {
 		let newLines = this.render(width);
 		if (this.hasOverlayEntries) newLines = this.compositeOverlays(newLines, width, height);
 		const cursorPosition = this.extractCursorPosition(newLines, height);
-		newLines = this.applyLineResets(newLines);
+		// Preserve component zone markers for alt-screen navigation, but do not emit
+		// them here: terminals draw their own gutter indicators for OSC 133.
+		newLines = this.applyLineResets(newLines.map((line) => line.replace(OSC133_ZONE_PREFIX, "")));
 		return { width, height, widthChanged, heightChanged, newLines, cursorPosition, previousViewportTop };
 	}
 

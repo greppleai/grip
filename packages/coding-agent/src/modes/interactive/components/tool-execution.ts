@@ -1,4 +1,14 @@
-import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, type TUI } from "@greppleai/grip-tui";
+import {
+	Box,
+	type Component,
+	Container,
+	getCapabilities,
+	Image,
+	Spacer,
+	Text,
+	type TUI,
+	truncateToWidth,
+} from "@greppleai/grip-tui";
 import type {
 	ToolCallRenderer,
 	ToolDefinition,
@@ -24,8 +34,6 @@ export interface ToolExecutionDisplayResult {
 	details?: any;
 	isError: boolean;
 }
-
-type ToolBackgroundFormatter = (text: string) => string;
 
 export class ToolExecutionComponent extends Container {
 	private contentBox: Box;
@@ -78,17 +86,36 @@ export class ToolExecutionComponent extends Container {
 		// Always create all shell variants. contentBox is used for default renderer-based composition.
 		// selfRenderContainer is used when the tool renders its own framing.
 		// contentText is reserved for generic fallback rendering when no tool definition exists.
-		this.contentBox = new Box(1, 1, (text: string) => theme.bg("toolPendingBg", text));
-		this.contentText = new Text("", 1, 1, (text: string) => theme.bg("toolPendingBg", text));
+		this.contentBox = new Box(1, 1);
+		this.contentText = new Text("", 1, 1);
 		this.selfRenderContainer = new Container();
 
 		if (this.hasRendererDefinition()) {
-			this.addChild(this.getRenderShell() === "self" ? this.selfRenderContainer : this.contentBox);
+			const shell =
+				this.getRenderShell() === "self" ? this.selfRenderContainer : this.withStatusLine(this.contentBox);
+			this.addChild(shell);
 		} else {
-			this.addChild(this.contentText);
+			this.addChild(this.withStatusLine(this.contentText));
 		}
 
 		this.updateDisplay();
+	}
+
+	private withStatusLine(content: Component): Component {
+		return {
+			render: (width) => {
+				if (width < 1) return [];
+				const color = this.isPartial ? "muted" : this.result?.isError ? "error" : "success";
+				const marker = theme.bgFromFg(color, " ");
+				const contentWidth = Math.max(1, width - 2);
+				return content.render(contentWidth).map((line) => {
+					if (width <= 2) return marker;
+					const rendered = truncateToWidth(line.trimEnd(), contentWidth, "");
+					return rendered ? `${marker} ${rendered}` : marker;
+				});
+			},
+			invalidate: () => content.invalidate(),
+		};
 	}
 
 	private getCallRenderer(): ToolCallRenderer<any, any> | undefined {
@@ -231,12 +258,6 @@ export class ToolExecutionComponent extends Container {
 		return super.render(width);
 	}
 
-	private getBackgroundFormatter(): ToolBackgroundFormatter {
-		if (this.isPartial) return (text) => theme.bg("toolPendingBg", text);
-		if (this.result?.isError) return (text) => theme.bg("toolErrorBg", text);
-		return (text) => theme.bg("toolSuccessBg", text);
-	}
-
 	private renderToolCall(renderContainer: Container): boolean {
 		const callRenderer = this.getCallRenderer();
 		if (!callRenderer) {
@@ -282,17 +303,15 @@ export class ToolExecutionComponent extends Container {
 		}
 	}
 
-	private renderDefinitionContent(backgroundFormatter: ToolBackgroundFormatter): boolean {
+	private renderDefinitionContent(): boolean {
 		const renderContainer = this.getRenderShell() === "self" ? this.selfRenderContainer : this.contentBox;
-		if (renderContainer instanceof Box) renderContainer.setBgFn(backgroundFormatter);
 		renderContainer.clear();
 		const callHasContent = this.renderToolCall(renderContainer);
 		const resultHasContent = this.renderToolResult(renderContainer);
 		return callHasContent || resultHasContent;
 	}
 
-	private renderGenericContent(backgroundFormatter: ToolBackgroundFormatter): boolean {
-		this.contentText.setCustomBgFn(backgroundFormatter);
+	private renderGenericContent(): boolean {
 		this.contentText.setText(this.formatToolExecution());
 		return true;
 	}
@@ -330,12 +349,9 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private updateDisplay(): void {
-		const backgroundFormatter = this.getBackgroundFormatter();
 		this.hideComponent = false;
 		const hasRendererDefinition = this.hasRendererDefinition();
-		const hasContent = hasRendererDefinition
-			? this.renderDefinitionContent(backgroundFormatter)
-			: this.renderGenericContent(backgroundFormatter);
+		const hasContent = hasRendererDefinition ? this.renderDefinitionContent() : this.renderGenericContent();
 
 		this.clearRenderedImages();
 		this.renderResultImages();

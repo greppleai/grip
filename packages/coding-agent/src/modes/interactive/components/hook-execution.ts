@@ -1,7 +1,8 @@
-import { Box, Container, Markdown, type MarkdownTheme, Spacer, Text } from "@greppleai/grip-tui";
+import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@greppleai/grip-tui";
 import type { HookExecutionCallNotice, HookExecutionNotice } from "../../../core/hooks/types.ts";
 import { getMarkdownTheme, type ThemeColor, theme } from "../theme/theme.ts";
 import { keyHint, keyText } from "./keybinding-hints.ts";
+import { MessageCard } from "./message-card.ts";
 
 const MAX_CALL_LABEL_CHARS = 300;
 
@@ -101,14 +102,14 @@ function groupedCallStatusColor(group: GroupedHookCall): ThemeColor {
 export class HookExecutionComponent extends Container {
 	private readonly notices: HookExecutionNotice[];
 	private readonly markdownTheme: MarkdownTheme;
-	private readonly box: Box;
+	private readonly box: MessageCard;
 	private expanded = false;
 
 	constructor(notice: HookExecutionNotice, markdownTheme: MarkdownTheme = getMarkdownTheme()) {
 		super();
 		this.notices = [notice];
 		this.markdownTheme = markdownTheme;
-		this.box = new Box(1, 1, (text: string) => theme.bg("selectedBg", text));
+		this.box = new MessageCard(1, 1);
 		this.addChild(new Spacer(1));
 		this.addChild(this.box);
 		this.rebuild();

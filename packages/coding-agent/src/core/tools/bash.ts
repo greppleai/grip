@@ -134,7 +134,10 @@ function formatBashCall(args: Partial<BashToolInput> | undefined, backendInfo?: 
 	const timeoutSuffix = timeout ? theme.fg("muted", ` (timeout ${timeout}s)`) : "";
 	const commandDisplay = command === null ? invalidArgText(theme) : command ? command : theme.fg("toolOutput", "...");
 	return (
-		formatBackendIcon(backendInfo, theme) + theme.fg("toolTitle", theme.bold(`$ ${commandDisplay}`)) + timeoutSuffix
+		formatBackendIcon(backendInfo, theme) +
+		theme.fg("toolTitle", theme.bold("$ ")) +
+		theme.fg("accent", theme.bold(commandDisplay)) +
+		timeoutSuffix
 	);
 }
 
@@ -215,6 +218,7 @@ function rebuildBashResultRenderComponent(
 	component: BashResultRenderComponent,
 	result: AgentToolResult<BashToolDetails | undefined>,
 	options: ToolRenderResultOptions,
+	isError: boolean,
 	showImages: boolean,
 	startedAt: number | undefined,
 	endedAt: number | undefined,
@@ -230,7 +234,7 @@ function rebuildBashResultRenderComponent(
 	const endTime = endedAt ?? Date.now();
 	component.addChild(
 		new Text(
-			`\n${theme.fg("muted", `${label} ${formatDuration(endTime - startedAt)}`)}${formatBackendSuffix(backendInfo)}`,
+			`\n${theme.fg(options.isPartial ? "muted" : isError ? "error" : "success", `${label} ${formatDuration(endTime - startedAt)}`)}${formatBackendSuffix(backendInfo)}`,
 			0,
 			0,
 		),
@@ -405,6 +409,7 @@ export function createBashToolDefinition(operations: ToolOperations, options?: B
 				component,
 				result as any,
 				options,
+				context.isError,
 				context.showImages,
 				state.startedAt,
 				state.endedAt,

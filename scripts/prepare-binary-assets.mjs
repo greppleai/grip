@@ -29,6 +29,7 @@ add(join(agent, "docs"), "docs");
 add(join(agent, "examples"), "examples");
 add(join(agent, "src/modes/interactive/theme"), "theme");
 add(join(agent, "src/core/export-html"), "export-html");
+add(join(agent, "dist/bun/image-resize-worker.js"), "image-resize-worker.js");
 add(join(repository, "node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm"), "photon_rs_bg.wasm");
 const nativePlatform = platform.replace(/^windows-/, "win32-");
 const clipboard = platform === "darwin-arm64" ? "clipboard-darwin-arm64" :
