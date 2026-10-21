@@ -2,6 +2,13 @@
 
 All notable changes to `@greppleai/grip-tui` are documented in this file.
 
+## [0.1.1](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.1.0...@greppleai/grip-tui-v0.1.1) (2026-10-21)
+
+
+### Miscellaneous Chores
+
+* **@greppleai/grip-tui:** Synchronize grip versions
+
 ## [0.1.0](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.0.1...@greppleai/grip-tui-v0.1.0) (2026-10-21)
 
 

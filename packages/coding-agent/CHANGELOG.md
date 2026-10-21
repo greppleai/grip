@@ -2,6 +2,22 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.1.1](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.0...@greppleai/grip-v0.1.1) (2026-10-21)
+
+
+### Features
+
+* **coding-agent:** stripe user and stop-hook messages ([c5d39b4](https://github.com/greppleai/grip/commit/c5d39b4775a9803f8b1d6fd58267c5ef594eff3b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.1.0 to ^0.1.1
+    * @greppleai/grip-ai bumped from ^0.1.0 to ^0.1.1
+    * @greppleai/grip-tui bumped from ^0.1.0 to ^0.1.1
+
 ## [0.1.0](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.0.1...@greppleai/grip-v0.1.0) (2026-10-21)
 
 
