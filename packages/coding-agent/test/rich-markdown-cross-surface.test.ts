@@ -14,7 +14,7 @@ interface ExportedSessionEntry {
 }
 
 interface BinaryAssetPackageScripts {
-	"copy-binary-assets"?: string;
+	"build:binary"?: string;
 }
 
 const tempDirs: string[] = [];
@@ -80,14 +80,17 @@ describe("rich Markdown non-interactive boundaries", () => {
 		expect(exportedAssistant?.content[0]).toEqual(assistantMessage(richSource).content[0]);
 	});
 
-	it("copies every browser export asset into Bun binary packages", () => {
+	it("includes every browser export asset in Bun binary packages", () => {
 		const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
 			scripts?: BinaryAssetPackageScripts;
 		};
-		const copyCommand = packageJson.scripts?.["copy-binary-assets"];
-		expect(copyCommand).toBeDefined();
+		expect(packageJson.scripts?.["build:binary"]).toContain("scripts/prepare-binary-assets.mjs");
+
+		const assetScript = readFileSync(new URL("../../../scripts/prepare-binary-assets.mjs", import.meta.url), "utf8");
+		expect(assetScript).toContain('add(join(agent, "src/core/export-html"), "export-html")');
+		expect(assetScript).toContain("for (const name of readdirSync(source).sort()) add(");
 		for (const asset of ["template.html", "template.css", "template.js"]) {
-			expect(copyCommand).toContain(`src/core/export-html/${asset}`);
+			expect(readFileSync(new URL(`../src/core/export-html/${asset}`, import.meta.url)).length).toBeGreaterThan(0);
 		}
 	});
 });
