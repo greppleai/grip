@@ -109,7 +109,11 @@ export class HookExecutionComponent extends Container {
 		super();
 		this.notices = [notice];
 		this.markdownTheme = markdownTheme;
-		this.box = new MessageCard(1, 1);
+		this.box = new MessageCard(
+			1,
+			1,
+			notice.event === "Stop" || notice.event === "StopFailure" ? "warning" : undefined,
+		);
 		this.addChild(new Spacer(1));
 		this.addChild(this.box);
 		this.rebuild();

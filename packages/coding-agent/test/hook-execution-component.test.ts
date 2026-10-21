@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { HookExecutionNotice } from "../src/core/hooks/types.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { HookExecutionComponent } from "../src/modes/interactive/components/hook-execution.ts";
-import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
 const notice: HookExecutionNotice = {
@@ -48,8 +48,11 @@ describe("HookExecutionComponent", () => {
 		expect(text).toContain("1 completed");
 		expect(text).toContain("ctrl+o to expand");
 		expectHiddenDetails(text);
-		expect(component.render(120).every((line) => !line.endsWith(" "))).toBe(true);
-		expect(component.render(120).join("\n")).not.toMatch(/\x1b\[48;/);
+		const marker = theme.bgFromFg("warning", " ");
+		const lines = component.render(120);
+		expect(lines.every((line) => !line.endsWith(" "))).toBe(true);
+		expect(lines.slice(1).every((line) => line.startsWith(marker))).toBe(true);
+		expect(lines.slice(1).every((line) => line.split("\x1b[48;").length === 2)).toBe(true);
 	});
 
 	it("renders full details when expanded and hides them again when collapsed", () => {
@@ -62,10 +65,27 @@ describe("HookExecutionComponent", () => {
 		expect(text).toContain("completed, exit 0, 42ms");
 		expect(text).toContain("Returned prompt");
 		expect(text.match(/Fix the reported issue\./g)).toHaveLength(1);
-		expect(rendered).not.toMatch(/\x1b\[48;/);
+		expect(
+			component
+				.render(120)
+				.slice(1)
+				.every((line) => line.startsWith(theme.bgFromFg("warning", " "))),
+		).toBe(true);
 		expect(component.render(120).every((line) => !line.endsWith(" "))).toBe(true);
 		component.setExpanded(false);
 		expectHiddenDetails(render(component));
+	});
+
+	it("stripes StopFailure notices but leaves other hook events unframed", () => {
+		const stopFailure = new HookExecutionComponent({ ...notice, event: "StopFailure" });
+		const otherHook = new HookExecutionComponent({ ...notice, event: "PreToolUse" });
+		expect(
+			stopFailure
+				.render(120)
+				.slice(1)
+				.every((line) => line.startsWith(theme.bgFromFg("warning", " "))),
+		).toBe(true);
+		expect(otherHook.render(120).join("\n")).not.toMatch(/\x1b\[48;/);
 	});
 
 	it("summarizes failures, nonzero exits, cancellations, and null-exit successes", () => {

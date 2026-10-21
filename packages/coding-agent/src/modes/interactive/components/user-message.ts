@@ -37,7 +37,7 @@ export class UserMessageComponent extends Container {
 
 	private rebuild(): void {
 		this.clear();
-		const contentBox = new MessageCard(this.outputPad, 1);
+		const contentBox = new MessageCard(this.outputPad, 1, "accent");
 		contentBox.addChild(
 			new Markdown(
 				this.text,
