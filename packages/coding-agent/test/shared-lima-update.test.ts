@@ -60,7 +60,7 @@ it("stages the pinned release before disconnecting all shared clients and restar
 	await mkdir(child);
 	try {
 		const runner = new UpdateRunner(parent);
-		const service = new LimaSandboxService({ runner, readinessWaiter: async () => {} });
+		const service = new LimaSandboxService({ runner, env: {}, readinessWaiter: async () => {} });
 		const result = await service.start({ workspaceRoot: child, name: "shared-update", update: true });
 		expect(result).toMatchObject({ containerName: "shared-update", token });
 		const scripts = runner.calls.map((args) => args.at(-1) ?? "");
@@ -89,7 +89,7 @@ it.each(["failPreflight", "failStage"] as const)("does not disconnect clients wh
 	try {
 		const runner = new UpdateRunner(parent);
 		runner[failure] = true;
-		const service = new LimaSandboxService({ runner, readinessWaiter: async () => {} });
+		const service = new LimaSandboxService({ runner, env: {}, readinessWaiter: async () => {} });
 		await expect(service.start({ workspaceRoot: parent, name: "shared-update", update: true })).rejects.toThrow();
 		expect(runner.calls.some((args) => args.at(-1)?.includes("systemctl --user stop"))).toBe(false);
 	} finally {
