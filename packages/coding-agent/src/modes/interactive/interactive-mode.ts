@@ -5961,6 +5961,7 @@ export class InteractiveMode {
 			this.editorContainer.clear();
 			this.editorContainer.addChild(editor);
 			this.ui.setFocus(editor);
+			this.updateToolBackendStatus();
 			this.ui.requestRender();
 		};
 

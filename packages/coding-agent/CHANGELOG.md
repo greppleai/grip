@@ -24,3 +24,7 @@ All notable changes to Grip are documented in this file.
 ### Added
 
 - Added `/sandbox start --name <vm> --update` to replace a verified shared Lima guest binary and restart its daemon after disconnecting attached clients.
+
+### Fixed
+
+- Fixed the `tools:` backend indicator disappearing from the footer after `/reload`.
