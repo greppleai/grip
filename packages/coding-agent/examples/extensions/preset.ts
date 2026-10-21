@@ -40,9 +40,9 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Api, Model, ModelThinkingLevel } from "@greppleai/grip-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@greppleai/grip";
 import { DynamicBorder, getAgentDir } from "@greppleai/grip";
+import type { Api, Model, ModelThinkingLevel } from "@greppleai/grip-ai";
 import { Container, Key, type SelectItem, SelectList, Text } from "@greppleai/grip-tui";
 
 // Preset configuration

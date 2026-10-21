@@ -9,24 +9,7 @@ Grip runs on Android via [Termux](https://termux.dev/), a terminal emulator and 
 
 ## Installation
 
-When `@greppleai/grip` is available in your registry:
-
-```bash
-# Update packages
-pkg update && pkg upgrade
-
-# Install dependencies
-pkg install nodejs termux-api git
-
-# Install Grip
-npm install -g --ignore-scripts @greppleai/grip
-
-# Create config directory
-mkdir -p ~/.grip/agent
-
-# Run Grip
-grip
-```
+The single-file release installers support **macOS, Linux, and Windows**, not Android/Termux. Do not run the Linux installer here: its native modules and system ABI are not Android builds. There is currently no supported Grip binary or npm release for Termux. A source checkout and Termux-specific build would need separate validation before documenting an installation procedure.
 
 ## Clipboard Support
 

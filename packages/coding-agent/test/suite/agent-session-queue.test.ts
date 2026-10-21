@@ -1,6 +1,6 @@
+import type { ExtensionAPI } from "@greppleai/grip";
 import type { AgentTool } from "@greppleai/grip-agent-core";
 import { fauxAssistantMessage, fauxToolCall, type TextContent } from "@greppleai/grip-ai";
-import type { ExtensionAPI } from "@greppleai/grip";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import {

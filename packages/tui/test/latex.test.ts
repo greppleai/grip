@@ -215,9 +215,11 @@ R_{\mu\nu}-\frac12 Rg_{\mu\nu}+\Lambda g_{\mu\nu}
 				].join("\n"),
 			],
 			[
-String.raw`\Psi(x,t)=
+				String.raw`\Psi(x,t)=
 \sum_{n=1}^{\infty}
-` + "\\underbrace{\n" + String.raw`c_n
+` +
+					"\\underbrace{\n" +
+					String.raw`c_n
 \sqrt{\frac{2}{L}}
 \sin\!\left(\frac{n\pi x}{L}\right)
 }_{\text{spatial eigenmode}}
@@ -324,7 +326,7 @@ String.raw`\Psi(x,t)=
 	it("renders named, modular, overlaid, and underlaid operators", () => {
 		assert.strictEqual(renderLatex(String.raw`\operatorname*{arg\,max}_{x\in X} f(x)`), "arg max[x∈X] f(x)");
 		assert.strictEqual(renderLatex(String.raw`a\bmod n,\quad a\equiv b\pmod n`), "a mod n, a ≡ b (mod n)");
-		assert.strictEqual(renderLatex(String.raw`\overset{!}{=}+` + "\\underset{n}{x}" + String.raw`+\stackrel{def}{=}`), "=^!+xₙ+=ᵈᵉᶠ");
+		assert.strictEqual(renderLatex(String.raw`\overset{!}{=}+\underset{n}{x}+\stackrel{def}{=}`), "=^!+xₙ+=ᵈᵉᶠ");
 	});
 
 	it("renders indexed roots and additional accents and wrappers", () => {
@@ -489,7 +491,7 @@ R\left(\frac{\pi}{4}\right)
 	});
 
 	it("returns undefined for unsupported commands", () => {
-		assert.strictEqual(renderLatex(String.raw`x + ` + "\\unknown{y}"), undefined);
+		assert.strictEqual(renderLatex(String.raw`x + \unknown{y}`), undefined);
 	});
 
 	it("returns undefined for malformed groups and environments", () => {

@@ -4,7 +4,6 @@
  * Replace everything - no discovery, explicit configuration.
  */
 
-import { getModel } from "@greppleai/grip-ai";
 import {
 	AuthStorage,
 	createExtensionRuntime,
@@ -14,6 +13,7 @@ import {
 	type ResourceLoader,
 	SettingsManager,
 } from "@greppleai/grip";
+import { getModel } from "@greppleai/grip-ai";
 
 // Custom auth storage location
 const authStorage = AuthStorage.create("/tmp/my-agent/auth.json");

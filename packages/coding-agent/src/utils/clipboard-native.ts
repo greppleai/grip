@@ -12,7 +12,9 @@ export type ClipboardModule = {
 type ClipboardRequire = (id: string) => unknown;
 
 const moduleRequire = createRequire(import.meta.url);
-const executableDirRequire = createRequire(pathToFileURL(join(dirname(process.execPath), "package.json")).href);
+const executableDirRequire = createRequire(
+	pathToFileURL(join(process.env.GRIP_EMBEDDED_ASSET_DIR || dirname(process.execPath), "package.json")).href,
+);
 const hasDisplay = process.platform !== "linux" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
 
 export function loadClipboardNative(

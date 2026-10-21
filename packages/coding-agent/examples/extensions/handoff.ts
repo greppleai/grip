@@ -12,10 +12,10 @@
  * The generated prompt appears as a draft in the editor for review/editing.
  */
 
-import type { AgentMessage } from "@greppleai/grip-agent-core";
-import { complete, type Message, type TextContent } from "@greppleai/grip-ai";
 import type { ExtensionAPI, SessionEntry } from "@greppleai/grip";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@greppleai/grip";
+import type { AgentMessage } from "@greppleai/grip-agent-core";
+import { complete, type Message, type TextContent } from "@greppleai/grip-ai";
 
 const SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
 

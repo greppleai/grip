@@ -13,9 +13,9 @@
  *   grip --extension examples/extensions/custom-compaction.ts
  */
 
-import { type AssistantMessage, complete } from "@greppleai/grip-ai";
 import type { ExtensionAPI, ExtensionContext } from "@greppleai/grip";
 import { convertToLlm, serializeConversation } from "@greppleai/grip";
+import { type AssistantMessage, complete } from "@greppleai/grip-ai";
 
 function extractSummaryText(response: AssistantMessage): string {
 	return response.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("\n");

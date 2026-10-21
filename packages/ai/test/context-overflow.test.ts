@@ -126,9 +126,9 @@ describe("Context overflow error handling", () => {
 	describe("GitHub Copilot (OAuth)", () => {
 		// OpenAI model via Copilot
 		it.skipIf(!githubCopilotToken)(
-			"gpt-5-mini - should detect overflow via isContextOverflow",
+			"gpt-5.4-nano - should detect overflow via isContextOverflow",
 			async () => {
-				const model = getModel("github-copilot", "gpt-5-mini");
+				const model = getModel("github-copilot", "gpt-5.4-nano");
 				const result = await testContextOverflow(model, githubCopilotToken!);
 				logResult(result);
 

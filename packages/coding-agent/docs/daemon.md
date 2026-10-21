@@ -2,12 +2,12 @@
 
 `grip --daemon` starts Grip as a remote workspace runtime. A normal local Grip process remains the orchestrator: it owns provider credentials, model calls, prompts, sessions, compaction, extensions, subagents, RPC, and UI. The daemon owns one configured workspace and executes canonical workspace tools, primitive project-resource operations, streamed file transfers, optional process execution, and optional colocated LSP.
 
-Grip integrates the daemon into `@greppleai/grip`; start it with `grip --daemon`. Verify package availability before installing from a registry; a local packaged build can be used instead.
+Grip includes the daemon in the single-file executable; install a published, checksummed binary using [Quickstart](quickstart.md#install) or use a locally built executable. The daemon needs no npm installation on its host.
 
 ## Start a daemon
 
 ```bash
-npm install -g --ignore-scripts @greppleai/grip
+# Install the verified Grip binary first (see Quickstart).
 GRIP_DAEMON_TOKEN='long-random-token' \
 grip --daemon --daemon-cwd /workspace --daemon-host 127.0.0.1 --daemon-port 8787
 ```
@@ -31,11 +31,14 @@ Use `GRIP_REMOTE_TOKEN` on the client. Do not put tokens in query strings or URL
 
 ## Topology and trust boundary
 
-One daemon process serves one workspace root and one trust domain. The daemon is an authenticated remote-code-execution service: anyone with the bearer token can use every advertised daemon capability.
+In ordinary v1 mode, each daemon connection exposes a single workspace root; all clients of a daemon still share its OS-user trust domain. The daemon is an authenticated remote-code-execution service: anyone with the bearer token can use every advertised daemon capability. The separately negotiated v2 shared-Lima mode binds a workspace root per channel, but does **not** provide hostile-client isolation.
 
 Application-layer confinement prevents protocol paths and symlinks from escaping the configured workspace and optional temporary root for file tools, resource reads, file transfers, temporary outputs, subprocess working directories, and LSP paths. `GRIP_DAEMON_TEMP_ROOT` is opt-in and should point only to disposable storage inside an OS sandbox; it is unset by default. This is not an operating-system sandbox. If process execution is enabled, commands can access anything the daemon OS user can access. Run the daemon as a dedicated unprivileged user, in a container, VM, or equivalent sandbox for hostile repositories.
 
 The daemon refuses root and insecure non-loopback deployment by default. Non-loopback HTTP requires explicit override and should only be used behind a trusted TLS terminator. Prefer TLS for direct non-local use.
+
+
+The shared Lima workflow uses a **separately negotiated v2** protocol, not a reinterpretation of the v1 single-root handshake. Each local TUI opens its own authenticated WebSocket and binds a workspace channel under the guest daemon's fixed parent mount. The daemon starts with `--daemon-shared-parent`; ordinary `--remote` still creates a v1 connection. Shared transfers are not advertised (ordinary v1 transfers remain available), and guest process execution is enabled for trusted clients only. See [sandbox.md](sandbox.md#direct-shared-lima-attachment) for attachment and stop policy.
 
 ## Configuration
 
@@ -74,7 +77,6 @@ File uploads/downloads and artifact reads use bounded streamed transfer messages
 
 A local daemon smoke-test image lives at `packages/coding-agent/examples/daemon-docker` and starts the packaged `grip --daemon` command inside the container.
 
-The sandbox base image used by `/sandbox start` lives at `packages/coding-agent/examples/sandbox-docker`. It builds from local release artifacts, expects the host workspace to be mounted at `/workspace`, and receives `GRIP_DAEMON_TOKEN` from the sandbox launcher environment. See [Docker Sandbox](sandbox.md) for the hidden `/sandbox` command, configuration precedence, auto-switch behavior, and security limits.
 
 ```bash
 docker build -f packages/coding-agent/examples/daemon-docker/Dockerfile -t grip-remote-daemon-test .

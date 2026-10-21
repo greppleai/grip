@@ -466,6 +466,7 @@ ${chalk.bold("Examples:")}
   # Run built-in tools through a remote workspace daemon
   ${APP_NAME} --remote ws://localhost:8787 "Inspect this repo"
 
+
   # Start without a connected daemon backend and attach later with /sandbox
   ${APP_NAME} --remote-deferred --remote-cwd /workspace
 

@@ -1,6 +1,6 @@
-import { complete, getModel, type TextContent } from "@greppleai/grip-ai";
 import type { ExtensionAPI, ExtensionCommandContext, SessionEntry } from "@greppleai/grip";
 import { DynamicBorder, getMarkdownTheme } from "@greppleai/grip";
+import { complete, getModel, type TextContent } from "@greppleai/grip-ai";
 import { Container, Markdown, matchesKey, Text } from "@greppleai/grip-tui";
 
 type ContentBlock = {

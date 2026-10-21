@@ -16,9 +16,6 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentToolResult } from "@greppleai/grip-agent-core";
-import type { AssistantMessage, Message } from "@greppleai/grip-ai";
-import { StringEnum } from "@greppleai/grip-ai";
 import {
 	type ExtensionAPI,
 	type ExtensionContext,
@@ -28,6 +25,9 @@ import {
 	type ThemeColor,
 	withFileMutationQueue,
 } from "@greppleai/grip";
+import type { AgentToolResult } from "@greppleai/grip-agent-core";
+import type { AssistantMessage, Message } from "@greppleai/grip-ai";
+import { StringEnum } from "@greppleai/grip-ai";
 import { Container, Markdown, Spacer, Text } from "@greppleai/grip-tui";
 import { type Static, Type } from "typebox";
 import { type AgentConfig, type AgentConfigSource, type AgentScope, discoverAgents } from "./agents.ts";

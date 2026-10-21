@@ -8,8 +8,8 @@
  * Token stats come from ctx.session/ctx.model (already accessible).
  */
 
-import type { AssistantMessage } from "@greppleai/grip-ai";
 import type { ExtensionAPI, SessionEntry } from "@greppleai/grip";
+import type { AssistantMessage } from "@greppleai/grip-ai";
 import { truncateToWidth, visibleWidth } from "@greppleai/grip-tui";
 
 interface FooterUsage {

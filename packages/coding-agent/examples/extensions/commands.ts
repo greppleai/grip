@@ -10,12 +10,7 @@
  * 3. Use /commands extensions to filter by source
  */
 
-import type {
-	ExtensionAPI,
-	ExtensionCommandContext,
-	SlashCommandInfo,
-	SlashCommandSource,
-} from "@greppleai/grip";
+import type { ExtensionAPI, ExtensionCommandContext, SlashCommandInfo, SlashCommandSource } from "@greppleai/grip";
 
 interface CommandSourceGroup {
 	key: SlashCommandSource;

@@ -1,9 +1,4 @@
-import {
-	CustomEditor,
-	type ExtensionAPI,
-	type ExtensionContext,
-	type KeybindingsManager,
-} from "@greppleai/grip";
+import { CustomEditor, type ExtensionAPI, type ExtensionContext, type KeybindingsManager } from "@greppleai/grip";
 import type { Component, EditorTheme, TUI } from "@greppleai/grip-tui";
 import { truncateToWidth, visibleWidth } from "@greppleai/grip-tui";
 

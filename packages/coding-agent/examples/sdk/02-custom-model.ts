@@ -4,8 +4,8 @@
  * Shows how to select a specific model and thinking level.
  */
 
-import { getModel } from "@greppleai/grip-ai";
 import { AuthStorage, GripAgent, ModelRegistry } from "@greppleai/grip";
+import { getModel } from "@greppleai/grip-ai";
 
 // Set up auth storage and model registry
 const authStorage = AuthStorage.create();

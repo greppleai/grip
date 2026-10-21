@@ -52,6 +52,7 @@ function pathOrNull(file: NodeFs.PathOrFileDescriptor): string | null {
 function getFallbackWasmPaths(): string[] {
 	const execDir = path.dirname(process.execPath);
 	return [
+		...(process.env.GRIP_EMBEDDED_ASSET_DIR ? [path.join(process.env.GRIP_EMBEDDED_ASSET_DIR, WASM_FILENAME)] : []),
 		path.join(execDir, WASM_FILENAME),
 		path.join(execDir, "photon", WASM_FILENAME),
 		path.join(process.cwd(), WASM_FILENAME),

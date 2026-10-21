@@ -25,20 +25,8 @@
  *   grip -e ./built-in-tool-renderer.ts
  */
 
-import type {
-	BashToolDetails,
-	EditToolDetails,
-	ExtensionAPI,
-	ReadToolDetails,
-	Theme,
-} from "@greppleai/grip";
-import {
-	createBashTool,
-	createEditTool,
-	createReadTool,
-	createWriteTool,
-	LocalToolOperations,
-} from "@greppleai/grip";
+import type { BashToolDetails, EditToolDetails, ExtensionAPI, ReadToolDetails, Theme } from "@greppleai/grip";
+import { createBashTool, createEditTool, createReadTool, createWriteTool, LocalToolOperations } from "@greppleai/grip";
 import { Text } from "@greppleai/grip-tui";
 
 function appendExpandedBashOutput(summary: string, output: string, theme: Theme): string {

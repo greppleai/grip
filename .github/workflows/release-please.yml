@@ -21,6 +21,9 @@ jobs:
       prs_created: ${{ steps.release.outputs.prs_created }}
       pr: ${{ steps.release.outputs.pr }}
       prs: ${{ steps.release.outputs.prs }}
+      cli_release_created: ${{ steps.release.outputs['packages/coding-agent--release_created'] }}
+      cli_version: ${{ steps.release.outputs['packages/coding-agent--version'] }}
+      cli_tag: ${{ steps.release.outputs['packages/coding-agent--tag_name'] }}
     steps:
       - name: Run release-please
         id: release
@@ -85,45 +88,12 @@ jobs:
           git commit -m "chore(release): sync generated release files"
           git push origin HEAD:${{ steps.branch.outputs.branch }}
 
-  publish-npm:
+  publish-binary:
     needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
-    runs-on: ubuntu-latest
-    environment: npm-publish
+    if: ${{ needs.release-please.outputs.cli_release_created == 'true' }}
     permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          registry-url: https://registry.npmjs.org
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fd-find ripgrep
-          sudo ln -s $(which fdfind) /usr/local/bin/fd
-
-      - name: Sync generated release files
-        run: |
-          VERSION=$(node -e 'const manifest=require("./.release-please-manifest.json"); const versions=[...new Set(Object.values(manifest))]; if (versions.length !== 1) throw new Error(`Release Please manifest versions are out of sync: ${versions.join(", ")}`); console.log(versions[0]);')
-          node scripts/sync-versions.js --set "$VERSION"
-          npm install --package-lock-only --ignore-scripts
-          node scripts/generate-coding-agent-shrinkwrap.mjs
-          node scripts/generate-coding-agent-install-lock.mjs
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Publish packages
-        run: |
-          npm run prepublishOnly
-          npm publish -ws --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      contents: write
+    uses: ./.github/workflows/build-binaries.yml
+    with:
+      tag: ${{ format('v{0}', needs.release-please.outputs.cli_version) }}
+      source_ref: ${{ needs.release-please.outputs.cli_tag }}

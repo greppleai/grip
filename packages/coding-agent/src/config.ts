@@ -287,7 +287,7 @@ export function getSelfUpdateCommand(packageName: string, npmCommand?: string[])
 export function getSelfUpdateUnavailableInstruction(packageName: string, npmCommand?: string[]): string {
 	const method = detectInstallMethod();
 	if (method === "bun-binary") {
-		return `Download from: https://github.com/greppleai/grip/releases/latest`;
+		return "Rerun the verified Grip binary installer from https://github.com/greppleai/grip to update this executable.";
 	}
 	const command = getSelfUpdateCommandForMethod(method, packageName, npmCommand);
 	if (command) {
@@ -325,8 +325,8 @@ export function getPackageDir(): string {
 	}
 
 	if (isBunBinary) {
-		// Bun binary: process.execPath points to the compiled executable
-		return dirname(process.execPath);
+		// A compiled binary extracts its bundled resources into a private temporary directory.
+		return process.env.GRIP_EMBEDDED_ASSET_DIR || dirname(process.execPath);
 	}
 	// Node.js: walk up from __dirname until we find package.json
 	let dir = __dirname;

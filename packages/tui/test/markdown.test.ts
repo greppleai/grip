@@ -1507,7 +1507,7 @@ A=
 		});
 
 		it("preserves unsupported, incomplete, escaped, and fenced LaTeX", () => {
-			const cases = [String.raw`Unknown $x + ` + "\\unknown{y}$ after", String.raw`Streaming $\mathbb{C}^3`];
+			const cases = [`Unknown $x + ` + "\\unknown{y}$ after", String.raw`Streaming $\mathbb{C}^3`];
 			for (const source of cases) {
 				const markdown = new Markdown(source, 0, 0, defaultMarkdownTheme);
 				assert.deepStrictEqual(

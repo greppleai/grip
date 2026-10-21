@@ -20,8 +20,8 @@
  *   grip -e ./tool-override.ts
  */
 
-import type { TextContent } from "@greppleai/grip-ai";
 import { type ExtensionAPI, getAgentDir, withFileMutationQueue } from "@greppleai/grip";
+import type { TextContent } from "@greppleai/grip-ai";
 import { constants, readFileSync } from "fs";
 import { access, appendFile, readFile } from "fs/promises";
 import { join, resolve } from "path";

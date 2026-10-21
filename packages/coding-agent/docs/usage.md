@@ -139,13 +139,13 @@ grip remove <source> [-l]        # Remove package
 grip uninstall <source> [-l]     # Alias for remove
 grip update [source|self|grip]   # Update Grip and packages; reconcile pinned git refs
 grip update --extensions        # Update packages only; reconcile pinned git refs
-grip update --self              # Update Grip only
+grip update --self              # npm-managed installs only; for binary installs rerun the verified installer
 grip update --extension <src>   # Update one package
 grip list                       # List installed packages
 grip config                     # Enable/disable package resources
 ```
 
-These commands manage Grip packages, not the Grip CLI installation. To uninstall Grip itself, see [Quickstart](quickstart.md#uninstall).
+These commands manage Grip packages; the compiled binary itself updates by rerunning the [verified installer](quickstart.md#install), not `grip update --self`. To uninstall Grip itself, see [Quickstart](quickstart.md#uninstall).
 
 See [Grip Packages](packages.md) for package sources and security notes.
 

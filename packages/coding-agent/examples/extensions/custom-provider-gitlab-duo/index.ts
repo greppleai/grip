@@ -9,6 +9,7 @@
  *   # Then /login gitlab-duo, or set GITLAB_TOKEN=glpat-...
  */
 
+import type { ExtensionAPI } from "@greppleai/grip";
 import {
 	type Api,
 	type AssistantMessageEventStream,
@@ -24,7 +25,6 @@ import {
 	streamSimpleOpenAIResponses,
 	type ThinkingLevelMap,
 } from "@greppleai/grip-ai";
-import type { ExtensionAPI } from "@greppleai/grip";
 
 // =============================================================================
 // Constants

@@ -4,23 +4,19 @@ Grip is a minimal terminal coding harness. It is designed to stay small at the c
 
 ## Quick start
 
-When the package is available in your registry, install Grip with npm:
+Install the single compiled executable from a published Grip release:
 
 ```bash
-npm install -g --ignore-scripts @greppleai/grip
+# macOS/Linux
+curl -fsSL https://raw.githubusercontent.com/greppleai/grip/main/install.sh | sh
 ```
 
-`--ignore-scripts` disables dependency lifecycle scripts during install. Grip does not require install scripts for normal npm installs. This repository rename does not verify publication or ownership of the new npm scope.
-
-The former installer at `https://pi.dev/install.sh` belongs to the old Pi distribution; it is not a verified Grip installation method. Do not replace the hostname with a guessed endpoint.
-
-To uninstall Grip itself after an npm install, use:
-
-```bash
-npm uninstall -g @greppleai/grip
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/greppleai/grip/main/install.ps1 | iex
 ```
 
-For pnpm, Yarn, or Bun installs, use the matching global remove command: `pnpm remove -g @greppleai/grip`, `yarn global remove @greppleai/grip`, or `bun uninstall -g @greppleai/grip`.
+These commands require the scripts and checksummed release binaries to have been published. They do **not** install the Grip CLI through npm. See [Quickstart](quickstart.md) for pinning versions, PATH, and uninstall instructions; the old Pi installer at `https://pi.dev/install.sh` is unrelated.
 
 Then run it in a project directory:
 
@@ -41,7 +37,7 @@ For the full first-run flow, see [Quickstart](quickstart.md). Upgrading from the
 - [Settings](settings.md) - global and project settings.
 - [Language Server Protocol](lsp.md) - configure spawned servers, attached endpoints, host connections, and remote-backend path mappings.
 - [Remote Daemon](daemon.md) - run `grip --daemon` as a confined remote workspace runtime.
-- [Docker Sandbox](sandbox.md) - hidden user-only `/sandbox` command for Docker-backed workspace execution.
+- [Lima Sandbox](sandbox.md) - hidden user-only `/sandbox` command for Lima VM workspace execution.
 - [Keybindings](keybindings.md) - default shortcuts and custom keybindings.
 - [Sessions](sessions.md) - session management, branching, and tree navigation.
 - [Compaction](compaction.md) - context compaction and branch summarization.

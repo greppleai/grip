@@ -769,12 +769,13 @@ async function resolveStartupSession(parsed: Args, appMode: GripAgentAppMode): P
 }
 
 async function resolveStartupToolOperations(parsed: Args): Promise<ToolOperations | undefined> {
+	if (parsed.help) return undefined;
 	const remoteDeferred = parsed.remoteDeferred;
-	if (remoteDeferred && parsed.remote && !parsed.help) {
+	if (remoteDeferred && parsed.remote) {
 		console.error(chalk.red("Error: --remote-deferred and --remote cannot be used together"));
 		process.exit(1);
 	}
-	if (parsed.remote && !parsed.help) {
+	if (parsed.remote) {
 		try {
 			return await createRemoteToolOperations(parsed.remote);
 		} catch (error) {
@@ -783,7 +784,7 @@ async function resolveStartupToolOperations(parsed: Args): Promise<ToolOperation
 			process.exit(1);
 		}
 	}
-	if (!remoteDeferred || parsed.help) return undefined;
+	if (!remoteDeferred) return undefined;
 	if (!parsed.remoteCwd) {
 		console.error(chalk.red("Error: --remote-deferred requires --remote-cwd <path>"));
 		process.exit(1);

@@ -2,8 +2,8 @@
  * Hello Tool - Minimal custom tool example
  */
 
-import { Type } from "@greppleai/grip-ai";
 import { defineTool, type ExtensionAPI } from "@greppleai/grip";
+import { Type } from "@greppleai/grip-ai";
 
 const helloTool = defineTool({
 	name: "hello",

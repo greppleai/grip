@@ -41,7 +41,7 @@ I regularly publish my own `pi-mono` work sessions here:
 - [Settings](#settings)
 - [Language Servers](#language-servers)
 - [Remote Daemon](#remote-daemon)
-- [Docker Sandbox](#docker-sandbox)
+- [Lima Sandbox](#lima-sandbox)
 - [Customization](#customization)
   - [Prompt Templates](#prompt-templates)
   - [Skills](#skills)
@@ -57,15 +57,19 @@ I regularly publish my own `pi-mono` work sessions here:
 
 ## Quick Start
 
-Install the Grip CLI from npm once `@greppleai/grip` is available in your registry and its ownership is verified:
+Install the single Grip executable from a published, checksummed [GitHub release](https://github.com/greppleai/grip/releases); no npm or Bun is required on the destination machine:
 
 ```bash
-npm install -g --ignore-scripts @greppleai/grip
+# macOS/Linux (inspect the installer first)
+curl -fsSL https://raw.githubusercontent.com/greppleai/grip/main/install.sh | sh
 ```
 
-`--ignore-scripts` disables dependency lifecycle scripts during install. Grip does not require install scripts for normal npm installs.
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/greppleai/grip/main/install.ps1 | iex
+```
 
-The old `https://pi.dev/install.sh` is a historical Pi installer, **not** a verified Grip installer. Do not use it to install Grip. See [manual migration](docs/migrating-to-grip.md) when replacing an existing Pi installation.
+These URLs become active only after the scripts and release assets are published. Rerun the installer to update; set `GRIP_VERSION=vX.Y.Z` to pin a release. The old `https://pi.dev/install.sh` installs upstream Pi, **not** Grip. See [manual migration](docs/migrating-to-grip.md) when replacing an existing Pi installation.
 
 Authenticate with an API key:
 
@@ -311,9 +315,9 @@ There is no separate Grip daemon package or executable. See [docs/daemon.md](doc
 
 ---
 
-## Docker Sandbox
+## Lima Sandbox
 
-Interactive `/sandbox` is the sole command for inspecting, connecting, clearing, starting, listing, and stopping workspace tool backends. It supports existing sandbox daemons and Grip-owned Docker containers. The command is user-only and appears in slash-command completion, but is hidden from model-visible command catalogs, tools, prompts, skills, and rules. Local Grip keeps model/session/UI orchestration while workspace tools/resources use the selected backend. See [docs/sandbox.md](docs/sandbox.md) for command syntax, image configuration, local base-image builds, troubleshooting, and security limits.
+Interactive `/sandbox` manages workspace backends through Lima VMs or attaches to existing sandbox daemons. The command is user-only and hidden from model-visible catalogs. Local Grip keeps model/session/UI orchestration while workspace tools run in the selected backend. See [docs/sandbox.md](docs/sandbox.md) for VM commands, configuration, troubleshooting, and security limits.
 
 ---
 

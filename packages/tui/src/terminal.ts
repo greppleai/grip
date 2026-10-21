@@ -388,7 +388,7 @@ export class ProcessTerminal implements Terminal {
 			const candidates = [
 				path.join(moduleDir, "..", nativePath),
 				path.join(moduleDir, nativePath),
-				path.join(path.dirname(process.execPath), nativePath),
+				path.join(process.env.GRIP_EMBEDDED_ASSET_DIR || path.dirname(process.execPath), nativePath),
 			];
 			for (const modulePath of candidates) {
 				try {

@@ -28,10 +28,10 @@ grip install ./relative/path/to/package
 
 grip remove npm:@foo/bar
 grip list                     # show installed packages from settings
-grip update                   # update Grip, update packages, and reconcile pinned git refs
+grip update                   # update packages; for a compiled CLI rerun the verified installer
 grip update --extensions      # update packages and reconcile pinned git refs only
-grip update --self            # update Grip only
-grip update --self --force    # reinstall Grip even if current
+grip update --self            # npm-managed CLI only; compiled binary cannot replace itself
+grip update --self --force    # npm-managed CLI only
 grip update npm:@foo/bar      # update one package
 grip update --extension npm:@foo/bar
 ```

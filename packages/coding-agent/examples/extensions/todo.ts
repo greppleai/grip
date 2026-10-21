@@ -10,8 +10,8 @@
  * correct for that point in history.
  */
 
-import { StringEnum } from "@greppleai/grip-ai";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext, Theme } from "@greppleai/grip";
+import { StringEnum } from "@greppleai/grip-ai";
 import { matchesKey, Text, truncateToWidth } from "@greppleai/grip-tui";
 import { Type } from "typebox";
 

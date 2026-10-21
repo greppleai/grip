@@ -13,15 +13,8 @@
 #   --platform <name>   Build only for specified platform (darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64, windows-arm64)
 #   --out <dir>         Output directory (default: packages/coding-agent/binaries)
 #
-# Output:
-#   packages/coding-agent/binaries/
-#     grip-darwin-arm64.tar.gz
-#     grip-darwin-x64.tar.gz
-#     grip-linux-x64.tar.gz
-#     grip-linux-arm64.tar.gz
-#     grip-windows-x64.zip
-#     grip-windows-arm64.zip
-
+# Output: one executable and SHA-256 file per platform in packages/coding-agent/binaries/,
+# plus compatibility archives containing only the executable.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -130,73 +123,22 @@ fi
 
 for platform in "${PLATFORMS[@]}"; do
     echo "Building for $platform..."
-    # Bun compiled executables only embed worker scripts when they are passed as
-    # explicit build entrypoints. The runtime can still use new URL(...), but the
-    # worker must be present in the compiled executable.
+    node ../../scripts/prepare-binary-assets.mjs "$platform"
+    # Keep the worker as an explicit entrypoint; embed resources with Bun's --asset.
+    binary="$OUTPUT_DIR/$platform/grip"
+    asset="grip-$platform"
     if [[ "$platform" == windows-* ]]; then
-        bun build --compile --target=bun-$platform ./dist/bun/cli.js ./dist/utils/image-resize-worker.js --outfile "$OUTPUT_DIR/$platform/grip.exe"
-    else
-        bun build --compile --target=bun-$platform ./dist/bun/cli.js ./dist/utils/image-resize-worker.js --outfile "$OUTPUT_DIR/$platform/grip"
+        binary="$binary.exe"
+        asset="$asset.exe"
     fi
+    bun build --compile --target=bun-$platform --asset=./dist/bun/grip-assets.blob ./dist/bun/cli.js ./dist/utils/image-resize-worker.js --outfile "$binary"
+    cp "$binary" "$OUTPUT_DIR/$asset"
+    (cd "$OUTPUT_DIR" && sha256sum "$asset" > "$asset.sha256")
 done
 
 echo "==> Creating release archives..."
 
-# Copy shared files to each platform directory
-for platform in "${PLATFORMS[@]}"; do
-    cp package.json "$OUTPUT_DIR/$platform/"
-    cp README.md "$OUTPUT_DIR/$platform/"
-    cp CHANGELOG.md "$OUTPUT_DIR/$platform/"
-    cp ../../node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm "$OUTPUT_DIR/$platform/"
-    mkdir -p "$OUTPUT_DIR/$platform/theme"
-    cp dist/modes/interactive/theme/*.json "$OUTPUT_DIR/$platform/theme/"
-    if [[ -d dist/modes/interactive/assets ]]; then
-        mkdir -p "$OUTPUT_DIR/$platform/assets"
-        cp dist/modes/interactive/assets/* "$OUTPUT_DIR/$platform/assets/"
-    fi
-    cp -r dist/core/export-html "$OUTPUT_DIR/$platform/"
-    cp -r docs "$OUTPUT_DIR/$platform/"
-    cp -r examples "$OUTPUT_DIR/$platform/"
-
-    case "$platform" in
-        darwin-arm64)
-            clipboard_native_package="clipboard-darwin-arm64"
-            ;;
-        darwin-x64)
-            clipboard_native_package="clipboard-darwin-x64"
-            ;;
-        linux-x64)
-            clipboard_native_package="clipboard-linux-x64-gnu"
-            ;;
-        linux-arm64)
-            clipboard_native_package="clipboard-linux-arm64-gnu"
-            ;;
-        windows-x64)
-            clipboard_native_package="clipboard-win32-x64-msvc"
-            ;;
-        windows-arm64)
-            clipboard_native_package="clipboard-win32-arm64-msvc"
-            ;;
-    esac
-    mkdir -p "$OUTPUT_DIR/$platform/node_modules/@mariozechner"
-    cp -r ../../node_modules/@mariozechner/clipboard "$OUTPUT_DIR/$platform/node_modules/@mariozechner/"
-    cp -r ../../node_modules/@mariozechner/$clipboard_native_package "$OUTPUT_DIR/$platform/node_modules/@mariozechner/"
-
-    # Copy terminal input native helpers next to compiled binaries.
-    if [[ "$platform" == darwin-* ]]; then
-        mkdir -p "$OUTPUT_DIR/$platform/native/darwin/prebuilds/$platform"
-        cp ../tui/native/darwin/prebuilds/$platform/darwin-modifiers.node "$OUTPUT_DIR/$platform/native/darwin/prebuilds/$platform/"
-    fi
-    if [[ "$platform" == windows-* ]]; then
-        if [[ "$platform" == "windows-arm64" ]]; then
-            win32_arch_dir="win32-arm64"
-        else
-            win32_arch_dir="win32-x64"
-        fi
-        mkdir -p "$OUTPUT_DIR/$platform/native/win32/prebuilds/$win32_arch_dir"
-        cp ../tui/native/win32/prebuilds/$win32_arch_dir/win32-console-mode.node "$OUTPUT_DIR/$platform/native/win32/prebuilds/$win32_arch_dir/"
-    fi
-done
+# Archives remain available for existing release consumers but now contain only the executable.
 
 # Create archives
 cd "$OUTPUT_DIR"
@@ -226,8 +168,8 @@ done
 
 echo ""
 echo "==> Build complete!"
-echo "Archives available in $OUTPUT_DIR/"
-ls -lh *.tar.gz *.zip 2>/dev/null || true
+printf 'Single-file executables and SHA-256 files available in %s/\n' "$OUTPUT_DIR"
+ls -lh grip-* grip-*.sha256 2>/dev/null || true
 echo ""
 echo "Extracted directories for testing:"
 for platform in "${PLATFORMS[@]}"; do

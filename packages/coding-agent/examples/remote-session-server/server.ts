@@ -1,7 +1,6 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { TextContent } from "@greppleai/grip-ai";
 import {
 	type AppendRemoteSessionEntriesRequest,
 	type CreateRemoteSessionRequest,
@@ -14,6 +13,7 @@ import {
 	type SessionHeader,
 	type SessionInfo,
 } from "@greppleai/grip";
+import type { TextContent } from "@greppleai/grip-ai";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 

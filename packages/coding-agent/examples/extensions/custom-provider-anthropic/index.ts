@@ -38,6 +38,7 @@ import type {
 	TextBlockParam,
 	ToolResultBlockParam,
 } from "@anthropic-ai/sdk/resources/messages.js";
+import type { ExtensionAPI } from "@greppleai/grip";
 import {
 	type Api,
 	type AssistantMessage,
@@ -59,7 +60,6 @@ import {
 	type ToolCall,
 	type ToolResultMessage,
 } from "@greppleai/grip-ai";
-import type { ExtensionAPI } from "@greppleai/grip";
 
 // =============================================================================
 // OAuth Implementation (copied from packages/ai/src/utils/oauth/anthropic.ts)

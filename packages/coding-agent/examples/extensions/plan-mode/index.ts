@@ -12,9 +12,9 @@
  * - Progress tracking widget during execution
  */
 
+import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@greppleai/grip";
 import type { AgentMessage } from "@greppleai/grip-agent-core";
 import type { AssistantMessage, TextContent } from "@greppleai/grip-ai";
-import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@greppleai/grip";
 import { Key } from "@greppleai/grip-tui";
 import { extractTodoItems, isSafeCommand, markCompletedSteps, type TodoItem } from "./utils.ts";
 

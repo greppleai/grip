@@ -17,8 +17,8 @@
  * separate variables. Only the agent cursor is ever exposed to the agent.
  */
 
-import { StringEnum } from "@greppleai/grip-ai";
 import type { ExtensionAPI, ExtensionContext, Theme, ToolExecutionMode } from "@greppleai/grip";
+import { StringEnum } from "@greppleai/grip-ai";
 import { type Component, matchesKey, Text, truncateToWidth, visibleWidth } from "@greppleai/grip-tui";
 import { Type } from "typebox";
 
