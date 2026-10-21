@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { isIP } from "node:net";
 import type { Duplex } from "node:stream";
+import { SHARED_WORKSPACE_WEBSOCKET_PROTOCOL } from "../core/remote-workspace-protocol/shared-transport.ts";
 import {
 	DAEMON_WEBSOCKET_PATH,
 	DAEMON_WEBSOCKET_PROTOCOL,
@@ -173,7 +174,8 @@ export function validateDaemonUpgrade(
 		version !== "13" ||
 		!key ||
 		!isValidWebSocketKey(key) ||
-		protocol !== DAEMON_WEBSOCKET_PROTOCOL
+		(protocol !== DAEMON_WEBSOCKET_PROTOCOL &&
+			(protocol !== SHARED_WORKSPACE_WEBSOCKET_PROTOCOL || !configuration.sharedParentRoot))
 	) {
 		return { accepted: false, status: 400, message: "Invalid WebSocket upgrade" };
 	}

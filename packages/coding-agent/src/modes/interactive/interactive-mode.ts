@@ -134,14 +134,11 @@ import {
 	type SandboxUserCommand,
 } from "../../core/sandbox/command.ts";
 import {
-	DockerSandboxService,
-	type ManagedSandboxContainer,
 	redactSecrets,
-	type SandboxRuntime,
 	type SandboxService,
 	type SandboxStartResult,
 	type SandboxStopResult,
-} from "../../core/sandbox/docker.ts";
+} from "../../core/sandbox/config.ts";
 import { LimaSandboxService, type ManagedLimaInstance } from "../../core/sandbox/lima.ts";
 import { LocalSessionManager } from "../../core/session/local-session-manager.ts";
 import type { Session } from "../../core/session/session.ts";
@@ -261,7 +258,6 @@ interface SessionSandboxState {
 	token: string;
 	expectedCwd: string;
 	containerId?: string;
-	runtime?: SandboxRuntime;
 }
 
 function getSessionSandboxKey(session: Session): string {
@@ -614,10 +610,8 @@ export class InteractiveMode {
 	// Tool output expansion state
 	private toolOutputExpanded = false;
 	private activeSandboxContainerId: string | undefined;
-	private activeSandboxRuntime: SandboxRuntime | undefined;
 	private activeSandboxBackendConnected = false;
 	private readonly sessionSandboxStates = new Map<string, SessionSandboxState>();
-	private readonly managedSandboxContainers = new Map<string, ManagedSandboxContainer>();
 	private readonly managedLimaInstances = new Map<string, ManagedLimaInstance>();
 
 	// Thinking block visibility state
@@ -6261,13 +6255,6 @@ export class InteractiveMode {
 		this.setupAutocompleteProvider();
 		this.showLoadedResources({ force: true, showDiagnosticsWhenQuiet: true });
 	}
-	private createDockerSandboxService(): DockerSandboxService {
-		return new DockerSandboxService({
-			settingsManager: this.settingsManager,
-			managedContainers: this.managedSandboxContainers,
-		});
-	}
-
 	private createLimaSandboxService(): LimaSandboxService {
 		return new LimaSandboxService({
 			settingsManager: this.settingsManager,
@@ -6276,7 +6263,6 @@ export class InteractiveMode {
 	}
 
 	private async disposeRuntimeResources(): Promise<Error[]> {
-		const dockerSandboxService = this.createDockerSandboxService();
 		const limaSandboxService = this.createLimaSandboxService();
 		const errors: Error[] = [];
 		try {
@@ -6285,7 +6271,7 @@ export class InteractiveMode {
 			errors.push(error instanceof Error ? error : new Error(String(error)));
 		}
 		try {
-			await Promise.all([dockerSandboxService.stopManagedContainers(), limaSandboxService.stopManagedInstances()]);
+			await limaSandboxService.stopManagedInstances();
 		} catch (error) {
 			errors.push(error instanceof Error ? error : new Error(String(error)));
 		}
@@ -6294,12 +6280,10 @@ export class InteractiveMode {
 
 	private async restoreCurrentSessionSandbox(): Promise<void> {
 		this.activeSandboxContainerId = undefined;
-		this.activeSandboxRuntime = undefined;
 		this.activeSandboxBackendConnected = false;
 		const state = this.sessionSandboxStates.get(getSessionSandboxKey(this.activeSession));
 		if (!state) return;
 		this.activeSandboxContainerId = state.containerId;
-		this.activeSandboxRuntime = state.runtime ?? "docker";
 		try {
 			await this.session.activateSandboxDaemon({
 				url: state.url,
@@ -6319,9 +6303,6 @@ export class InteractiveMode {
 		return (
 			this.activeSandboxBackendConnected ||
 			this.activeSandboxContainerId !== undefined ||
-			[...this.managedSandboxContainers.values()].some(
-				(container) => container.ownerId === this.activeSession.getSessionId(),
-			) ||
 			[...(this.managedLimaInstances?.values() ?? [])].some(
 				(instance) => instance.ownerId === this.activeSession.getSessionId(),
 			) ||
@@ -6341,13 +6322,12 @@ export class InteractiveMode {
 		if (!this.activeSandboxBackendConnected && this.sessionSandboxStates.has(sessionKey)) {
 			this.sessionSandboxStates.delete(sessionKey);
 			this.activeSandboxContainerId = undefined;
-			this.activeSandboxRuntime = undefined;
 			this.showStatus("Stale sandbox state cleared");
 			return;
 		}
 		await this.session.clearRemoteSandbox();
 		this.sessionSandboxStates.delete(sessionKey);
-		this.activeSandboxRuntime = undefined;
+		this.activeSandboxContainerId = undefined;
 		this.activeSandboxBackendConnected = false;
 		this.refreshUiAfterBackendChange();
 		this.updateToolBackendStatus();
@@ -6363,7 +6343,6 @@ export class InteractiveMode {
 		const token = process.env.GRIP_REMOTE_TOKEN ?? "";
 		const info = await this.session.activateSandboxDaemon({ url, token, expectedCwd });
 		this.activeSandboxContainerId = undefined;
-		this.activeSandboxRuntime = undefined;
 		this.activeSandboxBackendConnected = true;
 		this.sessionSandboxStates.set(sessionKey, { type: "daemon", url, token, expectedCwd });
 		this.refreshUiAfterBackendChange();
@@ -6418,10 +6397,15 @@ export class InteractiveMode {
 
 		const activationError =
 			lastActivationError instanceof Error ? lastActivationError : new Error(String(lastActivationError));
+		if (result.daemonUrl.startsWith("grip+ws:")) {
+			// A shared-VM attach owns only its channel, never the VM or guest daemon.
+			this.activeSandboxContainerId = undefined;
+			this.activeSandboxBackendConnected = false;
+			throw activationError;
+		}
 		try {
 			await service.stop({ workspaceRoot, currentContainerId: result.containerId });
 			this.activeSandboxContainerId = undefined;
-			this.activeSandboxRuntime = undefined;
 			this.activeSandboxBackendConnected = false;
 		} catch (cleanupError) {
 			this.activeSandboxContainerId = result.containerId;
@@ -6437,19 +6421,25 @@ export class InteractiveMode {
 		service: SandboxService,
 		workspaceRoot: string,
 		sessionKey: string,
-		runtime: SandboxRuntime,
+		updatingAttached = false,
 	): Promise<void> {
 		const loader = this.showSandboxStartupLoader();
 		try {
 			const result = await service.start({
 				workspaceRoot,
-				...(command.image ? { image: command.image } : {}),
 				...(command.name ? { name: command.name } : {}),
 				...(command.template ? { limaTemplate: command.template } : {}),
+				...(command.update ? { update: true } : {}),
 				sessionId: this.activeSession.getSessionId(),
 			});
+			if (updatingAttached) {
+				await this.session.abort();
+				await this.session.clearRemoteSandbox();
+				this.sessionSandboxStates.delete(sessionKey);
+				this.activeSandboxContainerId = undefined;
+				this.activeSandboxBackendConnected = false;
+			}
 			this.activeSandboxContainerId = result.containerId;
-			this.activeSandboxRuntime = runtime;
 			const info = await this.activateStartedSandbox(service, workspaceRoot, result);
 			this.activeSandboxBackendConnected = true;
 			this.sessionSandboxStates.set(sessionKey, {
@@ -6458,11 +6448,17 @@ export class InteractiveMode {
 				token: result.token,
 				expectedCwd: result.workspaceMountPath,
 				containerId: result.containerId,
-				runtime,
 			});
 			this.refreshUiAfterBackendChange();
 			this.updateToolBackendStatus();
-			this.showStatus([formatSandboxStartResult(result), this.formatToolBackendStatus(info)].join("\n"));
+			this.showStatus(
+				[
+					command.update
+						? formatSandboxStartResult(result).replace("Sandbox started:", "Sandbox updated:")
+						: formatSandboxStartResult(result),
+					this.formatToolBackendStatus(info),
+				].join("\n"),
+			);
 		} finally {
 			this.hideSandboxStartupLoader(loader);
 		}
@@ -6494,7 +6490,6 @@ export class InteractiveMode {
 			}
 			this.sessionSandboxStates.delete(sessionKey);
 			this.activeSandboxContainerId = undefined;
-			this.activeSandboxRuntime = undefined;
 			this.activeSandboxBackendConnected = false;
 			return;
 		}
@@ -6510,7 +6505,6 @@ export class InteractiveMode {
 		}
 		if (stoppedActiveSandbox) {
 			this.activeSandboxContainerId = undefined;
-			this.activeSandboxRuntime = undefined;
 			this.activeSandboxBackendConnected = false;
 		}
 	}
@@ -6530,6 +6524,21 @@ export class InteractiveMode {
 			this.showStatus("Sandbox detached");
 			return;
 		}
+		const attached = this.sessionSandboxStates.get(sessionKey);
+		if (
+			attached?.url?.startsWith("grip+ws:") &&
+			attached.containerId === this.activeSandboxContainerId &&
+			(!target || target === attached.containerId)
+		) {
+			if (this.activeSandboxBackendConnected) await this.session.clearRemoteSandbox();
+			this.sessionSandboxStates.delete(sessionKey);
+			this.activeSandboxContainerId = undefined;
+			this.activeSandboxBackendConnected = false;
+			this.refreshUiAfterBackendChange();
+			this.updateToolBackendStatus();
+			this.showStatus("Shared sandbox detached; VM and guest daemon remain running");
+			return;
+		}
 		const result = await service.stop({
 			workspaceRoot,
 			target,
@@ -6541,7 +6550,7 @@ export class InteractiveMode {
 
 	private async executeSandboxCommand(
 		command: SandboxUserCommand,
-		dockerService: DockerSandboxService,
+		service: LimaSandboxService,
 		workspaceRoot: string,
 		sessionKey: string,
 	): Promise<void> {
@@ -6554,28 +6563,24 @@ export class InteractiveMode {
 				return;
 			case "attach":
 				if (!this.ensureSandboxCanActivate(sessionKey)) return;
-				await this.attachSandboxBackend(command.url, dockerService, sessionKey);
+				await this.attachSandboxBackend(command.url, service, sessionKey);
 				return;
-			case "start":
-				if (!this.ensureSandboxCanActivate(sessionKey)) return;
-				{
-					const runtime = command.runtime ?? dockerService.resolveConfig().runtime;
-					const service = runtime === "lima" ? this.createLimaSandboxService() : dockerService;
-					await this.startSandboxBackend(command, service, workspaceRoot, sessionKey, runtime);
-				}
+			case "start": {
+				const attached = this.sessionSandboxStates.get(sessionKey);
+				const updatingAttached =
+					command.update === true &&
+					attached?.url.startsWith("grip+ws:") === true &&
+					attached.containerId === command.name &&
+					this.activeSandboxBackendConnected;
+				if (!updatingAttached && !this.ensureSandboxCanActivate(sessionKey)) return;
+				await this.startSandboxBackend(command, service, workspaceRoot, sessionKey, updatingAttached);
 				return;
-			case "list":
-				{
-					const runtime = command.runtime ?? dockerService.resolveConfig().runtime;
-					const service = runtime === "lima" ? this.createLimaSandboxService() : dockerService;
-					this.showStatus(formatSandboxList(await service.list({ workspaceRoot })));
-				}
-				return;
-			case "stop": {
-				const runtime = this.activeSandboxRuntime ?? dockerService.resolveConfig().runtime;
-				const service = runtime === "lima" ? this.createLimaSandboxService() : dockerService;
-				await this.stopSandboxBackend(command.target, service, workspaceRoot, sessionKey);
 			}
+			case "list":
+				this.showStatus(formatSandboxList(await service.list({ workspaceRoot })));
+				return;
+			case "stop":
+				await this.stopSandboxBackend(command.target, service, workspaceRoot, sessionKey);
 		}
 	}
 
@@ -6588,7 +6593,7 @@ export class InteractiveMode {
 			return;
 		}
 
-		const service = this.createDockerSandboxService();
+		const service = this.createLimaSandboxService();
 		const workspaceRoot = this.activeSession.getCwd();
 		const sessionKey = getSessionSandboxKey(this.activeSession);
 		try {

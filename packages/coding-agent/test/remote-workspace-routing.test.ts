@@ -21,10 +21,12 @@ import {
 	borrowToolOperations,
 	createRemoteToolOperations,
 	DeferredRemoteToolOperations,
+	type ToolBackendInfo,
 } from "../src/core/tools/operations.ts";
 import { WorkspaceToolHost } from "../src/core/tools/workspace-tool-host.ts";
 import { parseDaemonCommand } from "../src/daemon/config.ts";
 import { createDaemonServer } from "../src/daemon/server.ts";
+import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { createHarness } from "./suite/harness.ts";
 import { createTestExtensionsResult, createTestResourceLoader } from "./utilities.ts";
 
@@ -457,6 +459,29 @@ describe("remote canonical workspace tool routing", () => {
 		await sandboxExpected.dispose();
 		await server.close();
 	});
+	it("aborts the active LLM loop when the sandbox connection drops without running tools on the host", async () => {
+		const workspaceRoot = await createTemporaryDirectory();
+		const { server, address } = await createServer(workspaceRoot);
+		const hostRoot = await createTemporaryDirectory();
+		const deferred = new DeferredRemoteToolOperations(hostRoot);
+		const harness = await createHarness({ toolOperations: deferred });
+		const abort = vi.spyOn(harness.session.agent, "abort");
+		try {
+			await harness.session.activateSandboxDaemon({ url: address.url, token: "", expectedCwd: workspaceRoot });
+			expect(abort).not.toHaveBeenCalled();
+			await server.close();
+			await vi.waitFor(() => expect(abort).toHaveBeenCalledOnce());
+			expect(harness.session.getToolBackendInfo().type).toBe("remote");
+			await expect(harness.session.prompt("run a local tool instead")).rejects.toThrow("Sandbox connection lost");
+			await expect(harness.session.getToolOperations().writeFile("host-escape.txt", "unsafe")).rejects.toThrow();
+			await expect(readFile(join(hostRoot, "host-escape.txt"), "utf8")).rejects.toThrow();
+			await expect(readFile(join(workspaceRoot, "host-escape.txt"), "utf8")).rejects.toThrow();
+		} finally {
+			await harness.session.dispose();
+			await server.close();
+			harness.cleanup();
+		}
+	});
 	it("keeps sandbox overlays session-local across new sessions", async () => {
 		const workspaceRoot = await createTemporaryDirectory();
 		const { server, address } = await createServer(workspaceRoot, false);
@@ -482,6 +507,65 @@ describe("remote canonical workspace tool routing", () => {
 			expect(deferred.getBackendInfo()).toEqual({ type: "remote", cwd: workspaceRoot, configured: false });
 		} finally {
 			await pi.dispose();
+			await deferred.dispose();
+			await server.close();
+		}
+	});
+	it("dispatches interactive /sandbox --attach and stop against a real v1 daemon transport", async () => {
+		const workspaceRoot = await createTemporaryDirectory();
+		const file = join(workspaceRoot, "interactive-attach.txt");
+		await writeFile(file, "attached through v1");
+		const { server, address } = await createServer(workspaceRoot, false);
+		const deferred = new DeferredRemoteToolOperations(workspaceRoot);
+		const agent = await GripAgent.create({
+			cwd: workspaceRoot,
+			toolOperations: deferred,
+			sessionManager: new InMemorySessionManager(workspaceRoot),
+		});
+		try {
+			const session = await agent.createAgentSession();
+			const showError = vi.fn();
+			const showStatus = vi.fn();
+			const context = {
+				session,
+				activeSession: { getCwd: () => workspaceRoot, getSessionId: () => "interactive-v1-test" },
+				sessionSandboxStates: new Map(),
+				managedLimaInstances: new Map(),
+				createLimaSandboxService: () => ({
+					resolveConfig: () => ({ workspaceMountPath: workspaceRoot }),
+					start: async () => {
+						throw new Error("Unexpected Lima start");
+					},
+					list: async () => {
+						throw new Error("Unexpected Lima list");
+					},
+					stop: async () => {
+						throw new Error("Unexpected Lima stop");
+					},
+				}),
+				refreshUiAfterBackendChange: vi.fn(),
+				updateToolBackendStatus: vi.fn(),
+				formatToolBackendStatus: (info: ToolBackendInfo) => `tools: ${info.type}`,
+				showStatus,
+				showWarning: vi.fn(),
+				showError,
+			};
+			Object.setPrototypeOf(context, InteractiveMode.prototype);
+			const dispatch = (
+				InteractiveMode.prototype as unknown as {
+					handleSandboxCommand(this: typeof context, text: string): Promise<void>;
+				}
+			).handleSandboxCommand;
+			await dispatch.call(context, `/sandbox --attach ${address.url}`);
+			expect(showError).not.toHaveBeenCalled();
+			expect(session.getToolBackendInfo()).toMatchObject({ type: "remote", cwd: workspaceRoot, configured: true });
+			expect((await session.getToolOperations().readFile(file)).toString()).toBe("attached through v1");
+			await dispatch.call(context, "/sandbox stop");
+			expect(showError).not.toHaveBeenCalled();
+			expect(session.getToolBackendInfo()).toMatchObject({ type: "remote", cwd: workspaceRoot, configured: false });
+			expect(showStatus.mock.calls.map(([message]) => message).join("\n")).toContain("Sandbox detached");
+		} finally {
+			await agent.dispose();
 			await deferred.dispose();
 			await server.close();
 		}

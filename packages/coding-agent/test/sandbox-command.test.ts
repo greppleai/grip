@@ -16,7 +16,7 @@ import type {
 	SandboxStartResult,
 	SandboxStopOptions,
 	SandboxStopResult,
-} from "../src/core/sandbox/docker.ts";
+} from "../src/core/sandbox/config.ts";
 import { BUILTIN_SLASH_COMMANDS, HIDDEN_BUILTIN_SLASH_COMMAND_NAMES } from "../src/core/slash-commands.ts";
 import { buildSystemPrompt } from "../src/core/system-prompt.ts";
 import type { ToolBackendInfo } from "../src/core/tools/operations.ts";
@@ -24,6 +24,7 @@ import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 interface SandboxSessionStub {
 	activateSandboxDaemon(options: ActivateSandboxDaemonOptions): Promise<ToolBackendInfo>;
+	abort?(): Promise<void>;
 	getToolBackendInfo(): ToolBackendInfo;
 	clearRemoteSandbox(): Promise<void>;
 }
@@ -40,15 +41,20 @@ interface SandboxServiceStub {
 	stop(options: SandboxStopOptions): Promise<SandboxStopResult>;
 }
 
+interface ManagedLimaInstanceStub {
+	ownerId?: string;
+	workspaceRoot?: string;
+	daemonPort?: number;
+}
+
 interface SandboxHandlerContext {
 	session: SandboxSessionStub;
 	activeSession: ActiveSandboxSessionStub;
 	sessionSandboxStates: Map<string, unknown>;
-	managedSandboxContainers: Map<string, unknown>;
+	managedLimaInstances?: Map<string, ManagedLimaInstanceStub>;
 	activeSandboxContainerId?: string;
 	activeSandboxBackendConnected?: boolean;
-	createDockerSandboxService(): SandboxServiceStub;
-	createLimaSandboxService?(): SandboxServiceStub;
+	createLimaSandboxService(): SandboxServiceStub;
 	refreshUiAfterBackendChange(): void;
 	updateToolBackendStatus(): void;
 	formatToolBackendStatus(info: ToolBackendInfo): string;
@@ -61,17 +67,12 @@ interface RuntimeHostStub {
 	dispose(): Promise<void>;
 }
 
-interface ManagedDockerSandboxCleanupServiceStub {
-	stopManagedContainers(): Promise<void>;
-}
-
 interface ManagedLimaSandboxCleanupServiceStub {
 	stopManagedInstances(): Promise<void>;
 }
 
 interface RuntimeResourceDisposalContext {
 	runtimeHost: RuntimeHostStub;
-	createDockerSandboxService(): ManagedDockerSandboxCleanupServiceStub;
 	createLimaSandboxService(): ManagedLimaSandboxCleanupServiceStub;
 }
 
@@ -151,14 +152,14 @@ function createContainer(): SandboxContainer {
 	return {
 		id: "abc123",
 		name: "grip-sandbox-project-hash",
-		image: "grip-sandbox:test",
-		status: "Up 1s",
+		image: "lima:qemu/x86_64",
+		status: "Running",
 		state: "running",
 		createdAt: "2026-01-01T00:00:00Z",
 		workspaceRoot: "/host/project",
 		workspaceMountPath: "/workspace",
 		daemonPort: 8787,
-		daemonEndpoint: "127.0.0.1:49153->8787/tcp",
+		daemonEndpoint: "ws://127.0.0.1:8787/grip/workspace",
 		labels: {},
 	};
 }
@@ -173,20 +174,13 @@ describe("hidden sandbox command", () => {
 			url: "ws://127.0.0.1:8787/pi/workspace",
 		});
 		expect(parseSandboxUserCommand("/sandbox start")).toEqual({ subcommand: "start" });
-		expect(parseSandboxUserCommand('/sandbox start --image "pi sandbox:test"')).toEqual({
+		expect(parseSandboxUserCommand("/sandbox start --name existing --template template:alpine")).toEqual({
 			subcommand: "start",
-			image: "pi sandbox:test",
-		});
-		expect(
-			parseSandboxUserCommand("/sandbox start --runtime lima --name existing --template template:alpine"),
-		).toEqual({
-			subcommand: "start",
-			runtime: "lima",
 			name: "existing",
 			template: "template:alpine",
 		});
 		expect(parseSandboxUserCommand("/sandbox list")).toEqual({ subcommand: "list" });
-		expect(parseSandboxUserCommand("/sandbox list --runtime lima")).toEqual({ subcommand: "list", runtime: "lima" });
+		expect(() => parseSandboxUserCommand("/sandbox list --runtime lima")).toThrow("Usage: /sandbox list");
 		expect(parseSandboxUserCommand("/sandbox stop abc123")).toEqual({ subcommand: "stop", target: "abc123" });
 		expect(() => parseSandboxUserCommand("/sandbox --attach")).toThrow("Usage: /sandbox --attach");
 		expect(() => parseSandboxUserCommand("/sandbox --attach one two")).toThrow("Usage: /sandbox --attach");
@@ -195,35 +189,39 @@ describe("hidden sandbox command", () => {
 		expect(() => parseSandboxUserCommand("/sandbox start --token secret")).toThrow(
 			"Unsupported /sandbox start argument",
 		);
-		expect(parseSandboxUserCommand("/sandbox start --name my-dev")).toEqual({
+		expect(parseSandboxUserCommand("/sandbox start --name my-dev")).toEqual({ subcommand: "start", name: "my-dev" });
+		expect(parseSandboxUserCommand("/sandbox start --name my-dev --update")).toEqual({
 			subcommand: "start",
-			runtime: "lima",
 			name: "my-dev",
+			update: true,
 		});
+		expect(parseSandboxUserCommand("/sandbox start --update --name my-dev")).toEqual({
+			subcommand: "start",
+			name: "my-dev",
+			update: true,
+		});
+		expect(() => parseSandboxUserCommand("/sandbox start --update")).toThrow("requires --name");
+		expect(() => parseSandboxUserCommand("/sandbox start --name my-dev --update --update")).toThrow("Duplicate");
+		expect(() => parseSandboxUserCommand("/sandbox start --name my-dev --update --template x")).toThrow(
+			"cannot be combined",
+		);
 		expect(parseSandboxUserCommand("/sandbox start --name my-dev --template template:alpine")).toEqual({
 			subcommand: "start",
-			runtime: "lima",
 			name: "my-dev",
 			template: "template:alpine",
 		});
-		expect(parseSandboxUserCommand("/sandbox start --runtime docker")).toEqual({
+		expect(parseSandboxUserCommand("/sandbox start --template template:alpine")).toEqual({
 			subcommand: "start",
-			runtime: "docker",
+			template: "template:alpine",
 		});
-		expect(() => parseSandboxUserCommand("/sandbox start --name my-dev --runtime docker")).toThrow(
-			"require --runtime lima",
+		expect(() => parseSandboxUserCommand("/sandbox start --runtime lima")).toThrow(
+			"Unsupported /sandbox start argument",
 		);
-		expect(() => parseSandboxUserCommand("/sandbox start --runtime docker --name my-dev")).toThrow(
-			"require --runtime lima",
+		expect(() => parseSandboxUserCommand("/sandbox start --runtime docker")).toThrow(
+			"Unsupported /sandbox start argument",
 		);
-		expect(() => parseSandboxUserCommand("/sandbox start --name my-dev --image image")).toThrow(
-			"only supported by the Docker runtime",
-		);
-		expect(() => parseSandboxUserCommand("/sandbox start --template template:alpine")).toThrow(
-			"require --runtime lima",
-		);
-		expect(() => parseSandboxUserCommand("/sandbox start --runtime lima --image image")).toThrow(
-			"only supported by the Docker runtime",
+		expect(() => parseSandboxUserCommand("/sandbox start --image image")).toThrow(
+			"Unsupported /sandbox start argument",
 		);
 		expect(() => parseSandboxUserCommand("/sandbox rm abc123")).toThrow("Unsupported /sandbox subcommand");
 		expect(() => parseSandboxUserCommand("/sandbox stop one two")).toThrow("Usage: /sandbox stop");
@@ -247,18 +245,18 @@ describe("hidden sandbox command", () => {
 				{
 					id: "abc123",
 					name: "grip-sandbox-project-hash",
-					image: "grip-sandbox:test",
-					status: "Up 1s",
+					image: "lima:qemu/x86_64",
+					status: "Running",
 					state: "running",
 					createdAt: "2026-01-01T00:00:00Z",
 					workspaceRoot: "/host/project",
 					workspaceMountPath: "/workspace",
 					daemonPort: 8787,
-					daemonEndpoint: "127.0.0.1:49153->8787/tcp",
+					daemonEndpoint: "ws://127.0.0.1:8787/grip/workspace",
 					labels: {},
 				},
 			]),
-		).toContain("abc123\tgrip-sandbox-project-hash\trunning\tgrip-sandbox:test");
+		).toContain("abc123\tgrip-sandbox-project-hash\trunning\tlima:qemu/x86_64");
 		expect(formatSandboxList([])).toBe("No Grip sandboxes found for this workspace.");
 		expect(
 			formatSandboxStopResult({
@@ -266,9 +264,9 @@ describe("hidden sandbox command", () => {
 				container: {
 					id: "abc123",
 					name: "grip-sandbox-project-hash",
-					image: "grip-sandbox:test",
-					status: "Exited",
-					state: "exited",
+					image: "lima:qemu/x86_64",
+					status: "Stopped",
+					state: "stopped",
 					createdAt: undefined,
 					workspaceRoot: undefined,
 					workspaceMountPath: "/workspace",
@@ -325,8 +323,8 @@ describe("hidden sandbox command", () => {
 					},
 				],
 			]),
-			managedSandboxContainers: new Map(),
-			createDockerSandboxService: vi.fn(),
+			managedLimaInstances: new Map(),
+			createLimaSandboxService: vi.fn(),
 			refreshUiAfterBackendChange: vi.fn(),
 			updateToolBackendStatus: vi.fn(),
 			formatToolBackendStatus: vi.fn(),
@@ -359,7 +357,7 @@ describe("hidden sandbox command", () => {
 		expect(context.session.clearRemoteSandbox).not.toHaveBeenCalled();
 	});
 
-	it("blocks replacement backends while a failed-start container awaits cleanup", async () => {
+	it("blocks replacement backends while a failed-start VM awaits cleanup", async () => {
 		const start = vi.fn(async () => createStartResult());
 		const showWarning = vi.fn();
 		const activateSandboxDaemon = vi.fn(async () => ({
@@ -378,12 +376,12 @@ describe("hidden sandbox command", () => {
 			},
 			activeSession: { getCwd: () => "/host/project", getSessionId: () => "session-a" },
 			sessionSandboxStates: new Map(),
-			managedSandboxContainers: new Map([
+			managedLimaInstances: new Map([
 				["orphaned-container", { workspaceRoot: "/host/project", daemonPort: 49300, ownerId: "session-a" }],
 			]),
 			activeSandboxContainerId: undefined,
 			activeSandboxBackendConnected: false,
-			createDockerSandboxService: () => ({
+			createLimaSandboxService: () => ({
 				resolveConfig: () => ({ workspaceMountPath: "/workspace" }),
 				start,
 				list: vi.fn(),
@@ -399,7 +397,7 @@ describe("hidden sandbox command", () => {
 		Object.setPrototypeOf(context, InteractiveMode.prototype);
 
 		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start");
-		context.managedSandboxContainers.clear();
+		context.managedLimaInstances?.clear();
 		context.activeSandboxContainerId = "orphaned-container";
 		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start");
 		expect(start).not.toHaveBeenCalled();
@@ -407,7 +405,7 @@ describe("hidden sandbox command", () => {
 		expect(showWarning).toHaveBeenLastCalledWith(expect.stringContaining("awaiting cleanup"));
 
 		context.activeSandboxContainerId = undefined;
-		context.managedSandboxContainers.set("other-session-container", {
+		context.managedLimaInstances?.set("other-session-container", {
 			workspaceRoot: "/host/project",
 			daemonPort: 49301,
 			ownerId: "session-b",
@@ -419,7 +417,7 @@ describe("hidden sandbox command", () => {
 		expect(activateSandboxDaemon).toHaveBeenCalledOnce();
 	});
 
-	it("preserves active sandbox guards when backend clearing fails after Docker disappears", async () => {
+	it("preserves active sandbox guards when backend clearing fails after Lima disappears", async () => {
 		const clearRemoteSandbox = vi.fn(async () => {
 			throw new Error("disconnect failed");
 		});
@@ -432,10 +430,10 @@ describe("hidden sandbox command", () => {
 			},
 			activeSession: { getCwd: () => "/host/project", getSessionId: () => "session-a" },
 			sessionSandboxStates: new Map([["/host/project\0session-a", { type: "daemon" }]]),
-			managedSandboxContainers: new Map(),
+			managedLimaInstances: new Map(),
 			activeSandboxContainerId: "missing-container",
 			activeSandboxBackendConnected: true,
-			createDockerSandboxService: () => ({
+			createLimaSandboxService: () => ({
 				resolveConfig: () => ({ workspaceMountPath: "/workspace" }),
 				start: vi.fn(),
 				list: vi.fn(),
@@ -456,6 +454,79 @@ describe("hidden sandbox command", () => {
 		expect(context.activeSandboxBackendConnected).toBe(true);
 		expect(context.sessionSandboxStates.size).toBe(1);
 		expect(showError).toHaveBeenCalledWith("disconnect failed");
+	});
+
+	it("detaches shared named Lima sessions through the interactive command without stopping the VM", async () => {
+		const sharedResult = {
+			...createStartResult(),
+			containerId: "shared-dev",
+			containerName: "shared-dev",
+			workspaceMountPath: "/workspace/project",
+			daemonUrl: "grip+ws://127.0.0.1:8787/grip/workspace?root=%2Fworkspace%2Fproject",
+		};
+		const start = vi.fn(async () => sharedResult);
+		const stop = vi.fn(async () => {
+			throw new Error("shared VM must not be stopped");
+		});
+		const clearRemoteSandbox = vi.fn(async () => {});
+		const showStatus = vi.fn();
+		const showError = vi.fn();
+		const context: SandboxHandlerContext = {
+			session: {
+				activateSandboxDaemon: vi.fn(async () => ({
+					type: "remote" as const,
+					cwd: "/workspace/project",
+					url: sharedResult.daemonUrl,
+					protocol: "ws" as const,
+					configured: true as const,
+					workspace: { id: "shared-project", root: "/workspace/project", pathFlavor: "posix" as const },
+				})),
+				getToolBackendInfo: () => ({ type: "local", cwd: "/host/project" }),
+				clearRemoteSandbox,
+				abort: vi.fn(async () => {}),
+			},
+			activeSession: { getCwd: () => "/host/project", getSessionId: () => "session-a" },
+			sessionSandboxStates: new Map(),
+			managedLimaInstances: new Map(),
+			createLimaSandboxService: () => ({
+				resolveConfig: () => ({ workspaceMountPath: "/workspace" }),
+				start,
+				list: vi.fn(),
+				stop,
+			}),
+			refreshUiAfterBackendChange: vi.fn(),
+			updateToolBackendStatus: vi.fn(),
+			formatToolBackendStatus: () => "shared workspace",
+			showStatus,
+			showWarning: vi.fn(),
+			showError,
+		};
+		Object.setPrototypeOf(context, InteractiveMode.prototype);
+		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start --name shared-dev");
+		expect(context.activeSandboxContainerId).toBe("shared-dev");
+		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox stop shared-dev");
+		expect(clearRemoteSandbox).toHaveBeenCalledOnce();
+		expect(stop).not.toHaveBeenCalled();
+		expect(context.activeSandboxContainerId).toBeUndefined();
+		expect(context.sessionSandboxStates.size).toBe(0);
+		expect(showStatus.mock.calls.map((call) => call[0]).join("\n")).toContain("VM and guest daemon remain running");
+		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start --name shared-dev");
+		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox clear");
+		expect(context.activeSandboxContainerId).toBeUndefined();
+		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start --name shared-dev");
+		expect(start).toHaveBeenCalledTimes(3);
+		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start --name shared-dev --update");
+		expect(start).toHaveBeenLastCalledWith({
+			workspaceRoot: "/host/project",
+			name: "shared-dev",
+			update: true,
+			sessionId: "session-a",
+		});
+		expect(context.session.abort).toHaveBeenCalledOnce();
+		expect(clearRemoteSandbox).toHaveBeenCalledTimes(3);
+		expect(context.activeSandboxContainerId).toBe("shared-dev");
+		expect(showStatus.mock.calls.map((call) => call[0]).join("\n")).toContain("Sandbox updated:");
+		expect(showError).not.toHaveBeenCalled();
 	});
 
 	it("dispatches start, list, and stop to the sandbox service and renders output", async () => {
@@ -480,8 +551,8 @@ describe("hidden sandbox command", () => {
 			},
 			activeSession: { getCwd: () => "/host/project", getSessionId: () => "session-a" },
 			sessionSandboxStates: new Map(),
-			managedSandboxContainers: new Map(),
-			createDockerSandboxService: () => ({
+			managedLimaInstances: new Map(),
+			createLimaSandboxService: () => ({
 				resolveConfig: () => ({ workspaceMountPath: "/workspace" }),
 				start,
 				list,
@@ -496,13 +567,12 @@ describe("hidden sandbox command", () => {
 		};
 		Object.setPrototypeOf(context, InteractiveMode.prototype);
 
-		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start --image grip-sandbox:test");
+		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start");
 		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox list");
 		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox stop abc123");
 
 		expect(start).toHaveBeenCalledWith({
 			workspaceRoot: "/host/project",
-			image: "grip-sandbox:test",
 			sessionId: "session-a",
 		});
 		expect(activateSandboxDaemon).toHaveBeenCalledWith({
@@ -517,13 +587,12 @@ describe("hidden sandbox command", () => {
 			currentContainerId: "abc123",
 		});
 		expect(showStatus.mock.calls.map((call) => call[0]).join("\n")).toContain("Sandbox started");
-		expect(showStatus.mock.calls.map((call) => call[0]).join("\n")).toContain("grip-sandbox:test");
+		expect(showStatus.mock.calls.map((call) => call[0]).join("\n")).toContain("lima:qemu/x86_64");
 		expect(showStatus.mock.calls.map((call) => call[0]).join("\n")).toContain("Sandbox stopped");
 		expect(clearRemoteSandbox).toHaveBeenCalledOnce();
 	});
 
-	it("routes runtime-specific Lima listing to the Lima sandbox service", async () => {
-		const dockerList = vi.fn(async () => []);
+	it("lists Lima instances without a runtime flag", async () => {
 		const limaList = vi.fn(async () => [createContainer()]);
 		const context: SandboxHandlerContext = {
 			session: {
@@ -533,13 +602,7 @@ describe("hidden sandbox command", () => {
 			},
 			activeSession: { getCwd: () => "/host/project", getSessionId: () => "session-a" },
 			sessionSandboxStates: new Map(),
-			managedSandboxContainers: new Map(),
-			createDockerSandboxService: () => ({
-				resolveConfig: () => ({ workspaceMountPath: "/workspace" }),
-				start: vi.fn(),
-				list: dockerList,
-				stop: vi.fn(),
-			}),
+			managedLimaInstances: new Map(),
 			createLimaSandboxService: () => ({
 				resolveConfig: () => ({ workspaceMountPath: "/workspace" }),
 				start: vi.fn(),
@@ -555,13 +618,12 @@ describe("hidden sandbox command", () => {
 		};
 		Object.setPrototypeOf(context, InteractiveMode.prototype);
 
-		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox list --runtime lima");
+		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox list");
 
 		expect(limaList).toHaveBeenCalledWith({ workspaceRoot: "/host/project" });
-		expect(dockerList).not.toHaveBeenCalled();
 	});
 
-	it("attaches and detaches an existing sandbox daemon without using Docker lifecycle commands", async () => {
+	it("attaches and detaches an existing sandbox daemon without Lima lifecycle commands", async () => {
 		const start = vi.fn(async () => createStartResult());
 		const list = vi.fn(async () => [createContainer()]);
 		const stop = vi.fn(async () => ({ status: "stopped" as const, container: createContainer() }));
@@ -587,8 +649,8 @@ describe("hidden sandbox command", () => {
 			},
 			activeSession: { getCwd: () => "/host/project", getSessionId: () => "session-a" },
 			sessionSandboxStates: new Map(),
-			managedSandboxContainers: new Map(),
-			createDockerSandboxService: () => ({
+			managedLimaInstances: new Map(),
+			createLimaSandboxService: () => ({
 				resolveConfig: () => ({ workspaceMountPath: "/workspace" }),
 				start,
 				list,
@@ -637,19 +699,16 @@ describe("hidden sandbox command", () => {
 	});
 	it("disposes the runtime and every managed sandbox during shutdown cleanup", async () => {
 		const dispose = vi.fn(async () => {});
-		const stopManagedContainers = vi.fn(async () => {});
 		const stopManagedInstances = vi.fn(async () => {});
 
 		await expect(
 			interactiveModePrototype.disposeRuntimeResources.call({
 				runtimeHost: { dispose },
-				createDockerSandboxService: () => ({ stopManagedContainers }),
 				createLimaSandboxService: () => ({ stopManagedInstances }),
 			}),
 		).resolves.toEqual([]);
 		expect(dispose).toHaveBeenCalledOnce();
-		expect(stopManagedContainers).toHaveBeenCalledOnce();
 		expect(stopManagedInstances).toHaveBeenCalledOnce();
-		expect(dispose.mock.invocationCallOrder[0]).toBeLessThan(stopManagedContainers.mock.invocationCallOrder[0]);
+		expect(dispose.mock.invocationCallOrder[0]).toBeLessThan(stopManagedInstances.mock.invocationCallOrder[0]);
 	});
 });

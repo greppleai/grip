@@ -437,7 +437,7 @@ export interface DaemonWorkspaceRuntime {
 	readonly lspRuntime?: LspRuntimeState;
 	readonly catalog: RemoteWorkspaceCatalog;
 	readonly capabilities: readonly RemoteWorkspaceCapability[];
-	createHandler(workspace: RemoteWorkspaceIdentity): RemoteWorkspaceServerHandler;
+	createHandler(workspace: RemoteWorkspaceIdentity, sharedMode?: boolean): RemoteWorkspaceServerHandler;
 	retire(): Promise<void>;
 	dispose(): Promise<void>;
 }
@@ -454,6 +454,7 @@ interface DaemonRequestRuntime {
 	host: WorkspaceToolHost;
 	lspRuntime: LspRuntimeState | undefined;
 	workspace: RemoteWorkspaceIdentity;
+	sharedMode: boolean;
 }
 
 function withDaemonWorkspace<T extends Record<string, unknown>>(result: T, workspace: RemoteWorkspaceIdentity) {
@@ -479,6 +480,10 @@ async function synchronizeDaemonToolFile(
 	}
 }
 
+function marksToolSideEffect(kind: RemoteWorkspaceOperationKind, toolName: string, sharedMode: boolean): boolean {
+	return kind !== "read" && !(sharedMode && (toolName === "edit" || toolName === "write"));
+}
+
 async function invokeDaemonTool(
 	request: RemoteWorkspaceTypedRequest,
 	params: Record<string, unknown>,
@@ -487,7 +492,7 @@ async function invokeDaemonTool(
 ): Promise<AgentToolResult<unknown>> {
 	const toolName = params.toolName as string;
 	const kind = operationKind(toolName);
-	if (kind !== "read") context.markSideEffectStarted();
+	if (marksToolSideEffect(kind, toolName, runtime.sharedMode)) context.markSideEffectStarted();
 	let updateQueue = Promise.resolve();
 	try {
 		const result = await runtime.host.executePrepared(toolName, {
@@ -512,6 +517,7 @@ async function invokeDaemonTool(
 				kind === "read" ? "not_started" : "indeterminate",
 			);
 		}
+		if (error instanceof RemoteWorkspaceRequestError) throw error;
 		throw new RemoteWorkspaceRequestError({
 			code: "internal_error",
 			message: error instanceof Error ? error.message.slice(0, 4096) : "Workspace tool failed",
@@ -551,6 +557,8 @@ async function executeDaemonWorkspaceProcess(
 					.finally(() => {
 						pendingOutputBytes -= chunk.byteLength;
 					});
+				// The process may run after an update fails; observe rejection until the final await.
+				void updateQueue.catch(() => undefined);
 			},
 		});
 	} catch (error) {
@@ -598,6 +606,18 @@ function getDaemonLspStatus(runtime: DaemonRequestRuntime): Record<string, unkno
 		servers: runtime.lspRuntime.manager.getStatus().map((status) => sanitizeLspStatus(status, runtime.configuration)),
 	};
 }
+async function statDaemonWorkspace(path: string, runtime: DaemonRequestRuntime): Promise<unknown> {
+	try {
+		const value = await runtime.operations.stat(path);
+		return withDaemonWorkspace(
+			{ kind: value.isDirectory() ? "directory" : value.isFile() ? "file" : "other" },
+			runtime.workspace,
+		);
+	} catch (error) {
+		if (!runtime.sharedMode || !isMissingPath(error)) throw error;
+		return withDaemonWorkspace({ kind: "absent" }, runtime.workspace);
+	}
+}
 
 async function dispatchDaemonWorkspaceRequest(
 	request: RemoteWorkspaceTypedRequest,
@@ -617,26 +637,30 @@ async function dispatchDaemonWorkspaceRequest(
 				runtime.workspace,
 			);
 		case "workspace.write":
-			context.markSideEffectStarted();
+			if (!runtime.sharedMode) context.markSideEffectStarted();
 			await withFileMutationQueue(resolve(runtime.configuration.workspaceRoot, params.path as string), () =>
 				runtime.operations.writeFile(params.path as string, Buffer.from(params.contentBase64 as string, "base64")),
 			);
 			context.markCommitted();
 			return {};
 		case "workspace.mkdir":
-			context.markSideEffectStarted();
-			await withFileMutationQueue(resolve(runtime.configuration.workspaceRoot, params.path as string), () =>
-				runtime.operations.mkdir(params.path as string, { recursive: params.recursive === true }),
-			);
+			if (!runtime.sharedMode) context.markSideEffectStarted();
+			await withFileMutationQueue(resolve(runtime.configuration.workspaceRoot, params.path as string), () => {
+				if (runtime.sharedMode) {
+					if (context.signal.aborted)
+						throw requestError(
+							"cancelled",
+							"Shared directory creation was cancelled before starting",
+							"not_started",
+						);
+					context.markSideEffectStarted();
+				}
+				return runtime.operations.mkdir(params.path as string, { recursive: params.recursive === true });
+			});
 			context.markCommitted();
 			return {};
-		case "workspace.stat": {
-			const value = await runtime.operations.stat(params.path as string);
-			return withDaemonWorkspace(
-				{ kind: value.isDirectory() ? "directory" : value.isFile() ? "file" : "other" },
-				runtime.workspace,
-			);
-		}
+		case "workspace.stat":
+			return statDaemonWorkspace(params.path as string, runtime);
 		case "workspace.readdir":
 			return withDaemonWorkspace(
 				{ entries: await runtime.operations.readdir(params.path as string) },
@@ -738,8 +762,15 @@ export function createDaemonWorkspaceRuntime(configuration: DaemonConfiguration)
 		lspRuntime,
 		catalog,
 		capabilities,
-		createHandler(workspace) {
-			const requestRuntime: DaemonRequestRuntime = { configuration, operations, host, lspRuntime, workspace };
+		createHandler(workspace, sharedMode = false) {
+			const requestRuntime: DaemonRequestRuntime = {
+				configuration,
+				operations,
+				host,
+				lspRuntime,
+				workspace,
+				sharedMode,
+			};
 			return {
 				validateToolArguments: (toolName, value) => host.validatePreparedArguments(toolName, value),
 				async handleRequest(request, context) {

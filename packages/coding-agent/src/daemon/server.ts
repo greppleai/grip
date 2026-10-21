@@ -12,16 +12,25 @@ import type { RemoteWorkspaceServerMessage } from "../core/remote-workspace-prot
 import {
 	type RemoteWorkspaceProtocolCloseCode,
 	type RemoteWorkspaceProtocolCloseReason,
+	RemoteWorkspaceRequestError,
 	type RemoteWorkspaceServerHandler,
 	RemoteWorkspaceServerProtocol,
 } from "../core/remote-workspace-protocol/session.ts";
+import {
+	SHARED_WORKSPACE_WEBSOCKET_PROTOCOL,
+	type SharedWorkspaceServerFrame,
+} from "../core/remote-workspace-protocol/shared-transport.ts";
+import { DaemonActivityBudget } from "./activity-budget.ts";
 import { DAEMON_WEBSOCKET_PATH, type DaemonConfiguration } from "./config.ts";
+import { DaemonOutboundBudget } from "./outbound-budget.ts";
 import {
 	createDaemonAuthorization,
 	rejectDaemonUpgrade,
 	validateDaemonNetworkPolicy,
 	validateDaemonUpgrade,
 } from "./security.ts";
+import { SharedDaemonConnection } from "./shared-connection.ts";
+import { SharedWorkspaceRoots } from "./shared-roots.ts";
 import { createDaemonWorkspaceRuntime } from "./workspace-runtime.ts";
 
 export interface DaemonServerAddress {
@@ -46,7 +55,7 @@ export interface DaemonServer {
 
 interface DaemonConnection {
 	readonly websocket: WebSocket;
-	readonly protocol: RemoteWorkspaceServerProtocol;
+	readonly protocol: RemoteWorkspaceServerProtocol | SharedDaemonConnection;
 	closed: Promise<void>;
 }
 
@@ -136,6 +145,7 @@ function formatHostForUrl(host: string): string {
 export function createDaemonServer(configuration: DaemonConfiguration): DaemonServer {
 	validateDaemonNetworkPolicy(configuration);
 	const authorization = createDaemonAuthorization(configuration.token);
+	const activityBudget = new DaemonActivityBudget(configuration);
 	const workspaceId = randomBytes(18).toString("base64url");
 	const workspace = Object.freeze({
 		id: workspaceId,
@@ -145,7 +155,17 @@ export function createDaemonServer(configuration: DaemonConfiguration): DaemonSe
 	let runtime = createDaemonWorkspaceRuntime(configuration);
 	let runtimeHandler = runtime.createHandler(workspace);
 	const handler: RemoteWorkspaceServerHandler = {
-		handleRequest: (request, context) => runtimeHandler.handleRequest(request, context),
+		handleRequest: (request, context) => {
+			if (typeof request.params === "object" && request.params !== null && "expectedRevision" in request.params) {
+				throw new RemoteWorkspaceRequestError({
+					code: "invalid_request",
+					message: "Revision preconditions require the v2 shared workspace protocol",
+					executionState: "not_started",
+					retryable: false,
+				});
+			}
+			return activityBudget.run(request.method, () => runtimeHandler.handleRequest(request, context));
+		},
 		validateToolArguments: (toolName, value) => runtimeHandler.validateToolArguments(toolName, value),
 	};
 	const requestListener = (_request: IncomingMessage, response: ServerResponse) => {
@@ -176,6 +196,7 @@ export function createDaemonServer(configuration: DaemonConfiguration): DaemonSe
 	const pendingSocketTimers = new Map<Socket, NodeJS.Timeout>();
 	const pendingSocketDeadlines = new Map<Socket, number>();
 	const connections = new Set<DaemonConnection>();
+	let sharedRoots: SharedWorkspaceRoots | undefined;
 	let catalog = runtime.catalog;
 	let reloadQueue: Promise<void> = Promise.resolve();
 	const forceController = new AbortController();
@@ -260,20 +281,45 @@ export function createDaemonServer(configuration: DaemonConfiguration): DaemonSe
 			}, remainingHandshakeMs);
 			handshakeTimer.unref?.();
 			let protocol: RemoteWorkspaceServerProtocol;
+			const outboundBudget = new DaemonOutboundBudget(
+				configuration.protocolLimits.maxPendingOutboundBytes,
+				configuration.protocolLimits.maxPendingOutboundMessages,
+			);
 			const transport = {
-				send(message: RemoteWorkspaceServerMessage): Promise<void> {
+				send(message: RemoteWorkspaceServerMessage | SharedWorkspaceServerFrame): Promise<void> {
 					if (websocket.readyState !== WebSocket.OPEN) return Promise.reject(new Error("WebSocket is not open"));
 					const serialized = JSON.stringify(message);
 					const bytes = Buffer.byteLength(serialized, "utf8");
-					if (websocket.bufferedAmount + bytes > configuration.protocolLimits.maxPendingOutboundBytes) {
-						return Promise.reject(new Error("WebSocket outbound buffer exceeds daemon limits"));
+					let release: () => void;
+					try {
+						release = outboundBudget.reserve(bytes, websocket.bufferedAmount);
+					} catch (error) {
+						// No channel can safely continue after a physical send is dropped.
+						websocket.terminate();
+						return Promise.reject(error);
 					}
-					return new Promise((resolve, reject) => {
-						websocket.send(serialized, { binary: false, compress: false }, (error) => {
-							if (error) reject(error);
-							else resolve();
-						});
-					});
+					return new Promise<void>((resolve, reject) => {
+						// A stalled callback must not pin physical reservations indefinitely. A
+						// timed-out send makes the entire uplink uncertain, not just its channel.
+						const deadline = setTimeout(() => {
+							websocket.terminate();
+							reject(new Error("WebSocket outbound send timed out"));
+						}, configuration.protocolLimits.maxTransportSendMs);
+						deadline.unref?.();
+						try {
+							websocket.send(serialized, { binary: false, compress: false }, (error) => {
+								clearTimeout(deadline);
+								if (error) {
+									websocket.terminate();
+									reject(error);
+								} else resolve();
+							});
+						} catch (error) {
+							clearTimeout(deadline);
+							websocket.terminate();
+							reject(error);
+						}
+					}).finally(release);
 				},
 				close(reason: RemoteWorkspaceProtocolCloseReason): Promise<void> {
 					if (websocket.readyState === WebSocket.CLOSED) return Promise.resolve();
@@ -281,6 +327,39 @@ export function createDaemonServer(configuration: DaemonConfiguration): DaemonSe
 					return waitForWebSocketClose(websocket);
 				},
 			};
+			if (websocket.protocol === SHARED_WORKSPACE_WEBSOCKET_PROTOCOL) {
+				if (!sharedRoots) {
+					websocket.close(1008, "Shared parent unavailable");
+					return;
+				}
+				const shared = new SharedDaemonConnection(
+					configuration,
+					sharedRoots,
+					transport.send,
+					(code, reason) => {
+						if (websocket.readyState === WebSocket.OPEN) websocket.close(code, reason);
+					},
+					activityBudget,
+				);
+				const connection: DaemonConnection = { websocket, protocol: shared, closed: Promise.resolve() };
+				connection.closed = waitForWebSocketClose(websocket).then(async () => {
+					clearTimeout(handshakeTimer);
+					connections.delete(connection);
+					await shared.disconnect().catch(() => undefined);
+				});
+				connections.add(connection);
+				websocket.on("message", (data, isBinary) => {
+					if (isBinary) {
+						websocket.close(1003, "Text protocol required");
+						return;
+					}
+					void shared.receive(websocketPayload(data)).then(() => {
+						if (shared.handshakeComplete) clearTimeout(handshakeTimer);
+					});
+				});
+				websocket.on("error", () => undefined);
+				return;
+			}
 			protocol = new RemoteWorkspaceServerProtocol(transport, handler, {
 				workspace,
 				catalog,
@@ -321,6 +400,12 @@ export function createDaemonServer(configuration: DaemonConfiguration): DaemonSe
 				return Promise.reject(new Error("Daemon server is closing"));
 			if (currentAddress) return Promise.resolve(currentAddress);
 			if (listenPromise) return listenPromise;
+			if (configuration.sharedParentRoot && !sharedRoots) {
+				return SharedWorkspaceRoots.fromParent(configuration.sharedParentRoot).then((roots) => {
+					sharedRoots = roots;
+					return api.listen();
+				});
+			}
 			listenPromise = new Promise((resolve, reject) => {
 				rejectListen = reject;
 				const onError = (error: Error) => {
@@ -369,27 +454,31 @@ export function createDaemonServer(configuration: DaemonConfiguration): DaemonSe
 		},
 		reload(): Promise<void> {
 			if (serverState !== "listening") return Promise.reject(new Error("Daemon server is not listening"));
-			reloadQueue = reloadQueue.then(async () => {
-				if (serverState !== "listening") throw new Error("Daemon server is not listening");
-				const candidate = createDaemonWorkspaceRuntime(configuration);
-				const candidateCatalog = { ...candidate.catalog, generation: catalog.generation + 1 };
-				const previous = runtime;
-				const previousCatalog = catalog;
-				runtime = candidate;
-				runtimeHandler = candidate.createHandler(workspace);
-				catalog = candidateCatalog;
-				try {
-					await Promise.all([...connections].map((connection) => connection.protocol.publishCatalog(catalog)));
-				} catch (error) {
-					runtime = previous;
-					runtimeHandler = previous.createHandler(workspace);
-					catalog = previousCatalog;
-					await Promise.allSettled([...connections].map((connection) => connection.protocol.disconnect()));
-					await candidate.dispose();
-					throw error;
-				}
-				await previous.retire();
-			});
+			reloadQueue = reloadQueue
+				.catch(() => undefined)
+				.then(async () => {
+					if (serverState !== "listening") throw new Error("Daemon server is not listening");
+					const candidate = createDaemonWorkspaceRuntime(configuration);
+					const candidateCatalog = { ...candidate.catalog, generation: catalog.generation + 1 };
+					const previous = runtime;
+					runtime = candidate;
+					runtimeHandler = candidate.createHandler(workspace);
+					catalog = candidateCatalog;
+					const snapshot = [...connections];
+					const outcomes = await Promise.allSettled(
+						snapshot.map(async (connection) => {
+							if (connection.protocol instanceof SharedDaemonConnection) await connection.protocol.reload();
+							else await connection.protocol.publishCatalog(catalog);
+						}),
+					);
+					const failed = snapshot.filter((_connection, index) => outcomes[index]?.status === "rejected");
+					// A failed publication may have been sent already. Do not roll back successful peers
+					// to an older generation: close only transports whose catalog is uncertain.
+					for (const connection of failed) connection.websocket.terminate();
+					await previous.retire();
+					if (failed.length > 0)
+						throw new Error(`Daemon catalog reload failed for ${failed.length} connection(s)`);
+				});
 			return reloadQueue;
 		},
 		close(): Promise<void> {

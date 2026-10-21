@@ -184,6 +184,7 @@ export interface RemoteWorkspaceClientProtocolOptions {
 	maxTombstones?: number;
 	onCatalogChanged?: (event: RemoteWorkspaceCatalogChanged) => void;
 	onCatalogRefreshed?: (catalog: RemoteWorkspaceCatalog) => void | Promise<void>;
+	onDisconnect?: (message: string) => void;
 }
 
 function classifyValidationClose(error: unknown): RemoteWorkspaceProtocolCloseCode {
@@ -320,6 +321,7 @@ export class RemoteWorkspaceClientProtocol {
 	private readonly maxTombstones: number;
 	private readonly onCatalogChanged: ((event: RemoteWorkspaceCatalogChanged) => void) | undefined;
 	private readonly onCatalogRefreshed: ((catalog: RemoteWorkspaceCatalog) => void | Promise<void>) | undefined;
+	private readonly onDisconnect: ((message: string) => void) | undefined;
 	private readonly connectionPrefix = randomBytes(16).toString("base64url");
 	private readonly pending = new Map<string, ClientPendingRequest>();
 	private readonly tombstones = new Map<string, number>();
@@ -369,6 +371,7 @@ export class RemoteWorkspaceClientProtocol {
 		this.maxTombstones = validateConfiguredInteger(options.maxTombstones ?? 65_536, "maxTombstones", 1, 1_000_000);
 		this.onCatalogChanged = options.onCatalogChanged;
 		this.onCatalogRefreshed = options.onCatalogRefreshed;
+		this.onDisconnect = options.onDisconnect;
 	}
 
 	get handshake(): RemoteWorkspaceHandshakeAck | undefined {
@@ -527,6 +530,7 @@ export class RemoteWorkspaceClientProtocol {
 	async disconnect(message = "Remote workspace connection closed"): Promise<void> {
 		if (this.closed) return;
 		this.closed = true;
+		this.onDisconnect?.(message);
 		this.failHandshake(new RemoteWorkspaceDisconnectedError(message, "not_started"));
 		for (const [id, pending] of this.pending) {
 			const state = pending.kind === "read" ? "not_started" : "indeterminate";

@@ -19,6 +19,8 @@ export interface DaemonConfiguration {
 	readonly host: string;
 	readonly port: number;
 	readonly workspaceRoot: string;
+	/** Canonical fixed parent mount for explicitly enabled shared-channel mode. */
+	readonly sharedParentRoot?: string;
 	readonly temporaryRoot?: string;
 	readonly token?: string;
 	readonly allowedOrigins: readonly string[];
@@ -58,6 +60,7 @@ interface ParsedDaemonInputs {
 	host?: string;
 	port?: string;
 	cwd?: string;
+	sharedParent?: string;
 	origins: string[];
 	tlsCertPath?: string;
 	tlsKeyPath?: string;
@@ -86,6 +89,7 @@ const VALUE_FLAGS = new Map<string, keyof ParsedDaemonInputs>([
 	["--daemon-host", "host"],
 	["--daemon-port", "port"],
 	["--daemon-cwd", "cwd"],
+	["--daemon-shared-parent", "sharedParent"],
 	["--daemon-tls-cert", "tlsCertPath"],
 	["--daemon-tls-key", "tlsKeyPath"],
 	["--daemon-lsp-config", "lspConfigPath"],
@@ -327,6 +331,22 @@ async function resolveDaemonWorkspaceRoots(
 	return { allowRoot, workspaceRoot, temporaryRoot };
 }
 
+async function resolveSharedParentRoot(
+	inputs: ParsedDaemonInputs,
+	environment: NodeJS.ProcessEnv,
+	startupCwd: string,
+	workspaceRoot: string,
+): Promise<string | undefined> {
+	const value = inputs.sharedParent ?? environment.GRIP_DAEMON_SHARED_PARENT;
+	if (value === undefined) return undefined;
+	if (value === "") throw new DaemonConfigurationError("Shared parent mount must not be empty");
+	const root = await resolveConfinedRoot(value, startupCwd, "shared parent mount");
+	if (root !== workspaceRoot) {
+		throw new DaemonConfigurationError("Shared parent mount must equal --daemon-cwd (the fixed mounted parent)");
+	}
+	return root;
+}
+
 async function resolveDaemonTransportSecurity(
 	inputs: ParsedDaemonInputs,
 	environment: NodeJS.ProcessEnv,
@@ -447,6 +467,7 @@ export async function parseDaemonCommand(
 		environment,
 		startupCwd,
 	);
+	const sharedParentRoot = await resolveSharedParentRoot(inputs, environment, startupCwd, workspaceRoot);
 	const { token, allowedOrigins, tls } = await resolveDaemonTransportSecurity(inputs, environment, startupCwd);
 	const { maxGlobalRequests, maxGlobalTransfers, maxBufferedOutputBytes, protocolLimits } =
 		resolveDaemonCapacity(environment);
@@ -499,6 +520,7 @@ export async function parseDaemonCommand(
 			host,
 			port,
 			workspaceRoot,
+			sharedParentRoot,
 			temporaryRoot,
 			token,
 			allowedOrigins: Object.freeze(allowedOrigins),

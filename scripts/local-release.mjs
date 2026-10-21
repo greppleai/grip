@@ -263,8 +263,6 @@ if (!options.skipInstall) {
 	console.log("\nRun the locally packed npm CLI from outside the repository:");
 	console.log(`  ${join(nodeInstallDirectory, process.platform === "win32" ? "grip.cmd" : "grip")} --help`);
 	console.log(`  GRIP_DAEMON_PORT=18787 ${join(nodeInstallDirectory, process.platform === "win32" ? "grip.cmd" : "grip")} --daemon`);
-	console.log("\nBuild the local Docker sandbox base image:");
-	console.log(`  docker build -f ${join(repoRoot, "packages/coding-agent/examples/sandbox-docker/Dockerfile")} -t grip-sandbox:local ${outDir}`);
 
 	if (!options.skipBunInstall) {
 		console.log("\nIsolated Bun package install:");

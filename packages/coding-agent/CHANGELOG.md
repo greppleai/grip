@@ -20,3 +20,7 @@ All notable changes to Grip are documented in this file.
     * @greppleai/grip-tui bumped from ^0.2.15 to ^0.0.1
 
 ## [Unreleased]
+
+### Added
+
+- Added `/sandbox start --name <vm> --update` to replace a verified shared Lima guest binary and restart its daemon after disconnecting attached clients.

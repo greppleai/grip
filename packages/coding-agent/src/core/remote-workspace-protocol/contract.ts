@@ -48,6 +48,7 @@ export const REMOTE_WORKSPACE_ERROR_CODES = [
 	"limit_exceeded",
 	"deadline_exceeded",
 	"cancelled",
+	"conflict",
 	"generation_retired",
 	"connection_draining",
 	"result_too_large",
@@ -326,6 +327,7 @@ export const RemoteWorkspaceProtocolErrorSchema = Type.Object(
 			Type.Literal("limit_exceeded"),
 			Type.Literal("deadline_exceeded"),
 			Type.Literal("cancelled"),
+			Type.Literal("conflict"),
 			Type.Literal("generation_retired"),
 			Type.Literal("connection_draining"),
 			Type.Literal("result_too_large"),
@@ -425,6 +427,13 @@ const SessionEnvironmentSchema = Type.Object(
 	},
 	closedObject,
 );
+/** Shared v2 mutations require an observed digest/absence, or an explicitly unsafe write. */
+const ExpectedRevisionSchema = Type.Union([
+	Type.Object({ sha256: HashSchema }, closedObject),
+	Type.Object({ absent: Type.Literal(true) }, closedObject),
+	Type.Object({ unsafeOverwrite: Type.Literal(true) }, closedObject),
+]);
+export type ExpectedWorkspaceRevision = Static<typeof ExpectedRevisionSchema>;
 const ToolInvokeParamsSchema = Type.Object(
 	{
 		generation: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
@@ -433,6 +442,7 @@ const ToolInvokeParamsSchema = Type.Object(
 		schemaHash: HashSchema,
 		argumentsPrepared: Type.Literal(true),
 		arguments: Type.Unknown(),
+		expectedRevision: Type.Optional(ExpectedRevisionSchema),
 		executionOptions: Type.Object(
 			{
 				imageAutoResize: Type.Optional(Type.Boolean()),
@@ -457,6 +467,7 @@ const WriteParamsSchema = Type.Object(
 	{
 		path: Type.String({ minLength: 1, maxLength: 32_768 }),
 		contentBase64: Type.String(),
+		expectedRevision: Type.Optional(ExpectedRevisionSchema),
 	},
 	closedObject,
 );
@@ -570,12 +581,18 @@ const ReadResultSchema = Type.Object(
 	{
 		contentBase64: Type.String(),
 		workspace: RemoteWorkspaceIdentitySchema,
+		revision: Type.Optional(HashSchema),
 	},
 	closedObject,
 );
 const StatResultSchema = Type.Object(
 	{
-		kind: Type.Union([Type.Literal("file"), Type.Literal("directory"), Type.Literal("other")]),
+		kind: Type.Union([
+			Type.Literal("file"),
+			Type.Literal("directory"),
+			Type.Literal("other"),
+			Type.Literal("absent"),
+		]),
 		workspace: RemoteWorkspaceIdentitySchema,
 	},
 	closedObject,

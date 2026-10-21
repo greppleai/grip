@@ -1,6 +1,15 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
+const mutationGuard = new AsyncLocalStorage<(filePath: string) => Promise<void>>();
+/** Apply a channel-local precondition inside the existing process-wide per-file queue. */
+export function withFileMutationGuard<T>(
+	guard: (filePath: string) => Promise<void>,
+	action: () => Promise<T>,
+): Promise<T> {
+	return mutationGuard.run(guard, action);
+}
 const fileMutationQueues = new Map<string, Promise<void>>();
 let registrationQueue = Promise.resolve();
 
@@ -37,6 +46,7 @@ async function getMutationQueueKey(filePath: string): Promise<string> {
  * Operations for different files still run in parallel.
  */
 export async function withFileMutationQueue<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
+	const guard = mutationGuard.getStore();
 	const registration = registrationQueue.then(async () => {
 		const key = await getMutationQueueKey(filePath);
 		const currentQueue = fileMutationQueues.get(key) ?? Promise.resolve();
@@ -58,6 +68,7 @@ export async function withFileMutationQueue<T>(filePath: string, fn: () => Promi
 	const { key, currentQueue, chainedQueue, releaseNext } = await registration;
 	await currentQueue;
 	try {
+		if (guard) await guard(filePath);
 		return await fn();
 	} finally {
 		releaseNext();

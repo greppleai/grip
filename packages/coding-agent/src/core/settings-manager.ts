@@ -12,7 +12,7 @@ import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import type { LspConfigurationLayer } from "./lsp/config.ts";
-import type { SandboxCleanupBehavior, SandboxRuntime } from "./sandbox/docker.ts";
+import type { SandboxCleanupBehavior } from "./sandbox/config.ts";
 
 // grip-ignore noNearIdenticalDataStructures: Persisted overrides permit omitted fields so settings layering can apply defaults independently of the fully resolved harness runtime contract.
 export interface CompactionSettings {
@@ -71,14 +71,10 @@ export interface WarningSettings {
 export type ToolSettings = Record<string, Record<string, unknown> | undefined>;
 
 export interface SandboxSettings {
-	runtime?: SandboxRuntime; // default: docker
-	image?: string; // default Docker sandbox image used by /sandbox start
-	dockerBinary?: string; // default: docker
 	limaBinary?: string; // default: limactl
 	limaTemplate?: string; // default: template:docker-rootful
 	limaInstanceNamePrefix?: string; // default: grip-sandbox
 	workspaceMountPath?: string; // default: /workspace
-	containerNamePrefix?: string; // default: grip-sandbox
 	daemonPort?: number; // sandbox daemon port, default: 8787
 	daemonHostBind?: string; // host bind address for daemon forwarding, default: 127.0.0.1
 	cleanup?: SandboxCleanupBehavior; // default: stop

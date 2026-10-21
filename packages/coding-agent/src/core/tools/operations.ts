@@ -23,6 +23,7 @@ import {
 	trackDetachedChildPid,
 	untrackDetachedChildPid,
 } from "../../utils/shell.ts";
+
 import type { PortablePathFlavor } from "../lsp/portable-path.ts";
 import {
 	DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -33,6 +34,7 @@ import {
 	type RemoteWorkspaceClientMessage,
 	type RemoteWorkspaceMethod,
 } from "../remote-workspace-protocol/contract.ts";
+import { GuestSharedClientTransport } from "../remote-workspace-protocol/guest-shared-client.ts";
 import {
 	RemoteWorkspaceClientProtocol,
 	type RemoteWorkspaceProtocolCloseReason,
@@ -43,6 +45,7 @@ import type { WorkspaceIdentity } from "../workspace-identity.ts";
 export type ToolAccessMode = "exists" | "read" | "write" | "readwrite";
 export type WorkspaceToolExecutionTarget = "local" | "remote" | "unavailable";
 export type RemoteWorkspaceToolExecutionTarget = Exclude<WorkspaceToolExecutionTarget, "local">;
+type RemoteToolTransportProtocol = "ws";
 
 export interface ToolFileStat {
 	isDirectory: () => boolean;
@@ -141,6 +144,8 @@ interface NormalizedRemoteWorkspaceUrl {
 export interface DeferredRemoteToolOperationsConnectOptions extends RemoteToolOperationsConnectOptions {
 	expectedCwd?: string;
 }
+
+type SharedExpectedRevision = { sha256: string } | { absent: true };
 
 export type BorrowedToolOperations = Omit<ToolOperations, "dispose">;
 
@@ -404,17 +409,19 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	private remoteCatalogUnsubscribe: (() => void) | undefined;
 	private readonly catalogListeners = new Set<() => void | Promise<void>>();
 	private disposePromise: Promise<void> | undefined;
+	private readonly onDisconnect: ((message: string) => void) | undefined;
 
-	constructor(cwd: string) {
+	constructor(cwd: string, onDisconnect?: (message: string) => void) {
 		this.cwd = cwd;
 		this.expectedCwd = cwd;
+		this.onDisconnect = onDisconnect;
 	}
 
 	async configureRemote(
 		url: string,
 		options: DeferredRemoteToolOperationsConnectOptions = {},
 	): Promise<ToolBackendInfo> {
-		const next = await createRemoteToolOperations(url, options);
+		const next = await createRemoteToolOperations(url, { ...options, onDisconnect: this.onDisconnect });
 		try {
 			const stat = await next.stat(next.cwd);
 			if (!stat.isDirectory()) throw new Error(`Remote daemon cwd is not a directory: ${next.cwd}`);
@@ -501,6 +508,9 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 
 	getBackendInfo(): ToolBackendInfo {
 		return this.operations?.getBackendInfo() ?? { type: "remote", cwd: this.cwd, configured: false };
+	}
+	isDisconnected(): boolean {
+		return this.operations?.isDisconnected() ?? false;
 	}
 
 	resolveWorkspaceToolExecution(name: string, parameterSchema: unknown): RemoteWorkspaceToolExecutionTarget {
@@ -596,66 +606,88 @@ function websocketCloseCode(reason: RemoteWorkspaceProtocolCloseReason): number 
 export interface RemoteToolOperationsConnectOptions {
 	token?: string;
 	handshakeTimeoutMs?: number;
+	onDisconnect?: (message: string) => void;
 }
 
 export class RemoteToolOperations implements ToolOperations {
 	readonly url: string;
-	readonly protocol: "ws";
+	readonly protocol: RemoteToolTransportProtocol;
 	cwd: string;
 	workspacePathFlavor: PortablePathFlavor = "posix";
 	private workspaceId = "";
-	private readonly socket: WebSocket;
+	private readonly socket: WebSocket | GuestSharedClientTransport;
+	private readonly isShared: boolean;
 	private readonly client: RemoteWorkspaceClientProtocol;
 	private readonly localToolSchemas = new Map<string, string>();
 	private readonly catalogListeners = new Set<() => void | Promise<void>>();
 	private remoteLspStatus: RemoteLspStatus = { enabled: false, servers: [] };
+	private disconnected = false;
 	private disposePromise: Promise<void> | undefined;
 
-	private constructor(url: string, protocol: "ws", socket: WebSocket, options: RemoteToolOperationsConnectOptions) {
+	private constructor(
+		url: string,
+		protocol: RemoteToolTransportProtocol,
+		socket: WebSocket | GuestSharedClientTransport,
+		options: RemoteToolOperationsConnectOptions,
+	) {
 		this.url = url;
 		this.protocol = protocol;
 		this.socket = socket;
+		this.isShared = socket instanceof GuestSharedClientTransport;
 		this.cwd = "/";
-		const transport = {
-			send: (message: RemoteWorkspaceClientMessage): Promise<void> =>
-				new Promise((resolve, reject) => {
-					if (socket.readyState !== WebSocket.OPEN) {
-						reject(new Error("Remote workspace connection is not open"));
-						return;
-					}
-					socket.send(JSON.stringify(message), { binary: false, compress: false }, (error) => {
-						if (error) reject(error);
-						else resolve();
-					});
-				}),
-			close: (reason: RemoteWorkspaceProtocolCloseReason): Promise<void> => {
-				if (socket.readyState === WebSocket.CLOSED) return Promise.resolve();
-				return new Promise((resolve) => {
-					socket.once("close", () => resolve());
-					socket.close(websocketCloseCode(reason), reason.message);
-				});
-			},
-		};
+		const transport =
+			socket instanceof GuestSharedClientTransport
+				? socket
+				: {
+						send: (message: RemoteWorkspaceClientMessage): Promise<void> =>
+							new Promise((resolve, reject) => {
+								if (socket.readyState !== WebSocket.OPEN) {
+									reject(new Error("Remote workspace connection is not open"));
+									return;
+								}
+								socket.send(JSON.stringify(message), { binary: false, compress: false }, (error) => {
+									if (error) reject(error);
+									else resolve();
+								});
+							}),
+						close: (reason: RemoteWorkspaceProtocolCloseReason): Promise<void> => {
+							if (socket.readyState === WebSocket.CLOSED) return Promise.resolve();
+							return new Promise((resolve) => {
+								socket.once("close", () => resolve());
+								socket.close(websocketCloseCode(reason), reason.message);
+							});
+						},
+					};
 		this.client = new RemoteWorkspaceClientProtocol(transport, {
 			requiredCapabilities: ["primitive_operations", "tool_updates"],
-			optionalCapabilities: ["catalog_refresh", "file_transfer", "artifacts", "lsp_status"],
+			optionalCapabilities: this.isShared
+				? ["catalog_refresh", "artifacts", "lsp_status"]
+				: ["catalog_refresh", "file_transfer", "artifacts", "lsp_status"],
 			receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
 			localToolSchemas: this.localToolSchemas,
 			handshakeTimeoutMs: options.handshakeTimeoutMs,
+			onDisconnect: (message) => {
+				this.disconnected = true;
+				options.onDisconnect?.(message);
+			},
 			onCatalogRefreshed: async () => {
 				await this.refreshRemoteLspStatus();
 				await Promise.all([...this.catalogListeners].map((listener) => listener()));
 			},
 		});
-		socket.on("message", (data, isBinary) => {
-			if (isBinary) {
-				void this.client.disconnect("Remote workspace sent an unexpected binary frame");
-				return;
-			}
-			void this.client.receive(websocketPayload(data)).catch(() => undefined);
-		});
-		socket.on("close", () => void this.client.disconnect("Remote workspace connection closed"));
-		socket.on("error", () => void this.client.disconnect("Remote workspace connection failed"));
+		if (socket instanceof GuestSharedClientTransport) {
+			socket.bind(this.client);
+		} else {
+			socket.on("message", (data, isBinary) => {
+				if (isBinary) {
+					void this.client.disconnect("Remote workspace sent an unexpected binary frame");
+					return;
+				}
+				void this.client.receive(websocketPayload(data)).catch(() => undefined);
+			});
+			socket.on("close", () => void this.client.disconnect("Remote workspace connection closed"));
+			socket.on("error", () => void this.client.disconnect("Remote workspace connection failed"));
+		}
 	}
 
 	static async connect(url: string, options: RemoteToolOperationsConnectOptions = {}): Promise<RemoteToolOperations> {
@@ -696,6 +728,30 @@ export class RemoteToolOperations implements ToolOperations {
 		}
 	}
 
+	static async connectGuestShared(
+		url: string,
+		root: string,
+		token: string,
+		options: RemoteToolOperationsConnectOptions = {},
+	): Promise<RemoteToolOperations> {
+		const socket = await GuestSharedClientTransport.attach(url, root, token);
+		const operations = new RemoteToolOperations(url, "ws", socket, options);
+		try {
+			const handshake = await operations.client.start();
+			if (!workspaceRootsEqual(handshake.workspace.root, root, handshake.workspace.pathFlavor)) {
+				throw new Error("Guest shared workspace root differs from daemon handshake");
+			}
+			operations.cwd = handshake.workspace.root;
+			operations.workspacePathFlavor = handshake.workspace.pathFlavor;
+			operations.workspaceId = handshake.workspace.id;
+			await operations.refreshRemoteLspStatus();
+			return operations;
+		} catch (error) {
+			await socket.close({ code: "normal", message: "Shared guest attach failed" });
+			throw error;
+		}
+	}
+
 	resolveWorkspaceToolExecution(name: string, parameterSchema: unknown): RemoteWorkspaceToolExecutionTarget {
 		const schemaHash = hashRemoteWorkspaceJson(parameterSchema);
 		const catalogTool = this.client.handshake?.catalog.tools.find((tool) => tool.name === name);
@@ -721,6 +777,7 @@ export class RemoteToolOperations implements ToolOperations {
 			if (!catalogTool || !schemaHash || catalogTool.schemaHash !== schemaHash) {
 				throw new Error(`Remote tool is unavailable or has schema drift: ${name}`);
 			}
+			const expectedRevision = await this.revisionForTool(name, invocation);
 			const result = requireRecord(
 				await this.client.request(
 					"tool.invoke",
@@ -731,6 +788,7 @@ export class RemoteToolOperations implements ToolOperations {
 						schemaHash,
 						argumentsPrepared: true,
 						arguments: invocation.arguments,
+						...(expectedRevision ? { expectedRevision } : {}),
 						executionOptions: invocation.executionOptions,
 					},
 					{
@@ -787,6 +845,47 @@ export class RemoteToolOperations implements ToolOperations {
 		return this.client.request(method, params);
 	}
 
+	private async revisionForTool(
+		name: string,
+		invocation: WorkspaceToolRemoteInvocation,
+	): Promise<SharedExpectedRevision | undefined> {
+		if (!this.isShared || (name !== "edit" && name !== "write")) return undefined;
+		const path = requireString(
+			requireRecord(invocation.arguments, "shared mutation arguments").path,
+			"shared mutation path",
+		);
+		return this.sharedExpectedRevision(path, invocation.signal, name === "write");
+	}
+
+	/** Observe exact bytes for CAS, or a daemon-confirmed absent target for creation. */
+	private async sharedExpectedRevision(
+		path: string,
+		signal?: AbortSignal,
+		allowAbsent = true,
+	): Promise<SharedExpectedRevision> {
+		let read: unknown;
+		try {
+			read = await this.client.request("workspace.read", { path }, { signal });
+		} catch (error) {
+			if (!allowAbsent) throw error;
+			// Do not infer absence from an error message: only a v2 server stat of the
+			// same workspace and path may establish the expected-absent precondition.
+			const stat = requireRecord(
+				await this.client.request("workspace.stat", { path }, { signal }),
+				"shared stat result",
+			);
+			if (stat.kind !== "absent") throw error;
+			return { absent: true };
+		}
+		const result = requireRecord(read, "shared read result");
+		const content = decodeCanonicalBase64(
+			requireString(result.contentBase64, "shared read content"),
+			Number.MAX_SAFE_INTEGER,
+		);
+		const sha256 = createHash("sha256").update(content).digest("hex");
+		if (result.revision !== sha256) throw new Error("Shared daemon did not confirm the observed file revision");
+		return { sha256 };
+	}
 	async exec(command: string, options: ToolExecOptions): Promise<ToolExecResult> {
 		const result = requireRecord(
 			await this.client.request(
@@ -818,7 +917,12 @@ export class RemoteToolOperations implements ToolOperations {
 	}
 
 	async writeFile(path: string, content: string | Buffer): Promise<void> {
-		await this.request("workspace.write", { path, contentBase64: Buffer.from(content).toString("base64") });
+		const expectedRevision = this.isShared ? await this.sharedExpectedRevision(path) : undefined;
+		await this.request("workspace.write", {
+			path,
+			contentBase64: Buffer.from(content).toString("base64"),
+			...(expectedRevision ? { expectedRevision } : {}),
+		});
 	}
 
 	async readResource(path: string): Promise<Buffer> {
@@ -833,6 +937,7 @@ export class RemoteToolOperations implements ToolOperations {
 	}
 
 	async uploadFile(sourcePath: string, destinationPath: string): Promise<void> {
+		if (this.isShared) throw new Error("Shared guest file transfers are unavailable");
 		const content = await fsReadFile(sourcePath);
 		const sha256 = createHash("sha256").update(content).digest("hex");
 		const handle = this.client.beginRequest("transfer.upload", {
@@ -850,6 +955,7 @@ export class RemoteToolOperations implements ToolOperations {
 	}
 
 	async downloadFile(sourcePath: string, destinationPath: string): Promise<void> {
+		if (this.isShared) throw new Error("Shared guest file transfers are unavailable");
 		const stream = createWriteStream(destinationPath);
 		try {
 			await this.client.request(
@@ -872,6 +978,7 @@ export class RemoteToolOperations implements ToolOperations {
 
 	async stat(path: string): Promise<ToolFileStat> {
 		const result = requireRecord(await this.request("workspace.stat", { path }), "stat result");
+		if (result.kind === "absent") throw new Error(`Remote workspace path does not exist: ${path}`);
 		return {
 			isDirectory: () => result.kind === "directory",
 			isFile: () => result.kind === "file",
@@ -928,10 +1035,13 @@ export class RemoteToolOperations implements ToolOperations {
 			workspace: { id: this.workspaceId, root: this.cwd, pathFlavor: this.workspacePathFlavor },
 		};
 	}
+	isDisconnected(): boolean {
+		return this.disconnected;
+	}
 
 	dispose(): Promise<void> {
 		this.disposePromise ??= this.client.close().catch(() => {
-			this.socket.terminate();
+			if (this.socket instanceof WebSocket) this.socket.terminate();
 		});
 		return this.disposePromise;
 	}
@@ -941,5 +1051,14 @@ export function createRemoteToolOperations(
 	url: string,
 	options?: RemoteToolOperationsConnectOptions,
 ): Promise<RemoteToolOperations> {
+	if (url.startsWith("grip+ws:")) {
+		const parsed = new URL(url.replace(/^grip\+/, ""));
+		const root = parsed.searchParams.get("root");
+		if (!root || !posix.isAbsolute(root) || parsed.searchParams.size !== 1 || !options?.token) {
+			return Promise.reject(new Error("Invalid guest shared workspace attachment"));
+		}
+		parsed.search = "";
+		return RemoteToolOperations.connectGuestShared(parsed.toString(), root, options.token, options);
+	}
 	return RemoteToolOperations.connect(url, options);
 }

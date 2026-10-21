@@ -189,30 +189,31 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 
 Global and project `tools` settings merge per tool name, so a project can override `tools.websearch.baseUrl` while keeping a global `tools.websearch.apiKey`. Environment variables remain supported for `websearch`; explicit settings take precedence. Firecrawl uses `POST /v2/search` with web results only.
 
-### Docker Sandbox
+### Lima Sandbox
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `sandbox.image` | string | `"ghcr.io/greppleai/grip-sandbox:latest"` (not yet verified as published) | Docker image used by `/sandbox start`; override with a reviewed available image until the Grip image is published |
-| `sandbox.dockerBinary` | string | `"docker"` | Docker executable |
-| `sandbox.workspaceMountPath` | string | `"/workspace"` | Container path for the mounted current workspace |
-| `sandbox.containerNamePrefix` | string | `"grip-sandbox"` | Prefix for generated container names |
-| `sandbox.daemonPort` | number | `8787` | Preferred loopback-published daemon port; an available port is selected when occupied |
-| `sandbox.daemonHostBind` | string | `"127.0.0.1"` | Host address used to publish the container daemon port |
-| `sandbox.cleanup` | string | `"stop"` | Stop behavior: `"stop"` or `"remove"` |
+| `sandbox.limaBinary` | string | `"limactl"` | Lima executable |
+| `sandbox.limaTemplate` | string | `"template:docker-rootful"` | Template used to create a managed VM |
+| `sandbox.limaInstanceNamePrefix` | string | `"grip-sandbox"` | Generated VM name prefix |
+| `sandbox.workspaceMountPath` | string | `"/workspace"` | Guest path for the mounted current workspace |
+| `sandbox.daemonPort` | number | `8787` | Preferred loopback-forwarded daemon port; an available port is selected when occupied for new VMs |
+| `sandbox.daemonHostBind` | string | `"127.0.0.1"` | Host bind for the daemon forward |
+| `sandbox.cleanup` | string | `"stop"` | Stop behavior: `"stop"` or `"remove"` for owned VMs |
 
 ```json
 {
   "sandbox": {
-    "image": "grip-sandbox:local",
+    "limaBinary": "limactl",
     "cleanup": "remove"
   }
 }
 ```
 
-Precedence for sandbox starts is command flag, then `GRIP_SANDBOX_*` environment variables, then project settings, then global settings, then defaults. See [Docker Sandbox](sandbox.md) for command syntax, environment variable names, and security notes. The default image above is an upstream Pi artifact; no Grip image location has been verified.
+Precedence for sandbox starts is `--template`, `GRIP_SANDBOX_*` environment variables, project settings, global settings, then defaults. See [Lima Sandbox](sandbox.md) for command syntax, environment variables, and security notes.
 
-### Sessions
+
+For a running shared Lima VM, `/sandbox start --name` uses `sandbox.workspaceMountPath`, `sandbox.daemonHostBind`, `sandbox.daemonPort` and `sandbox.limaBinary` to verify its fixed writable parent mount and loopback forward before attaching. `sandbox.cleanup` does not authorize stopping or deleting the shared VM. Auth, config and sessions remain on the host; same-user agents share the default host directory unless each selects a distinct `GRIP_CODING_AGENT_DIR`. Shared writes and edits use revision preconditions, but shell writes can still race. Shared transfers are unavailable; guest process execution requires trusted clients. See [sandbox.md](sandbox.md#direct-shared-lima-attachment).
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|

@@ -1,11 +1,10 @@
-import type { SandboxContainer, SandboxRuntime, SandboxStartResult, SandboxStopResult } from "./docker.ts";
+import type { SandboxContainer, SandboxStartResult, SandboxStopResult } from "./config.ts";
 
 export interface SandboxStartUserCommand {
 	subcommand: "start";
-	image?: string;
-	runtime?: SandboxRuntime;
 	name?: string;
 	template?: string;
+	update?: boolean;
 }
 
 export type SandboxUserCommand =
@@ -13,7 +12,7 @@ export type SandboxUserCommand =
 	| { subcommand: "clear" }
 	| { subcommand: "attach"; url: string }
 	| SandboxStartUserCommand
-	| { subcommand: "list"; runtime?: SandboxRuntime }
+	| { subcommand: "list" }
 	| { subcommand: "stop"; target?: string };
 
 function splitCommandLine(input: string): string[] {
@@ -26,60 +25,39 @@ function splitCommandLine(input: string): string[] {
 	});
 }
 
-function parseRuntime(value: string | undefined, usage: string): SandboxRuntime {
-	if (value === "docker" || value === "lima") return value;
-	throw new Error(usage);
+function parseSandboxStartValue(
+	option: string | undefined,
+	value: string | undefined,
+): Pick<SandboxStartUserCommand, "name" | "template"> {
+	if (option !== "--name" && option !== "--template") {
+		throw new Error(`Unsupported /sandbox start argument: ${option}`);
+	}
+	if (!value || value.startsWith("--")) {
+		throw new Error("Usage: /sandbox start [--name <lima-instance>] [--template <lima-template>] [--update]");
+	}
+	return option === "--name" ? { name: value } : { template: value };
 }
 
 function parseSandboxStartCommand(tokens: string[]): SandboxUserCommand {
-	let image: string | undefined;
-	let runtime: SandboxRuntime | undefined;
-	let name: string | undefined;
-	let template: string | undefined;
+	const fields: Pick<SandboxStartUserCommand, "name" | "template"> = {};
+	let update = false;
 	for (let index = 2; index < tokens.length; index++) {
 		const option = tokens[index];
-		const value = tokens[++index];
-		if (!value)
-			throw new Error(
-				"Usage: /sandbox start [--runtime docker|lima] [--image <image>] [--name <lima-instance>] [--template <lima-template>]",
-			);
-		switch (option) {
-			case "--image":
-				image = value;
-				break;
-			case "--runtime":
-				runtime = parseRuntime(value, "Usage: /sandbox start --runtime docker|lima");
-				break;
-			case "--name":
-				name = value;
-				break;
-			case "--template":
-				template = value;
-				break;
-			default:
-				throw new Error(`Unsupported /sandbox start argument: ${option}`);
+		if (option === "--update") {
+			if (update) throw new Error("Duplicate /sandbox start --update");
+			update = true;
+			continue;
 		}
+		Object.assign(fields, parseSandboxStartValue(option, tokens[++index]));
 	}
-	if (name) runtime ??= "lima";
-	if ((name || template) && runtime !== "lima") {
-		throw new Error("/sandbox start --name and --template require --runtime lima");
+	if (update && (!fields.name || fields.template)) {
+		throw new Error("/sandbox start --update requires --name and cannot be combined with --template");
 	}
-	if (image && runtime === "lima") throw new Error("/sandbox start --image is only supported by the Docker runtime");
 	return {
 		subcommand: "start",
-		...(image ? { image } : {}),
-		...(runtime ? { runtime } : {}),
-		...(name ? { name } : {}),
-		...(template ? { template } : {}),
+		...fields,
+		...(update ? { update: true } : {}),
 	};
-}
-
-function parseSandboxListCommand(tokens: string[]): SandboxUserCommand {
-	if (tokens.length === 2) return { subcommand: "list" };
-	if (tokens.length !== 4 || tokens[2] !== "--runtime") {
-		throw new Error("Usage: /sandbox list [--runtime docker|lima]");
-	}
-	return { subcommand: "list", runtime: parseRuntime(tokens[3], "Usage: /sandbox list --runtime docker|lima") };
 }
 
 export function parseSandboxUserCommand(input: string): SandboxUserCommand {
@@ -101,9 +79,10 @@ export function parseSandboxUserCommand(input: string): SandboxUserCommand {
 		case "start":
 			return parseSandboxStartCommand(tokens);
 		case "list":
-			return parseSandboxListCommand(tokens);
+			if (tokens.length !== 2) throw new Error("Usage: /sandbox list");
+			return { subcommand: "list" };
 		case "stop":
-			if (tokens.length > 3) throw new Error("Usage: /sandbox stop [container]");
+			if (tokens.length > 3) throw new Error("Usage: /sandbox stop [vm]");
 			return tokens[2] ? { subcommand: "stop", target: tokens[2] } : { subcommand: "stop" };
 		default:
 			throw new Error(

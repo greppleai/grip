@@ -1424,7 +1424,11 @@ export class AgentSession {
 	): Promise<ToolBackendInfo> {
 		if (this._sandboxToolOperations) throw new Error("A session sandbox backend is already active");
 		const previousToolOperations = this._toolOperations;
-		const operations = new DeferredRemoteToolOperations(expectedCwd);
+		const operations = new DeferredRemoteToolOperations(expectedCwd, () => {
+			if (this._sandboxToolOperations !== operations || this._toolOperations !== operations) return;
+			this.abortRetry();
+			this.agent.abort();
+		});
 		try {
 			await configure(operations);
 		} catch (error) {
@@ -1435,6 +1439,7 @@ export class AgentSession {
 		this._toolOperations = operations;
 		this._sandboxToolOperations = operations;
 		try {
+			if (operations.isDisconnected()) throw new Error("Sandbox connection lost during activation");
 			await this.applyToolOperationsBackendChange(operations);
 		} catch (error) {
 			this._toolOperations = previousToolOperations;
@@ -3281,6 +3286,7 @@ export class AgentSession {
 	// =========================================================================
 
 	private async _continueAgentIfReady(): Promise<boolean> {
+		if (this._sandboxToolOperations?.isDisconnected()) return false;
 		const lastMessage = this.agent.state.messages.at(-1);
 		if (lastMessage?.role === "assistant" && !this.agent.hasQueuedMessages()) {
 			return false;
@@ -3290,10 +3296,13 @@ export class AgentSession {
 	}
 
 	private _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
+		if (this._sandboxToolOperations?.isDisconnected()) {
+			throw new Error("Sandbox connection lost; reconnect before prompting");
+		}
 		return this._runActivity("agent run", async () => {
 			try {
 				await this.agent.prompt(messages);
-				while (await this._handlePostAgentRun()) {
+				while (!this._sandboxToolOperations?.isDisconnected() && (await this._handlePostAgentRun())) {
 					if (!(await this._continueAgentIfReady())) break;
 				}
 			} finally {
@@ -3859,6 +3868,9 @@ export class AgentSession {
 	 * @throws Error if manual or extension-requested compaction is in progress
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
+		if (this._sandboxToolOperations?.isDisconnected()) {
+			throw new Error("Sandbox connection lost; reconnect before prompting");
+		}
 		const promptId = randomUUID();
 		const state: PromptPreparationState = {
 			text,
