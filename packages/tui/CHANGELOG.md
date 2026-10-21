@@ -2,6 +2,22 @@
 
 All notable changes to `@greppleai/grip-tui` are documented in this file.
 
+## [0.1.0](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.0.1...@greppleai/grip-tui-v0.1.0) (2026-10-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **release:** Release workflows no longer publish npm packages; use the platform binary installers instead.
+
+### Features
+
+* **release:** ship checksummed single-file Grip binaries ([9fbaf6b](https://github.com/greppleai/grip/commit/9fbaf6bfdc191cf603a9a7963919f567919b02cb))
+
+
+### Bug Fixes
+
+* **coding-agent:** correct standalone images and TUI styling ([00599f2](https://github.com/greppleai/grip/commit/00599f24db3f40cb038504238588f792abb2ef53))
+
 ## [0.0.1](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.2.15...@greppleai/grip-tui-v0.0.1) (2026-10-19)
 
 

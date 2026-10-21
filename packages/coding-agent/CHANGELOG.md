@@ -2,6 +2,34 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.1.0](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.0.1...@greppleai/grip-v0.1.0) (2026-10-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **release:** Release workflows no longer publish npm packages; use the platform binary installers instead.
+* **coding-agent:** /sandbox no longer supports Docker containers or --runtime.
+
+### Features
+
+* **coding-agent:** use Lima-only shared sandboxes ([9a92301](https://github.com/greppleai/grip/commit/9a92301e78426220ae5f1ac634f85ce7356c9d57))
+* **release:** ship checksummed single-file Grip binaries ([9fbaf6b](https://github.com/greppleai/grip/commit/9fbaf6bfdc191cf603a9a7963919f567919b02cb))
+
+
+### Bug Fixes
+
+* **coding-agent:** correct standalone images and TUI styling ([00599f2](https://github.com/greppleai/grip/commit/00599f24db3f40cb038504238588f792abb2ef53))
+* **coding-agent:** restore tool backend status after reload ([4424413](https://github.com/greppleai/grip/commit/4424413639ef243480bf4351e9c3aa7125b8f087))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.0.1 to ^0.1.0
+    * @greppleai/grip-ai bumped from ^0.0.1 to ^0.1.0
+    * @greppleai/grip-tui bumped from ^0.0.1 to ^0.1.0
+
 ## [0.0.1](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.15...@greppleai/grip-v0.0.1) (2026-10-19)
 
 
