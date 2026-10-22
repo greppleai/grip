@@ -3293,6 +3293,8 @@ export class InteractiveMode {
 	private async handleEditorSubmit(text: string): Promise<void> {
 		const submittedText = text.trim();
 		if (!submittedText) return;
+		// Keep attempted commands as well as accepted prompts available through editor history.
+		this.editor.addToHistory?.(submittedText);
 		if (await this.handleBuiltInEditorCommand(submittedText)) return;
 		if (await this.handleBashEditorSubmission(submittedText)) return;
 		if (await this.handleCompactingEditorSubmission(submittedText)) return;
