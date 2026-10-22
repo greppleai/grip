@@ -102,7 +102,8 @@ export interface StreamOptions {
 	/**
 	 * Optional session identifier for providers that support session-based caching.
 	 * Providers can use this to enable prompt caching, request routing, or other
-	 * session-aware features. Ignored by providers that don't support it.
+	 * session-aware features. The stream/streamSimple entrypoints also send this
+	 * value as the `x-session-id` request header when present.
 	 */
 	sessionId?: string;
 	/**

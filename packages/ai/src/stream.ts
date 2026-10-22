@@ -20,13 +20,19 @@ function resolveApiProvider(api: Api) {
 	return provider;
 }
 
+/** Attach the active session ID to provider requests without mutating caller headers. */
+function withSessionHeader<T extends StreamOptions>(options: T | undefined): T | undefined {
+	if (!options?.sessionId) return options;
+	return { ...options, headers: { ...options.headers, "x-session-id": options.sessionId } };
+}
+
 export function stream<TApi extends Api>(
 	model: Model<TApi>,
 	context: Context,
 	options?: ProviderStreamOptions,
 ): AssistantMessageEventStream {
 	const provider = resolveApiProvider(model.api);
-	return provider.stream(model, context, options as StreamOptions);
+	return provider.stream(model, context, withSessionHeader(options));
 }
 
 export async function complete<TApi extends Api>(
@@ -44,7 +50,7 @@ export function streamSimple<TApi extends Api>(
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
 	const provider = resolveApiProvider(model.api);
-	return provider.streamSimple(model, context, options);
+	return provider.streamSimple(model, context, withSessionHeader(options));
 }
 
 export async function completeSimple<TApi extends Api>(
