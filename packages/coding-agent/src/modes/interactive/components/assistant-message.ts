@@ -34,10 +34,14 @@ function stripeFinalAnswer(lines: string[], width: number): void {
 	// Keep the leading spacer uncolored so neighboring message stripes do not touch.
 	lines[0] = "";
 	const marker = theme.bgFromFg("accent", " ");
+	if (lines.length === 1) return;
 	for (let index = 1; index < lines.length; index++) {
 		const content = lines[index].trimEnd();
 		lines[index] = width <= 2 || !content ? marker : `${marker}${content}`;
 	}
+	// Pad inside the accent stripe, leaving the leading row as a separator from prior messages.
+	lines.splice(1, 0, marker);
+	lines.push(marker);
 }
 
 /**

@@ -74,9 +74,13 @@ describe("AssistantMessageComponent", () => {
 		expect(lines[0]).toContain(OSC133_ZONE_START);
 		expect(lines[0]).not.toMatch(/\x1b\[48;/);
 		expect(stripAnsi(lines[0])).toBe("");
-		expect(lines[1]).toContain("hello");
+		expect(lines).toHaveLength(4);
+		expect(stripAnsi(lines[1])).toBe(" ");
 		expect(lines[1]).toMatch(/\x1b\[48;/);
-		expect(lines[lines.length - 1]).toContain(OSC133_ZONE_END + OSC133_ZONE_FINAL);
+		expect(lines[2]).toContain("hello");
+		expect(lines[2]).toMatch(/\x1b\[48;/);
+		expect(lines[3]).toMatch(/\x1b\[48;/);
+		expect(lines[3]).toContain(OSC133_ZONE_END + OSC133_ZONE_FINAL);
 
 		component.updateContent({ ...message, stopReason: "toolUse" }, false);
 		expect(component.render(40).join("\n")).not.toMatch(/\x1b\[48;/);
@@ -101,9 +105,11 @@ describe("AssistantMessageComponent", () => {
 		transcript.addChild(new AssistantMessageComponent(createAssistantMessage([{ type: "text", text: "reply" }])));
 		const lines = transcript.render(40);
 		const answerIndex = lines.findIndex((line) => line.includes("reply"));
-		expect(lines[answerIndex - 2]).toMatch(/\x1b\[48;/); // Tool's last bordered row.
-		expect(stripAnsi(lines[answerIndex - 1])).toBe("");
-		expect(lines[answerIndex - 1]).not.toMatch(/\x1b\[48;/);
+		expect(lines[answerIndex - 3]).toMatch(/\x1b\[48;/); // Tool's last bordered row.
+		expect(stripAnsi(lines[answerIndex - 2])).toBe("");
+		expect(lines[answerIndex - 2]).not.toMatch(/\x1b\[48;/);
+		expect(stripAnsi(lines[answerIndex - 1])).toBe(" "); // Answer's top padding row.
+		expect(lines[answerIndex - 1]).toMatch(/\x1b\[48;/);
 		expect(lines[answerIndex]).toMatch(/\x1b\[48;/);
 	});
 });
