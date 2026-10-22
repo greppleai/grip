@@ -14,7 +14,7 @@ export class CompactionSummaryMessageComponent extends MessageCard {
 	private markdownTheme: MarkdownTheme;
 
 	constructor(message: CompactionSummaryMessage, markdownTheme: MarkdownTheme = getMarkdownTheme()) {
-		super(1, 1);
+		super(1, 1, "customMessageLabel");
 		this.message = message;
 		this.markdownTheme = markdownTheme;
 		this.updateDisplay();

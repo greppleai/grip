@@ -42,6 +42,7 @@ export class AssistantMessageComponent extends Container {
 	private lastMessage?: AssistantMessage;
 	private hasToolCalls = false;
 	private isStreaming = false;
+	private isFinal = false;
 
 	constructor(
 		message?: AssistantMessage,
@@ -96,10 +97,16 @@ export class AssistantMessageComponent extends Container {
 	}
 
 	override render(width: number): string[] {
-		const lines = super.render(width);
-		if (this.hasToolCalls || lines.length === 0) {
-			return lines;
+		if (width < 1) return [];
+		const lines = super.render(this.isFinal ? Math.max(1, width - 2) : width);
+		if (this.isFinal) {
+			const marker = theme.bgFromFg("accent", " ");
+			for (let index = 0; index < lines.length; index++) {
+				const content = lines[index].trimEnd();
+				lines[index] = width <= 2 || !content ? marker : `${marker}${content}`;
+			}
 		}
+		if (this.hasToolCalls || lines.length === 0) return lines;
 
 		lines[0] = OSC133_ZONE_START + lines[0];
 		lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
@@ -186,6 +193,7 @@ export class AssistantMessageComponent extends Container {
 
 		const hasToolCalls = this.renderMessageContent(message);
 		this.hasToolCalls = hasToolCalls;
+		this.isFinal = !isStreaming && !hasToolCalls && message.stopReason === "stop";
 		this.renderCompletionStatus(message, hasToolCalls);
 	}
 }
