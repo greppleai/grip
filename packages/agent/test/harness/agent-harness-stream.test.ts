@@ -75,7 +75,12 @@ describe("AgentHarness stream configuration", () => {
 			sessionId: "session-1",
 			cacheRetention: "none",
 		});
-		expect(capturedOptions?.headers).toEqual({ "x-base": "base", "x-auth": "auth", "x-hook": "hook" });
+		expect(capturedOptions?.headers).toEqual({
+			"x-base": "base",
+			"x-auth": "auth",
+			"x-hook": "hook",
+			"x-session-id": "session-1",
+		});
 		expect(capturedOptions?.metadata).toEqual({ base: true, hook: true });
 	});
 
@@ -92,7 +97,7 @@ describe("AgentHarness stream configuration", () => {
 
 		const harness = createHarness({
 			env: new NodeExecutionEnv({ cwd: process.cwd() }),
-			session: new Session(new InMemorySessionStorage()),
+			session: new Session(new InMemorySessionStorage({ metadata: { id: "session-2", createdAt: "now" } })),
 			model: registration.getModel(),
 			streamOptions: {
 				timeoutMs: 1000,
@@ -127,7 +132,7 @@ describe("AgentHarness stream configuration", () => {
 
 		expect(capturedOptions?.timeoutMs).toBeUndefined();
 		expect(capturedOptions?.maxRetries).toBe(2);
-		expect(capturedOptions?.headers).toEqual({ keep: "base", first: "1", second: "2" });
+		expect(capturedOptions?.headers).toEqual({ keep: "base", first: "1", second: "2", "x-session-id": "session-2" });
 		expect(capturedOptions?.metadata).toBeUndefined();
 	});
 
@@ -150,7 +155,7 @@ describe("AgentHarness stream configuration", () => {
 
 		const harness = createHarness({
 			env: new NodeExecutionEnv({ cwd: process.cwd() }),
-			session: new Session(new InMemorySessionStorage()),
+			session: new Session(new InMemorySessionStorage({ metadata: { id: "session-3", createdAt: "now" } })),
 			model: registration.getModel(),
 			tools: [calculateTool],
 			streamOptions: { timeoutMs: 1000, headers: { turn: "first" } },
@@ -166,9 +171,9 @@ describe("AgentHarness stream configuration", () => {
 
 		expect(capturedOptions).toHaveLength(2);
 		expect(capturedOptions[0].timeoutMs).toBe(1000);
-		expect(capturedOptions[0].headers).toEqual({ turn: "first" });
+		expect(capturedOptions[0].headers).toEqual({ turn: "first", "x-session-id": "session-3" });
 		expect(capturedOptions[1].timeoutMs).toBe(2000);
-		expect(capturedOptions[1].headers).toEqual({ turn: "second" });
+		expect(capturedOptions[1].headers).toEqual({ turn: "second", "x-session-id": "session-3" });
 	});
 
 	it("chains provider payload hooks", async () => {
