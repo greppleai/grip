@@ -69,7 +69,7 @@ The default Lima template name contains `docker-rootful`; it is a Lima VM templa
 
 ### Guest Grip during development
 
-A new managed VM installs an exact-version Linux Grip release using the checksummed repository installer, when those release assets are published. Existing named VMs must already provide Grip. To test local code, cross-compile a Linux binary matching the guest architecture and opt in:
+A new managed VM installs an exact-version Linux Grip release using the checksummed repository installer, when those release assets are published. An existing named per-session VM without Grip installs the latest published release using the same installer; an existing installation is left alone. In development, `GRIP_SANDBOX_GUEST_BINARY` installs the local Linux build instead, including in existing VMs. To test local code, cross-compile a Linux binary matching the guest architecture and opt in:
 
 ```bash
 NODE_OPTIONS=--import=tsx ./scripts/build-binaries.sh --skip-install --platform linux-x64

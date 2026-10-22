@@ -29,6 +29,17 @@ function inspectAssistantContentVisibility(content: readonly AssistantContent[])
 	return { anyVisible, visibleAfter };
 }
 
+function stripeFinalAnswer(lines: string[], width: number): void {
+	if (lines.length === 0) return;
+	// Keep the leading spacer uncolored so neighboring message stripes do not touch.
+	lines[0] = "";
+	const marker = theme.bgFromFg("accent", " ");
+	for (let index = 1; index < lines.length; index++) {
+		const content = lines[index].trimEnd();
+		lines[index] = width <= 2 || !content ? marker : `${marker}${content}`;
+	}
+}
+
 /**
  * Component that renders a complete assistant message
  */
@@ -99,13 +110,7 @@ export class AssistantMessageComponent extends Container {
 	override render(width: number): string[] {
 		if (width < 1) return [];
 		const lines = super.render(this.isFinal ? Math.max(1, width - 2) : width);
-		if (this.isFinal) {
-			const marker = theme.bgFromFg("accent", " ");
-			for (let index = 0; index < lines.length; index++) {
-				const content = lines[index].trimEnd();
-				lines[index] = width <= 2 || !content ? marker : `${marker}${content}`;
-			}
-		}
+		if (this.isFinal) stripeFinalAnswer(lines, width);
 		if (this.hasToolCalls || lines.length === 0) return lines;
 
 		lines[0] = OSC133_ZONE_START + lines[0];

@@ -1,6 +1,8 @@
 import type { AssistantContent, AssistantMessage } from "@greppleai/grip-ai";
+import { Container, type TUI } from "@greppleai/grip-tui";
 import { describe, expect, test } from "vitest";
 import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
+import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
@@ -69,13 +71,39 @@ describe("AssistantMessageComponent", () => {
 		expect(lines.every((line) => !line.endsWith(" "))).toBe(true);
 		expect(lines.every((line) => stripAnsi(line).length < 40)).toBe(true);
 		expect(lines.join("\n")).toMatch(/\x1b\[48;[^m]+m \x1b\[49m/);
-		expect(stripAnsi(lines[1])).toContain("  hello");
 		expect(lines[0]).toContain(OSC133_ZONE_START);
+		expect(lines[0]).not.toMatch(/\x1b\[48;/);
+		expect(stripAnsi(lines[0])).toBe("");
+		expect(lines[1]).toContain("hello");
+		expect(lines[1]).toMatch(/\x1b\[48;/);
 		expect(lines[lines.length - 1]).toContain(OSC133_ZONE_END + OSC133_ZONE_FINAL);
 
 		component.updateContent({ ...message, stopReason: "toolUse" }, false);
 		expect(component.render(40).join("\n")).not.toMatch(/\x1b\[48;/);
 		component.updateContent({ ...message, stopReason: "aborted" }, false);
 		expect(component.render(40).join("\n")).not.toMatch(/\x1b\[48;/);
+	});
+
+	test("leaves a blank row between a failed tool border and the final answer border", () => {
+		initTheme("dark");
+		const transcript = new Container();
+		const tool = new ToolExecutionComponent(
+			"unknown_tool",
+			"failed-tool",
+			{},
+			{},
+			undefined,
+			{ requestRender: () => {} } as TUI,
+			process.cwd(),
+		);
+		tool.updateResult({ content: [{ type: "text", text: "failure" }], isError: true });
+		transcript.addChild(tool);
+		transcript.addChild(new AssistantMessageComponent(createAssistantMessage([{ type: "text", text: "reply" }])));
+		const lines = transcript.render(40);
+		const answerIndex = lines.findIndex((line) => line.includes("reply"));
+		expect(lines[answerIndex - 2]).toMatch(/\x1b\[48;/); // Tool's last bordered row.
+		expect(stripAnsi(lines[answerIndex - 1])).toBe("");
+		expect(lines[answerIndex - 1]).not.toMatch(/\x1b\[48;/);
+		expect(lines[answerIndex]).toMatch(/\x1b\[48;/);
 	});
 });

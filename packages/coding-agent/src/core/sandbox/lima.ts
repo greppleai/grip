@@ -553,7 +553,7 @@ export class LimaSandboxService {
 	private async ensureGrip(
 		config: SandboxConfig,
 		name: string,
-		managed: boolean,
+		existing: boolean,
 		local?: LocalGuestBinary,
 	): Promise<void> {
 		if (local) {
@@ -570,12 +570,10 @@ export class LimaSandboxService {
 		];
 		const check = await this.runner.run(config.limaBinary, checkArgs);
 		if (check.exitCode === 0) return;
-		if (!managed) {
-			throw new Error(
-				`Lima instance ${name} does not provide grip; install the matching Linux release in the VM first`,
-			);
-		}
-		const script = `set -eu; tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT; curl -fsSL -o "$tmp" https://raw.githubusercontent.com/greppleai/grip/main/install.sh; GRIP_VERSION=${shellQuote(`v${VERSION}`)} sh "$tmp"; test -x "$HOME/.local/bin/grip"`;
+		// Existing named VMs can be bootstrapped too. Keep managed VMs pinned to
+		// the host release; use the latest published release for user-owned VMs.
+		const version = existing ? "" : `GRIP_VERSION=${shellQuote(`v${VERSION}`)} `;
+		const script = `set -eu; tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT; curl -fsSL -o "$tmp" https://raw.githubusercontent.com/greppleai/grip/main/install.sh; ${version}sh "$tmp"; test -x "$HOME/.local/bin/grip"`;
 		const args = ["shell", "--tty=false", name, "sh", "-lc", script];
 		ensureLimaSuccessful(config.limaBinary, await this.runner.run(config.limaBinary, args), args);
 	}
@@ -743,7 +741,7 @@ export class LimaSandboxService {
 		if (!existing) await this.startInstance(effectiveConfig, workspaceRoot, name, daemonPort);
 		// A failed guest install/start can have changed state; never delete an uncertain VM.
 		if (existing) await this.assertNoSharedGuestState(effectiveConfig, name);
-		await this.ensureGrip(effectiveConfig, name, !existing, local);
+		await this.ensureGrip(effectiveConfig, name, !!existing, local);
 		const token = await this.startDaemon(effectiveConfig, name);
 		await this.readinessWaiter(config.daemonHostBind, daemonPort);
 		// A failed readiness check is not proof that this daemon is ours to stop.

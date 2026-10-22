@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -191,7 +191,76 @@ describe("Lima sandbox core", () => {
 			expect(runner.calls.some((call) => call.args.includes("--mount-none"))).toBe(false);
 		},
 	);
+	it.each(["Running", "Stopped"])("installs the latest release in an existing %s VM without Grip", async (status) => {
+		const runner = new FakeLimaRunner([
+			ok(limaRecord("existing", status)),
+			...(status === "Stopped" ? [ok()] : []),
+			ok(), // No shared guest state.
+			{ exitCode: 1, stdout: "", stderr: "grip missing" },
+			ok(), // Installer succeeded.
+			ok("GRIP_SANDBOX_TOKEN=installed-token\n"),
+		]);
+		const service = new LimaSandboxService({ runner, readinessWaiter: async () => {} });
+		await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).resolves.toMatchObject({
+			containerName: "existing",
+			token: "installed-token",
+		});
+		const scripts = runner.calls.map((call) => call.args.at(-1) ?? "");
+		const install = scripts.find((script) =>
+			script.includes("raw.githubusercontent.com/greppleai/grip/main/install.sh"),
+		);
+		expect(install).toContain('sh "$tmp"');
+		expect(install).not.toContain("GRIP_VERSION=");
+		expect(runner.calls.at(-1)?.args.at(-1)).toContain("--daemon --daemon-host");
+	});
 
+	it("does not start a daemon when installing Grip in an existing VM fails", async () => {
+		const runner = new FakeLimaRunner([
+			ok(limaRecord("existing")),
+			ok(),
+			{ exitCode: 1, stdout: "", stderr: "grip missing" },
+			{ exitCode: 1, stdout: "", stderr: "download failed" },
+		]);
+		const service = new LimaSandboxService({ runner });
+		await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).rejects.toThrow();
+		expect(runner.calls).toHaveLength(5); // Includes the named guest-mode probe.
+		expect(runner.calls.some((call) => call.args.at(-1)?.includes("--daemon --daemon-host"))).toBe(false);
+	});
+
+	it("installs the local development binary in an existing VM without Grip", async () => {
+		const root = await mkdtemp(join(tmpdir(), "grip-existing-dev-"));
+		try {
+			const binary = join(root, "grip-linux");
+			const header = Buffer.alloc(20);
+			Buffer.from("7f454c46", "hex").copy(header);
+			header[4] = 2;
+			header[5] = 1;
+			header.writeUInt16LE(62, 18);
+			await writeFile(binary, header);
+			const runner = new FakeLimaRunner([
+				ok(limaRecord("existing")),
+				ok(), // No shared guest state.
+				ok(), // Architecture and daemon-state probe.
+				ok(), // Reserve staging directory.
+				ok(), // Copy binary.
+				ok(), // Verify and install.
+				ok(), // Clean staging directory.
+				ok("GRIP_SANDBOX_TOKEN=dev-token\n"),
+			]);
+			const service = new LimaSandboxService({
+				runner,
+				env: { GRIP_SANDBOX_GUEST_BINARY: binary },
+				readinessWaiter: async () => {},
+			});
+			await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).resolves.toMatchObject({
+				token: "dev-token",
+			});
+			expect(runner.calls.find((call) => call.args[0] === "copy")?.args[1]).toBe(binary);
+			expect(runner.calls.some((call) => call.args.at(-1)?.includes("raw.githubusercontent.com"))).toBe(false);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
 	it.each(["Running", "Stopped"])(
 		"refuses named %s VM reuse while a shared host owner holds the name",
 		async (status) => {
