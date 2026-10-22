@@ -2,6 +2,27 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.1.4](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.3...@greppleai/grip-v0.1.4) (2026-10-22)
+
+
+### Features
+
+* **coding-agent:** complete sandbox names from Lima ([395f9f9](https://github.com/greppleai/grip/commit/395f9f93d9cdcf43adcff0a9eb91d2c40e6b252e))
+
+
+### Bug Fixes
+
+* **coding-agent:** align tool hints and Stop hook card spacing ([b8b9e43](https://github.com/greppleai/grip/commit/b8b9e43790e581c397df51cd4a924102dafc58cf))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.1.3 to ^0.1.4
+    * @greppleai/grip-ai bumped from ^0.1.3 to ^0.1.4
+    * @greppleai/grip-tui bumped from ^0.1.3 to ^0.1.4
+
 ## [0.1.3](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.2...@greppleai/grip-v0.1.3) (2026-10-22)
 
 
