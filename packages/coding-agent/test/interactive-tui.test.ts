@@ -195,6 +195,7 @@ type HookNoticeContext = {
 	hookExecutionSession: object | undefined;
 	hookExecutionNotices: HookExecutionNotice[][];
 	hookExecutionComponents: HookExecutionComponent[];
+	pendingStopHookNotifications: unknown[];
 	activeToolHookExecutionGroups: Map<ToolHookEvent, HookExecutionNotice[]>;
 	hookExecutionTurnActive: boolean;
 	toolOutputExpanded: boolean;
@@ -287,6 +288,7 @@ function createHookNoticeContext(): HookNoticeContext {
 		hookExecutionSession: undefined,
 		hookExecutionNotices: [],
 		hookExecutionComponents: [],
+		pendingStopHookNotifications: [],
 		activeToolHookExecutionGroups: new Map<ToolHookEvent, HookExecutionNotice[]>(),
 		hookExecutionTurnActive: false,
 		toolOutputExpanded: false,

@@ -68,10 +68,11 @@ describe("interactive Markdown transformer chain", () => {
 		assistant.render(40);
 		user.render(40);
 
+		// Final assistant and user cards reserve two columns for their stripe, in addition to padding.
 		expect(contexts).toEqual([
-			{ messageType: "assistant-thinking", isStreaming: false, availableWidth: 38 },
-			{ messageType: "assistant", isStreaming: false, availableWidth: 38 },
-			{ messageType: "user", isStreaming: false, availableWidth: 38 },
+			{ messageType: "assistant-thinking", isStreaming: false, availableWidth: 36 },
+			{ messageType: "assistant", isStreaming: false, availableWidth: 36 },
+			{ messageType: "user", isStreaming: false, availableWidth: 36 },
 		]);
 		expect(message).toEqual(before);
 		expect(userText).toBe("1) user\\text");
@@ -106,7 +107,7 @@ describe("interactive Markdown transformer chain", () => {
 			[true, 38],
 			[true, 48],
 			[true, 48],
-			[false, 48],
+			[false, 46],
 		]);
 		expect(message).toEqual(assistantMessage("answer"));
 	});
