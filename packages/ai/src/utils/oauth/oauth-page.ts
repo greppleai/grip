@@ -1,4 +1,13 @@
-const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" aria-hidden="true"><path fill="#fff" fill-rule="evenodd" d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z"/><path fill="#fff" d="M517.36 400 H634.72 V634.72 H517.36 Z"/></svg>`;
+// Inline the Grepple logo so callback pages work without an asset server or network access.
+const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 33.866666 33.866666" width="100%" height="100%" aria-hidden="true">
+  <rect fill="#03815e" width="4.130908" height="8.197772" x="4.4576864" y="-29.642889" transform="rotate(135)" />
+  <rect fill="#03815e" width="3.2359862" height="6.4218025" x="31.978354" y="-2.8312788" transform="rotate(45)" />
+  <rect fill="#03815e" width="4.3664689" height="8.6652403" x="15.093356" y="-7.0035233" transform="matrix(0.70457045,0.70963404,-0.70457045,0.70963404,0,0)" />
+  <rect fill="#04bd88" width="11.690248" height="12.840108" x="2.2676623" y="10.447897" rx="2.3883214" ry="2.3883214" />
+  <rect fill="#04bd88" width="10.076248" height="10.076248" x="14.357004" y="23.349915" rx="2.4876626" ry="2.4876626" />
+  <rect fill="#04bd88" width="7.9374213" height="7.9374213" x="23.661583" y="16.054033" rx="2.4779725" ry="2.4779725" />
+  <rect fill="#04bd88" width="9.987009" height="9.8861303" x="14.200699" y="0.44050309" rx="2.4407253" ry="2.4407253" />
+</svg>`;
 
 function escapeHtml(value: string): string {
 	return value
