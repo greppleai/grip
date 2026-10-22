@@ -151,6 +151,10 @@ export type WorkingIndicatorOptions = LoaderIndicatorOptions;
 export type AutocompleteProviderFactory = (current: AutocompleteProvider) => AutocompleteProvider;
 export type EditorFactory = (tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => EditorComponent;
 export type ExtensionNotificationType = "info" | "warning" | "error";
+export interface ExtensionNotificationOptions {
+	/** Place the notification in the next Stop hook card in interactive mode, if one runs. */
+	hookEvent?: "Stop";
+}
 
 /**
  * UI context for extensions to request interactive UI.
@@ -167,7 +171,7 @@ export interface ExtensionUIContext {
 	input(title: string, placeholder?: string, opts?: ExtensionUIDialogOptions): Promise<string | undefined>;
 
 	/** Show a notification to the user. */
-	notify(message: string, type?: ExtensionNotificationType): void;
+	notify(message: string, type?: ExtensionNotificationType, options?: ExtensionNotificationOptions): void;
 
 	/** Listen to raw terminal input (interactive mode only). Returns an unsubscribe function. */
 	onTerminalInput(handler: TerminalInputHandler): () => void;

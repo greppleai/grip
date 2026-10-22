@@ -2277,7 +2277,10 @@ const text = await ctx.ui.editor("Edit:", "prefilled text");
 
 // Notification (non-blocking)
 ctx.ui.notify("Done!", "info");  // "info" | "warning" | "error"
+ctx.ui.notify("Run statistics", "info", { hookEvent: "Stop" }); // Inside next Stop hook card
 ```
+
+In interactive mode, `{ hookEvent: "Stop" }` groups the notification with the next Stop hook card. If no Stop hook runs, the notification is shown normally when the agent settles. Other modes show it as a regular notification.
 
 #### Timed Dialogs with Countdown
 

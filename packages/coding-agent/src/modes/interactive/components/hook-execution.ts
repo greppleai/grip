@@ -101,6 +101,7 @@ function groupedCallStatusColor(group: GroupedHookCall): ThemeColor {
 /** TUI-only card for completed hook calls and their model-visible returned prompts. */
 export class HookExecutionComponent extends Container {
 	private readonly notices: HookExecutionNotice[];
+	private readonly annotations: string[] = [];
 	private readonly markdownTheme: MarkdownTheme;
 	private readonly box: MessageCard;
 	private expanded = false;
@@ -124,6 +125,11 @@ export class HookExecutionComponent extends Container {
 			throw new Error(`Cannot group ${notice.event} notice with ${this.notices[0].event}`);
 		}
 		this.notices.push(notice);
+		this.rebuild();
+	}
+
+	appendAnnotation(text: string): void {
+		this.annotations.push(text);
 		this.rebuild();
 	}
 
@@ -155,6 +161,7 @@ export class HookExecutionComponent extends Container {
 		const subject = subjects.map(({ value, count }) => `${value}${count > 1 ? ` ×${count}` : ""}`).join(", ");
 		const title = theme.fg("warning", theme.bold(`Hook · ${firstNotice.event}`));
 		this.box.addChild(new Text(title + (subject ? theme.fg("muted", ` · ${subject}`) : ""), 0, 0));
+		if (firstNotice.event === "Stop" || firstNotice.event === "StopFailure") this.box.addChild(new Spacer(1));
 		const statuses = countValues(
 			this.notices.flatMap((notice) =>
 				notice.calls.map((call) => {
@@ -170,6 +177,7 @@ export class HookExecutionComponent extends Container {
 			})
 			.join(theme.fg("muted", ", "));
 		this.box.addChild(new Text(summary || theme.fg("muted", "0 calls"), 0, 0));
+		this.renderAnnotations();
 		if (keyText("app.tools.expand")) this.box.addChild(new Text(keyHint("app.tools.expand", "to expand"), 0, 0));
 	}
 
@@ -184,6 +192,7 @@ export class HookExecutionComponent extends Container {
 			this.box.addChild(new Text(theme.fg("dim", call.source), 0, 0));
 		}
 		this.renderPrompts(countValues(notice.returnedPrompts), false);
+		this.renderAnnotations();
 	}
 
 	private renderGroupedNotices(firstNotice: HookExecutionNotice): void {
@@ -204,6 +213,12 @@ export class HookExecutionComponent extends Container {
 			this.box.addChild(new Text(theme.fg("dim", call.source), 0, 0));
 		}
 		this.renderPrompts(countValues(this.notices.flatMap((notice) => notice.returnedPrompts)), true);
+		this.renderAnnotations();
+	}
+	private renderAnnotations(): void {
+		if (this.annotations.length === 0) return;
+		this.box.addChild(new Spacer(1));
+		for (const annotation of this.annotations) this.box.addChild(new Text(theme.fg("dim", annotation), 0, 0));
 	}
 
 	private renderPrompts(prompts: readonly CountedValue[], grouped: boolean): void {

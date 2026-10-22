@@ -2,7 +2,6 @@ import type { AgentTool, AgentToolResult } from "@greppleai/grip-agent-core";
 import { Container, Text } from "@greppleai/grip-tui";
 import { dirname } from "path";
 import { type Static, Type } from "typebox";
-import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import { getLanguageFromPath, highlightCode, type Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
@@ -10,6 +9,7 @@ import type { ToolOperations } from "./operations.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import {
 	formatBackendIcon,
+	formatHiddenLinesHint,
 	invalidArgText,
 	normalizeDisplayText,
 	replaceTabs,
@@ -145,7 +145,7 @@ function formatWriteContentPreview(
 	const remaining = lines.length - maxLines;
 	let text = `\n\n${displayLines.map((line) => (lang ? line : theme.fg("toolOutput", replaceTabs(line)))).join("\n")}`;
 	if (remaining > 0) {
-		text += `${theme.fg("muted", `\n... (${remaining} more lines, ${lines.length} total,`)} ${keyHint("app.tools.expand", "to expand")})`;
+		text += `\n\n${formatHiddenLinesHint(remaining, theme)}`;
 	}
 	return text;
 }

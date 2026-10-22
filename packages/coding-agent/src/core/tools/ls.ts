@@ -2,12 +2,18 @@ import type { AgentTool, AgentToolResult } from "@greppleai/grip-agent-core";
 import { Text } from "@greppleai/grip-tui";
 import nodePath from "path";
 import { type Static, Type } from "typebox";
-import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import type { ToolOperations } from "./operations.ts";
 import { resolveToCwd } from "./path-utils.ts";
-import { formatBackendIcon, getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.ts";
+import {
+	formatBackendIcon,
+	formatHiddenLinesHint,
+	getTextOutput,
+	invalidArgText,
+	shortenPath,
+	str,
+} from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateHead } from "./truncate.ts";
 
@@ -54,7 +60,7 @@ function formatLsResult(
 		const remaining = lines.length - maxLines;
 		text += `\n${displayLines.map((line) => theme.fg("toolOutput", line)).join("\n")}`;
 		if (remaining > 0) {
-			text += `${theme.fg("muted", `\n... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")})`;
+			text += `\n\n${formatHiddenLinesHint(remaining, theme)}`;
 		}
 	}
 

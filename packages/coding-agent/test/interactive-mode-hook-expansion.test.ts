@@ -2,6 +2,8 @@ import { Container, getKeybindings, type MarkdownTheme, setKeybindings, TuiMainS
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultEditorTheme } from "../../tui/test/test-themes.ts";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
+import type { AgentSessionEvent } from "../src/core/agent-session.ts";
+import type { ExtensionNotificationOptions } from "../src/core/extensions/types.ts";
 import { HOOK_EXECUTION_CUSTOM_TYPE, type HookEventName, type HookExecutionNotice } from "../src/core/hooks/types.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import type { CustomMessage } from "../src/core/messages.ts";
@@ -115,6 +117,30 @@ describe("InteractiveMode hook expansion", () => {
 		expect(render(context)).not.toContain("Hook feedback.");
 		expect(setExpanded).toHaveBeenLastCalledWith(false);
 		expect(context.ui.requestRender).toHaveBeenCalled();
+	});
+	it("groups extension statistics with the next Stop card and falls back when no Stop hook runs", async () => {
+		const context = createContext();
+		const showStatus = vi.fn();
+		Object.assign(context, {
+			pendingStopHookNotifications: [],
+			showStatus,
+			isInitialized: true,
+			footer: { invalidate: vi.fn() },
+			checkShutdownRequested: vi.fn(),
+		});
+		const mode = context as unknown as {
+			showExtensionNotify(message: string, type: "info", options?: ExtensionNotificationOptions): void;
+			handleEvent(event: AgentSessionEvent): Promise<void>;
+		};
+		mode.showExtensionNotify("TPS 17.7 tok/s", "info", { hookEvent: "Stop" });
+		expect(showStatus).not.toHaveBeenCalled();
+		context.addHookExecutionNotice({ ...notice, event: "Stop" });
+		expect(render(context)).toContain("TPS 17.7 tok/s");
+		mode.showExtensionNotify("TPS no hook", "info", { hookEvent: "Stop" });
+		await mode.handleEvent({ type: "agent_settled" });
+		expect(showStatus).toHaveBeenCalledOnce();
+		expect(showStatus).toHaveBeenCalledWith("TPS no hook");
+		expect(render(context)).not.toContain("TPS no hook");
 	});
 
 	it.each([false, true])("initializes live and persisted cards from expanded=%s", (expanded) => {

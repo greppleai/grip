@@ -1,6 +1,7 @@
 import * as os from "node:os";
 import type { ImageContent, TextContent } from "@greppleai/grip-ai";
 import { getCapabilities, getImageDimensions, imageFallback } from "@greppleai/grip-tui";
+import { keyText } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { ThemeColor } from "../../modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../utils/ansi.ts";
 import { sanitizeBinaryOutput } from "../../utils/shell.ts";
@@ -66,6 +67,13 @@ export function getTextOutput(result: ToolTextOutputSource | undefined, showImag
 	}
 
 	return output;
+}
+
+export function formatHiddenLinesHint(count: number, theme: ToolRenderTheme): string {
+	const expandKey = keyText("app.tools.expand");
+	return (
+		theme.fg("warning", `${count} lines hidden`) + (expandKey ? theme.fg("accent", ` · ${expandKey} to expand`) : "")
+	);
 }
 
 export type ToolRenderResultLike<TDetails> = {

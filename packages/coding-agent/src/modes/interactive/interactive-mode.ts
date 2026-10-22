@@ -94,6 +94,7 @@ import type {
 	EditorFactory,
 	ExtensionContext,
 	ExtensionCustomOptions,
+	ExtensionNotificationOptions,
 	ExtensionSwitchSessionOptions,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -237,6 +238,10 @@ class ExpandableText extends Text implements Expandable {
 }
 
 type ExtensionNotificationType = "info" | "warning" | "error";
+interface PendingStopHookNotification {
+	message: string;
+	type: ExtensionNotificationType | undefined;
+}
 type CompactionDisplayReason = "manual" | "threshold" | "overflow";
 type ProviderAuthenticationType = "oauth" | "api_key";
 type AuthenticationOperation = "login" | "logout";
@@ -630,6 +635,7 @@ export class InteractiveMode {
 	private hookExecutionSession?: Session;
 	private hookExecutionNotices: HookExecutionNotice[][] = [];
 	private hookExecutionComponents: HookExecutionComponent[] = [];
+	private pendingStopHookNotifications: PendingStopHookNotification[] = [];
 	private activeToolHookExecutionGroups = new Map<ToolHookEvent, HookExecutionNotice[]>();
 	private hookExecutionTurnActive = false;
 	private signalCleanupHandlers: Array<() => void> = [];
@@ -2544,7 +2550,7 @@ export class InteractiveMode {
 			select: (title, options, opts) => this.showExtensionSelector(title, options, opts),
 			confirm: (title, message, opts) => this.showExtensionConfirm(title, message, opts),
 			input: (title, placeholder, opts) => this.showExtensionInput(title, placeholder, opts),
-			notify: (message, type) => this.showExtensionNotify(message, type),
+			notify: (message, type, options) => this.showExtensionNotify(message, type, options),
 			onTerminalInput: (handler) => this.addExtensionTerminalInputListener(handler),
 			setStatus: (key, text) => this.setExtensionStatus(key, text),
 			setWorkingMessage: (message) => {
@@ -2823,7 +2829,15 @@ export class InteractiveMode {
 	/**
 	 * Show a notification for extensions.
 	 */
-	private showExtensionNotify(message: string, type?: ExtensionNotificationType): void {
+	private showExtensionNotify(
+		message: string,
+		type?: ExtensionNotificationType,
+		options?: ExtensionNotificationOptions,
+	): void {
+		if (options?.hookEvent === "Stop") {
+			this.pendingStopHookNotifications.push({ message, type });
+			return;
+		}
 		if (type === "error") {
 			this.showError(message);
 		} else if (type === "warning") {
@@ -3366,6 +3380,10 @@ export class InteractiveMode {
 		const group = [notice];
 		this.hookExecutionNotices.push(group);
 		const component = new HookExecutionComponent(notice, this.getMarkdownThemeWithSettings());
+		if (notice.event === "Stop") {
+			for (const notification of this.pendingStopHookNotifications) component.appendAnnotation(notification.message);
+			this.pendingStopHookNotifications = [];
+		}
 		component.setExpanded(this.toolOutputExpanded);
 		this.hookExecutionComponents.push(component);
 		this.chatContainer.addChild(component);
@@ -3801,6 +3819,10 @@ export class InteractiveMode {
 				this.handleAgentEnd();
 				break;
 			case "agent_settled":
+				for (const notification of this.pendingStopHookNotifications) {
+					this.showExtensionNotify(notification.message, notification.type);
+				}
+				this.pendingStopHookNotifications = [];
 				await this.checkShutdownRequested();
 				this.ui.requestRender();
 				break;

@@ -5,7 +5,7 @@ import { Text } from "@greppleai/grip-tui";
 
 import { type Static, Type } from "typebox";
 import { getReadmePath } from "../../config.ts";
-import { keyHint, keyText } from "../../modes/interactive/components/keybinding-hints.ts";
+import { keyText } from "../../modes/interactive/components/keybinding-hints.ts";
 import { getLanguageFromPath, highlightCode, type Theme } from "../../modes/interactive/theme/theme.ts";
 import { processImage } from "../../utils/image-process.ts";
 import { formatPathRelativeToCwdOrAbsolute } from "../../utils/paths.ts";
@@ -15,7 +15,15 @@ import { HASH_SEP, initHasher, lineHashes } from "./hashline/hash.ts";
 import { visLines as hashlineVisLines } from "./hashline-utils.ts";
 import type { ToolOperations } from "./operations.ts";
 import { resolveReadPathAsync, resolveToCwd } from "./path-utils.ts";
-import { formatBackendIcon, getTextOutput, invalidArgText, replaceTabs, shortenPath, str } from "./render-utils.ts";
+import {
+	formatBackendIcon,
+	formatHiddenLinesHint,
+	getTextOutput,
+	invalidArgText,
+	replaceTabs,
+	shortenPath,
+	str,
+} from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateHead } from "./truncate.ts";
 
@@ -205,7 +213,7 @@ function formatReadResult(
 	const remaining = lines.length - maxLines;
 	let text = `\n${displayLines.map((line) => (lang ? replaceTabs(line) : theme.fg("toolOutput", replaceTabs(line)))).join("\n")}`;
 	if (remaining > 0) {
-		text += `${theme.fg("muted", `\n... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")})`;
+		text += `\n\n${formatHiddenLinesHint(remaining, theme)}`;
 	}
 
 	text += formatReadTruncationWarning(result.details?.truncation, theme);

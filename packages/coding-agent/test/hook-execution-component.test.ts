@@ -54,6 +54,23 @@ describe("HookExecutionComponent", () => {
 		expect(lines.slice(1).every((line) => line.startsWith(marker))).toBe(true);
 		expect(lines.slice(1).every((line) => line.split("\x1b[48;").length === 2)).toBe(true);
 	});
+	it("keeps Stop statistics and a blank title separator inside the striped card", () => {
+		const component = new HookExecutionComponent(notice);
+		component.appendAnnotation("TPS 17.7 tok/s");
+		const lines = render(component).split("\n");
+		const titleIndex = lines.findIndex((line) => line.includes("Hook · Stop"));
+		expect(lines[titleIndex + 1]?.trim()).toBe("");
+		expect(lines.findIndex((line) => line.includes("TPS 17.7 tok/s"))).toBeGreaterThan(titleIndex);
+		const marker = theme.bgFromFg("warning", " ");
+		expect(
+			component
+				.render(120)
+				.find((line) => line.includes("TPS 17.7 tok/s"))
+				?.startsWith(marker),
+		).toBe(true);
+		component.setExpanded(true);
+		expect(render(component)).toContain("TPS 17.7 tok/s");
+	});
 
 	it("renders full details when expanded and hides them again when collapsed", () => {
 		const component = new HookExecutionComponent(notice);
@@ -85,6 +102,10 @@ describe("HookExecutionComponent", () => {
 				.slice(1)
 				.every((line) => line.startsWith(theme.bgFromFg("warning", " "))),
 		).toBe(true);
+		const lines = render(stopFailure).split("\n");
+		const titleIndex = lines.findIndex((line) => line.includes("Hook · StopFailure"));
+		expect(titleIndex).toBeGreaterThan(-1);
+		expect(lines[titleIndex + 1]?.trim()).toBe("");
 		expect(otherHook.render(120).join("\n")).not.toMatch(/\x1b\[48;/);
 	});
 

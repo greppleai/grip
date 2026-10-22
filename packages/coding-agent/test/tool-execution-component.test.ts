@@ -6,6 +6,9 @@ import { getReadmePath } from "../src/config.ts";
 import type { ToolDefinition } from "../src/core/extensions/types.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { createBashToolDefinition } from "../src/core/tools/bash.ts";
+import { createFindToolDefinition } from "../src/core/tools/find.ts";
+import { createGrepToolDefinition } from "../src/core/tools/grep.ts";
+import { createLsToolDefinition } from "../src/core/tools/ls.ts";
 import { LocalToolOperations } from "../src/core/tools/operations.ts";
 import { createReadTool, createReadToolDefinition } from "../src/core/tools/read.ts";
 import { createWriteToolDefinition } from "../src/core/tools/write.ts";
@@ -248,6 +251,47 @@ describe("ToolExecutionComponent parity", () => {
 			const expanded = stripAnsi(component.render(120).join("\n"));
 			expect(expanded).toContain("entry-1");
 			expect(expanded).not.toContain("lines hidden");
+		} finally {
+			setKeybindings(previousKeybindings);
+		}
+	});
+
+	test.each(["read", "grep", "find", "ls", "write"])("separates and colors %s collapsed output hints", (toolName) => {
+		const previousKeybindings = getKeybindings();
+		setKeybindings(new KeybindingsManager());
+		try {
+			const ops = new LocalToolOperations(process.cwd());
+			const definitions = {
+				read: createReadToolDefinition(ops),
+				grep: createGrepToolDefinition(ops),
+				find: createFindToolDefinition(ops),
+				ls: createLsToolDefinition(ops),
+				write: createWriteToolDefinition(ops),
+			};
+			const content = Array.from({ length: 25 }, (_, index) => `entry-${index + 1}`).join("\n");
+			const component = new ToolExecutionComponent(
+				toolName,
+				`tool-${toolName}-preview`,
+				{ path: "notes.txt", pattern: "entry", content },
+				{},
+				definitions[toolName as keyof typeof definitions],
+				createFakeTui(),
+				process.cwd(),
+			);
+			if (toolName !== "write") {
+				component.updateResult(
+					{ content: [{ type: "text", text: content }], details: undefined, isError: false },
+					false,
+				);
+			}
+			const lines = component.render(120);
+			const hintIndex = lines.findIndex((line) => line.includes("lines hidden"));
+			expect(hintIndex).toBeGreaterThan(0);
+			expect(stripAnsi(lines[hintIndex - 1]!).trim()).toBe("");
+			const count = stripAnsi(lines[hintIndex]!).match(/(\d+) lines hidden/)?.[1];
+			expect(count).toBeDefined();
+			expect(lines[hintIndex]).toContain(theme.fg("warning", `${count} lines hidden`));
+			expect(lines[hintIndex]).toContain(theme.fg("accent", " · ctrl+o to expand"));
 		} finally {
 			setKeybindings(previousKeybindings);
 		}
