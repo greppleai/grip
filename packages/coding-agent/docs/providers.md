@@ -59,7 +59,7 @@ grip
 | Cloudflare AI Gateway | `CLOUDFLARE_API_KEY` (+ `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_GATEWAY_ID`) | `cloudflare-ai-gateway` |
 | Cloudflare Workers AI | `CLOUDFLARE_API_KEY` (+ `CLOUDFLARE_ACCOUNT_ID`) | `cloudflare-workers-ai` |
 | xAI | `XAI_API_KEY` | `xai` |
-| OpenRouter | `OPENROUTER_API_KEY` | `openrouter` |
+| OpenRouter | `OPENROUTER_API_KEY` or `/login` → browser sign-in | `openrouter` |
 | Vercel AI Gateway | `AI_GATEWAY_API_KEY` | `vercel-ai-gateway` |
 | ZAI | `ZAI_API_KEY` | `zai` |
 | OpenCode Zen | `OPENCODE_API_KEY` | `opencode` |
@@ -74,6 +74,8 @@ grip
 | Xiaomi MiMo Token Plan (China) | `XIAOMI_TOKEN_PLAN_CN_API_KEY` | `xiaomi-token-plan-cn` |
 | Xiaomi MiMo Token Plan (Amsterdam) | `XIAOMI_TOKEN_PLAN_AMS_API_KEY` | `xiaomi-token-plan-ams` |
 | Xiaomi MiMo Token Plan (Singapore) | `XIAOMI_TOKEN_PLAN_SGP_API_KEY` | `xiaomi-token-plan-sgp` |
+
+OpenRouter browser sign-in (`/login` → Sign in (subscriptions or OpenRouter credits) → OpenRouter) uses PKCE to request a durable API key on your OpenRouter account. Requests are billed to your OpenRouter credits; this is **not** a subscription login and OpenRouter does not issue a refresh token. Grip stores the resulting key in `auth.json` as an API key. If it is revoked, sign in again. You can still paste an existing API key or set `OPENROUTER_API_KEY` instead.
 
 Reference for environment variables and `auth.json` keys: [`const envMap`](../../ai/src/env-api-keys.ts) in `packages/ai/src/env-api-keys.ts`.
 

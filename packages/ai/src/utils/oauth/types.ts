@@ -66,6 +66,8 @@ export interface OAuthProviderInterface {
 
 	/** Whether login uses a local callback server and supports manual code input. */
 	usesCallbackServer?: boolean;
+	/** Browser authorization produces a durable API key rather than renewable OAuth tokens. */
+	storeAsApiKey?: boolean;
 
 	/** Refresh expired credentials, return updated credentials to persist */
 	refreshToken(credentials: OAuthCredentials, signal?: AbortSignal): Promise<OAuthCredentials>;

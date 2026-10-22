@@ -525,7 +525,12 @@ export class AuthStorage {
 		}
 
 		const credentials = await provider.login(callbacks);
-		this.set(providerId, { type: "oauth", ...credentials });
+		this.set(
+			providerId,
+			provider.storeAsApiKey
+				? { type: "api_key", key: provider.getApiKey(credentials) }
+				: { type: "oauth", ...credentials },
+		);
 	}
 
 	/**

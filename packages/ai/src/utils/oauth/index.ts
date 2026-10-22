@@ -8,12 +8,14 @@
 import { anthropicOAuthProvider } from "./anthropic.ts";
 import { githubCopilotOAuthProvider } from "./github-copilot.ts";
 import { openaiCodexOAuthProvider } from "./openai-codex.ts";
+import { openrouterOAuthProvider } from "./openrouter.ts";
 import type { OAuthCredentials, OAuthProviderId, OAuthProviderInfo, OAuthProviderInterface } from "./types.ts";
 
 const BUILT_IN_OAUTH_PROVIDERS: OAuthProviderInterface[] = [
 	anthropicOAuthProvider,
 	githubCopilotOAuthProvider,
 	openaiCodexOAuthProvider,
+	openrouterOAuthProvider,
 ];
 
 const oauthProviderRegistry = new Map<string, OAuthProviderInterface>(

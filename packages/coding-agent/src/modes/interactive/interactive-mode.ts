@@ -5504,15 +5504,15 @@ export class InteractiveMode {
 	}
 
 	private showLoginAuthTypeSelector(): void {
-		const subscriptionLabel = "Use a subscription";
+		const browserLabel = "Sign in (subscriptions or OpenRouter credits)";
 		const apiKeyLabel = "Use an API key";
 		this.showSelector((done) => {
 			const selector = new ExtensionSelectorComponent(
 				"Select authentication method:",
-				[subscriptionLabel, apiKeyLabel],
+				[browserLabel, apiKeyLabel],
 				(option) => {
 					done();
-					const authType = option === subscriptionLabel ? "oauth" : "api_key";
+					const authType = option === browserLabel ? "oauth" : "api_key";
 					this.showLoginProviderSelector(authType);
 				},
 				() => {
@@ -5528,7 +5528,7 @@ export class InteractiveMode {
 		const providerOptions = this.getLoginProviderOptions(authType);
 		if (providerOptions.length === 0) {
 			this.showStatus(
-				authType === "oauth" ? "No subscription providers available." : "No API key providers available.",
+				authType === "oauth" ? "No browser sign-in providers available." : "No API key providers available.",
 			);
 			return;
 		}
