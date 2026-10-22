@@ -2,6 +2,22 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.1.2](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.1...@greppleai/grip-v0.1.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **coding-agent:** move bash expansion hint below output ([07497cc](https://github.com/greppleai/grip/commit/07497cc0f44c58f99754bcc5a6c805c74b13e226))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.1.1 to ^0.1.2
+    * @greppleai/grip-ai bumped from ^0.1.1 to ^0.1.2
+    * @greppleai/grip-tui bumped from ^0.1.1 to ^0.1.2
+
 ## [0.1.1](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.0...@greppleai/grip-v0.1.1) (2026-10-21)
 
 
