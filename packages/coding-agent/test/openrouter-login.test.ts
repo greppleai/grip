@@ -3,7 +3,7 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 
 const REDIRECT_URI = "http://localhost:54549/callback";
 
-describe.sequential("OpenRouter browser login storage", () => {
+describe("OpenRouter browser login storage", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
 	it("stores a minted key as a durable API key, not as a refreshable OAuth token", async () => {

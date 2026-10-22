@@ -86,7 +86,7 @@ afterEach(async () => {
 	await Promise.all(tempDirs.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-describe.sequential("main LSP wiring", () => {
+describe("main LSP wiring", () => {
 	it("resolves --lsp-config from the startup cwd but leaves LSP tools off by default", async () => {
 		const startupCwd = await createTempDir();
 		const configDir = join(startupCwd, "config");

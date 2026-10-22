@@ -1,6 +1,6 @@
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import ts from "typescript-ast";
 import { describe, expect, it } from "vitest";
 import * as ClientValues from "../src/core/lsp/client.ts";
 import * as ConfigValues from "../src/core/lsp/config.ts";

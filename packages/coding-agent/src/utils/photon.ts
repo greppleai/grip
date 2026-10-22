@@ -31,7 +31,7 @@ interface PatchedReadFileSyncObjectOptions extends NodeFs.ObjectEncodingOptions 
 
 type PatchedReadFileSyncOptions = PatchedReadFileSyncObjectOptions | BufferEncoding | null;
 type ReadFileSync = typeof NodeFs.readFileSync;
-type PatchedReadFileSyncResult = string | Buffer<ArrayBuffer>;
+type PatchedReadFileSyncResult = string | Buffer<ArrayBufferLike>;
 
 const WASM_FILENAME = "photon_rs_bg.wasm";
 
@@ -63,6 +63,16 @@ interface PhotonWasmReadContext {
 	fallbackPaths: string[];
 }
 
+function readFileWithOptions(
+	readFileSync: ReadFileSync,
+	file: NodeFs.PathOrFileDescriptor,
+	options: PatchedReadFileSyncOptions | undefined,
+): PatchedReadFileSyncResult {
+	if (options === undefined || options === null) return readFileSync(file);
+	if (typeof options === "string") return readFileSync(file, options);
+	return readFileSync(file, options);
+}
+
 function readFallbackWasm(
 	context: PhotonWasmReadContext,
 	options: PatchedReadFileSyncOptions | undefined,
@@ -70,8 +80,7 @@ function readFallbackWasm(
 ): PatchedReadFileSyncResult {
 	for (const fallbackPath of context.fallbackPaths) {
 		if (!fs.existsSync(fallbackPath)) continue;
-		if (options === undefined) return context.readFileSync(fallbackPath);
-		return context.readFileSync(fallbackPath, options);
+		return readFileWithOptions(context.readFileSync, fallbackPath, options);
 	}
 	throw originalError;
 }
@@ -82,7 +91,7 @@ function readPhotonWasm(
 	options: PatchedReadFileSyncOptions | undefined,
 ): PatchedReadFileSyncResult {
 	try {
-		return context.readFileSync(file, options);
+		return readFileWithOptions(context.readFileSync, file, options);
 	} catch (error) {
 		const err = error as NodeJS.ErrnoException;
 		if (err?.code && err.code !== "ENOENT") throw error;
@@ -103,7 +112,7 @@ function patchPhotonWasmRead(): () => void {
 		options?: PatchedReadFileSyncOptions,
 	) => {
 		const resolvedPath = pathOrNull(file);
-		if (!resolvedPath?.endsWith(WASM_FILENAME)) return originalReadFileSync(file, options);
+		if (!resolvedPath?.endsWith(WASM_FILENAME)) return readFileWithOptions(originalReadFileSync, file, options);
 		return readPhotonWasm(context, file, options);
 	}) as ReadFileSync;
 

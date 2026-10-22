@@ -42,7 +42,7 @@ describe("version checks", () => {
 		await expect(checkForNewGripVersion("1.2.2")).resolves.toEqual({ version: "1.2.3" });
 	});
 
-	it("uses the npm package metadata api with a grip user agent", async () => {
+	it("uses the npm package metadata API with a Grip user agent", async () => {
 		const fetchMock = vi.fn(async () => Response.json({ "dist-tags": { latest: "1.2.4" } }));
 		vi.stubGlobal("fetch", fetchMock);
 

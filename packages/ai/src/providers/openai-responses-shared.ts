@@ -70,7 +70,15 @@ function parseTextSignature(signature: string | undefined): ParsedTextSignature 
 	return { id: signature };
 }
 
-export type OpenAIResponseServiceTier = "auto" | "default" | "flex" | "scale" | "priority" | null;
+export type OpenAIResponseServiceTier =
+	| "auto"
+	| "default"
+	| "flex"
+	| "scale"
+	| "priority"
+	| "fast"
+	| "ultrafast"
+	| null;
 
 export interface OpenAIResponsesStreamOptions {
 	serviceTier?: OpenAIResponseServiceTier;

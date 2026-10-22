@@ -112,7 +112,7 @@ afterEach(async () => {
 	);
 });
 
-describe.sequential("grip --daemon CLI and lifecycle", () => {
+describe("grip --daemon CLI and lifecycle", () => {
 	it("dispatches before normal Grip initialization", async () => {
 		const runner = vi.fn(async () => undefined);
 		const setupStdio = vi.spyOn(GripAgent, "setupStdio");

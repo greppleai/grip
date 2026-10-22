@@ -14,7 +14,7 @@ const outputLockfilePath = join(outputDir, "package-lock.json");
 const internalPackagePrefix = "@greppleai/grip";
 const installPackageName = "@greppleai/grip-install";
 const allowedInstallScriptPackages = new Map([
-	["@google/genai@1.52.0", "preinstall is a no-op in the published package"],
+	["@google/genai@2.30.0", "preinstall is a no-op in the published package"],
 	["protobufjs@7.6.5", "postinstall only warns about protobufjs version scheme mismatches"],
 ]);
 

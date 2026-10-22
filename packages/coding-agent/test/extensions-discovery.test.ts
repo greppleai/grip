@@ -74,7 +74,7 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].path).toContain("index.ts");
 	});
 
-	it("discovers subdirectory with index.ts", async () => {
+	it("resolves the index.ts entry path in a subdirectory", async () => {
 		const subdir = path.join(extensionsDir, "my-extension");
 		fs.mkdirSync(subdir);
 		fs.writeFileSync(path.join(subdir, "index.ts"), extensionCode);

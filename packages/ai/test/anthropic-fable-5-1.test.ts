@@ -10,9 +10,10 @@ import type { Context, ThinkingLevel } from "../src/types.ts";
 const model = getModel("anthropic", "claude-fable-5-1");
 const context: Context = { messages: [{ role: "user", content: "Hello", timestamp: 0 }] };
 const bindingBeta = "thinking-binding-controls-2026-08-01";
+type LegacyTemperature = { temperature?: number };
 
 function mockTransport() {
-	const requests: { body: MessageCreateParamsStreaming; headers: Headers }[] = [];
+	const requests: { body: MessageCreateParamsStreaming & LegacyTemperature; headers: Headers }[] = [];
 	const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
 		requests.push({
 			body: JSON.parse(String(init?.body)) as MessageCreateParamsStreaming,

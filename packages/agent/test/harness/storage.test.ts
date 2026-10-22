@@ -253,7 +253,7 @@ describe("JsonlSessionStorage", () => {
 			parentId: "user-1",
 			message: createAssistantMessage("two"),
 		});
-		expect((await JsonlSessionStorage.open(env, filePath)).getEntries()).resolves.toHaveLength(2);
+		await expect((await JsonlSessionStorage.open(env, filePath)).getEntries()).resolves.toHaveLength(2);
 	});
 
 	it("continues the append queue after a definitely-not-written failure", async () => {
@@ -292,7 +292,7 @@ describe("JsonlSessionStorage", () => {
 			outcome: "not_written",
 		});
 		await expect(storage.appendEntry(entry)).resolves.toBeUndefined();
-		expect((await JsonlSessionStorage.open(env, filePath)).getEntries()).resolves.toHaveLength(1);
+		await expect((await JsonlSessionStorage.open(env, filePath)).getEntries()).resolves.toHaveLength(1);
 	});
 
 	it("repairs only an unterminated final syntax or UTF-8 fragment", async () => {

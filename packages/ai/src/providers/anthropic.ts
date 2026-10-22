@@ -1037,7 +1037,7 @@ function applyAnthropicTemperature(
 	compat: Required<AnthropicMessagesCompat>,
 ): void {
 	if (options?.temperature !== undefined && !options.thinkingEnabled && compat.supportsTemperature) {
-		params.temperature = options.temperature;
+		(params as MessageCreateParamsStreaming & { temperature?: number }).temperature = options.temperature;
 	}
 }
 

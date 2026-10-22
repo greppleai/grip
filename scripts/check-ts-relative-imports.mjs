@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import ts from "typescript";
+import ts from "typescript-ast";
 
 const ignoredDirectories = new Set([".git", "coverage", "dist", "node_modules"]);
 const files = [];

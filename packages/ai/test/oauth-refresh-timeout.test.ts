@@ -34,7 +34,7 @@ function createStalledProvider(id: string, onStart?: (signal: AbortSignal) => vo
 	};
 }
 
-describe.sequential("OAuth refresh bounds", () => {
+describe("OAuth refresh bounds", () => {
 	const providerIds: string[] = [];
 
 	afterEach(() => {

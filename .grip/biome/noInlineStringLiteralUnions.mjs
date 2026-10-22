@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import ts from "typescript-ast";
 
 const RULE_NAME = "noInlineStringLiteralUnions";
 const SOURCE_DIRECTORY_NAMES = new Set(["src", "test"]);

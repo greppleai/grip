@@ -14,7 +14,7 @@ function completeCallback(code: string): Promise<number | undefined> {
 	});
 }
 
-describe.sequential("OpenRouter browser sign-in", () => {
+describe("OpenRouter browser sign-in", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
 	it("registers browser sign-in as a durable key without refresh tokens", () => {
