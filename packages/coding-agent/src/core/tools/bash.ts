@@ -1,7 +1,7 @@
 import type { AgentTool, AgentToolResult } from "@greppleai/grip-agent-core";
 import { Container, Text, truncateToWidth } from "@greppleai/grip-tui";
 import { type Static, Type } from "typebox";
-import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
+import { keyText } from "../../modes/interactive/components/keybinding-hints.ts";
 import { truncateToVisualLines } from "../../modes/interactive/components/visual-truncate.ts";
 import { theme } from "../../modes/interactive/theme/theme.ts";
 import { getShellEnv } from "../../utils/shell.ts";
@@ -178,12 +178,6 @@ function addBashOutput(
 				state.cachedSkipped = preview.skippedCount;
 				state.cachedWidth = width;
 			}
-			if (state.cachedSkipped && state.cachedSkipped > 0) {
-				const hint =
-					theme.fg("muted", `... (${state.cachedSkipped} earlier lines,`) +
-					` ${keyHint("app.tools.expand", "to expand")})`;
-				return ["", truncateToWidth(hint, width, "..."), ...(state.cachedLines ?? [])];
-			}
 			return ["", ...(state.cachedLines ?? [])];
 		},
 		invalidate: () => {
@@ -229,16 +223,30 @@ function rebuildBashResultRenderComponent(
 	const output = getBashDisplayOutput(result, showImages, options.isPartial);
 	addBashOutput(component, state, output, options);
 	addBashOutputWarnings(component, result.details?.truncation, result.details?.fullOutputPath);
-	if (startedAt === undefined) return;
-	const label = options.isPartial ? "Elapsed" : "Took";
-	const endTime = endedAt ?? Date.now();
-	component.addChild(
-		new Text(
-			`\n${theme.fg(options.isPartial ? "muted" : isError ? "error" : "success", `${label} ${formatDuration(endTime - startedAt)}`)}${formatBackendSuffix(backendInfo)}`,
-			0,
-			0,
-		),
-	);
+	if (startedAt !== undefined) {
+		const label = options.isPartial ? "Elapsed" : "Took";
+		const endTime = endedAt ?? Date.now();
+		component.addChild(
+			new Text(
+				`\n${theme.fg(options.isPartial ? "muted" : isError ? "error" : "success", `${label} ${formatDuration(endTime - startedAt)}`)}${formatBackendSuffix(backendInfo)}`,
+				0,
+				0,
+			),
+		);
+	}
+	if (!options.expanded && output) {
+		component.addChild({
+			render: (width) => {
+				if (!state.cachedSkipped || width < 1) return [];
+				const expandKey = keyText("app.tools.expand");
+				const hint =
+					theme.fg("warning", `${state.cachedSkipped} lines hidden`) +
+					(expandKey ? theme.fg("accent", ` · ${expandKey} to expand`) : "");
+				return ["", truncateToWidth(hint, width, "...")];
+			},
+			invalidate: () => {},
+		});
+	}
 }
 
 function appendBashStatus(text: string, status: string): string {

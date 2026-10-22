@@ -1,9 +1,10 @@
 import { join, resolve } from "node:path";
-import { Text, type TUI, visibleWidth } from "@greppleai/grip-tui";
+import { getKeybindings, setKeybindings, Text, type TUI, visibleWidth } from "@greppleai/grip-tui";
 import { Type } from "typebox";
 import { beforeAll, describe, expect, test } from "vitest";
 import { getReadmePath } from "../src/config.ts";
 import type { ToolDefinition } from "../src/core/extensions/types.ts";
+import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { createBashToolDefinition } from "../src/core/tools/bash.ts";
 import { LocalToolOperations } from "../src/core/tools/operations.ts";
 import { createReadTool, createReadToolDefinition } from "../src/core/tools/read.ts";
@@ -210,6 +211,60 @@ describe("ToolExecutionComponent parity", () => {
 
 		component.updateResult({ content: [{ type: "text", text: "failed" }], details: undefined, isError: true }, false);
 		expect(component.render(120).join("\n")).toContain(`${theme.getFgAnsi("error")}Took `);
+	});
+
+	test("puts a highlighted hidden-line count after collapsed bash output and status", () => {
+		const operations = new LocalToolOperations(process.cwd());
+		const component = new ToolExecutionComponent(
+			"bash",
+			"tool-bash-preview",
+			{ command: "produce lines" },
+			{},
+			createBashToolDefinition(operations),
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.markExecutionStarted();
+		const output = Array.from({ length: 82 }, (_, index) => `entry-${index + 1}`).join("\n");
+		component.updateResult({ content: [{ type: "text", text: output }], details: undefined, isError: false }, false);
+
+		const previousKeybindings = getKeybindings();
+		setKeybindings(new KeybindingsManager());
+		try {
+			const lines = component.render(120);
+			const collapsed = stripAnsi(lines.join("\n"));
+			expect(collapsed).not.toContain("entry-77");
+			expect(collapsed).toContain("entry-82");
+			expect(collapsed).toContain("77 lines hidden · ctrl+o to expand");
+			expect(collapsed.indexOf("entry-82")).toBeLessThan(collapsed.indexOf("77 lines hidden"));
+			expect(collapsed.indexOf("Took ")).toBeLessThan(collapsed.indexOf("77 lines hidden"));
+			const hintLine = lines.find((line) => line.includes("77 lines hidden"));
+			expect(hintLine).toContain(theme.fg("warning", "77 lines hidden"));
+			expect(hintLine).toContain(theme.fg("accent", " · ctrl+o to expand"));
+			expect(lines.findIndex((line) => line.includes("77 lines hidden"))).toBe(lines.length - 2);
+			expect(lines.every((line) => visibleWidth(line) <= 120)).toBe(true);
+
+			component.setExpanded(true);
+			const expanded = stripAnsi(component.render(120).join("\n"));
+			expect(expanded).toContain("entry-1");
+			expect(expanded).not.toContain("lines hidden");
+		} finally {
+			setKeybindings(previousKeybindings);
+		}
+	});
+
+	test("does not show the bash expansion hint when all output is visible", () => {
+		const component = new ToolExecutionComponent(
+			"bash",
+			"tool-bash-short",
+			{ command: "echo short" },
+			{},
+			createBashToolDefinition(new LocalToolOperations(process.cwd())),
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult({ content: [{ type: "text", text: "short" }], isError: false }, false);
+		expect(stripAnsi(component.render(120).join("\n"))).not.toContain("lines hidden");
 	});
 
 	test("bash renderer does not duplicate final full output truncation details", async () => {
