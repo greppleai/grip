@@ -19,6 +19,8 @@ irm https://raw.githubusercontent.com/greppleai/grip/main/install.ps1 | iex
 
 The installers verify the release's SHA-256 before replacing `grip` in `~/.local/bin` (Windows: `%LOCALAPPDATA%\Programs\Grip\bin`). They add the directory to future shells' PATH when needed. To pin a version, set `GRIP_VERSION=vX.Y.Z` before installing; rerun the installer to update. These URLs will not work until the scripts are merged and a release publishes its binary assets.
 
+For Node-based extension and SDK development, the same release also publishes `@greppleai/grip`, `@greppleai/grip-ai`, `@greppleai/grip-agent-core`, and `@greppleai/grip-tui` to npm. Install the CLI with `npm install -g @greppleai/grip` if you prefer a Node installation; the binary installer does not require npm.
+
 ## Use
 
 ```bash
@@ -54,7 +56,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance and [AGENTS.md]
 ## Security and releases
 
 - Dependency changes and generated lockfiles are reviewed; `package-lock.json` is the build dependency ground truth.
-- Binary release assets and SHA-256 checksums are built from tags; no npm publishing is triggered by the release workflows.
+- Release Please publishes checksummed binaries to GitHub Releases and the four core packages to npm at the same version. npm publication runs after binary verification using GitHub OIDC. Before releasing, configure `greppleai/grip` and `release-please.yml` as a trusted publisher **with `npm publish` permission** for each package in npm settings; new configurations expire unless validated by a successful publish within two days. No npm token is required. npm versions are immutable, so a partial publication requires manual inspection before retrying.
 - The executable embeds its resources and extracts native/WASM and documentation files to a private temporary directory at runtime; user configuration stays in its usual location. A crash or an OS lock on a loaded native add-on may leave disposable temporary data behind.
 - `grip update --self` cannot replace a compiled binary; rerun the verified installer to update it.
 

@@ -4,7 +4,7 @@ This page gets you from install to a useful first Grip session.
 
 ## Install
 
-Install the single compiled binary from a published [Grip GitHub release](https://github.com/greppleai/grip/releases) (no global npm package):
+Install the single compiled binary from a published [Grip GitHub release](https://github.com/greppleai/grip/releases) (no npm required):
 
 ```bash
 # macOS/Linux; inspect the script before running
@@ -18,9 +18,11 @@ irm https://raw.githubusercontent.com/greppleai/grip/main/install.ps1 | iex
 
 The installers download a platform-specific executable and verify its published SHA-256 before placing it in your user PATH. Linux binaries target glibc (not Alpine/musl); macOS and Windows native functionality still requires platform validation. Set `GRIP_VERSION=vX.Y.Z` to pin a release or `GRIP_INSTALL_DIR` to select a destination; rerun to update. Open a new shell and confirm that `command -v grip` (PowerShell: `Get-Command grip.exe`) resolves to the installed binary; an older npm executable earlier in PATH can shadow it, and is never removed automatically. The scripts and release assets must be published first. A compiled binary may extract embedded resources into a private temporary directory at runtime, without installing Node or Bun.
 
+Alternatively, install `@greppleai/grip` with `npm install -g @greppleai/grip` when you need a Node installation. Each release also publishes `@greppleai/grip-ai`, `@greppleai/grip-agent-core`, and `@greppleai/grip-tui` for extension and SDK development.
+
 ### Uninstall
 
-Delete `~/.local/bin/grip` on macOS/Linux, or `%LOCALAPPDATA%\Programs\Grip\bin\grip.exe` on Windows (or the path set with `GRIP_INSTALL_DIR`). Remove the optional PATH entry from your shell profile or Windows user PATH if you no longer need it. Uninstalling Grip leaves settings, credentials, sessions, and installed Grip packages in `~/.grip/agent/`. For migrating an older Pi installation, see [Migrating to Grip](migrating-to-grip.md). The old Pi installer is not a Grip installation method.
+For the binary installer, delete `~/.local/bin/grip` on macOS/Linux, or `%LOCALAPPDATA%\Programs\Grip\bin\grip.exe` on Windows (or the path set with `GRIP_INSTALL_DIR`). Remove the optional PATH entry from your shell profile or Windows user PATH if you no longer need it. For an npm installation, run `npm uninstall -g @greppleai/grip` instead. Uninstalling Grip leaves settings, credentials, sessions, and installed Grip packages in `~/.grip/agent/`. For migrating an older Pi installation, see [Migrating to Grip](migrating-to-grip.md). The old Pi installer is not a Grip installation method.
 
 Then start Grip in the project directory you want it to work on:
 

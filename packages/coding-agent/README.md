@@ -71,6 +71,8 @@ irm https://raw.githubusercontent.com/greppleai/grip/main/install.ps1 | iex
 
 These URLs become active only after the scripts and release assets are published. Rerun the installer to update; set `GRIP_VERSION=vX.Y.Z` to pin a release. The old `https://pi.dev/install.sh` installs upstream Pi, **not** Grip. See [manual migration](docs/migrating-to-grip.md) when replacing an existing Pi installation.
 
+For extension or SDK development with Node.js, npm releases also include `@greppleai/grip`, `@greppleai/grip-ai`, `@greppleai/grip-agent-core`, and `@greppleai/grip-tui`. Install the CLI with `npm install -g @greppleai/grip` if you prefer npm over the standalone binary.
+
 Authenticate with an API key:
 
 ```bash
