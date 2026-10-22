@@ -2,6 +2,23 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.1.3](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.2...@greppleai/grip-v0.1.3) (2026-10-22)
+
+
+### Bug Fixes
+
+* **coding-agent:** retain submitted commands in editor history ([d5f7105](https://github.com/greppleai/grip/commit/d5f71056c57c77b3d6460dfa6e6d472db148df29))
+* **coding-agent:** stripe compaction and final assistant messages ([d3a307d](https://github.com/greppleai/grip/commit/d3a307dac9ed56a9e07a8e0061b592892d204296))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.1.2 to ^0.1.3
+    * @greppleai/grip-ai bumped from ^0.1.2 to ^0.1.3
+    * @greppleai/grip-tui bumped from ^0.1.2 to ^0.1.3
+
 ## [0.1.2](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.1...@greppleai/grip-v0.1.2) (2026-10-22)
 
 
