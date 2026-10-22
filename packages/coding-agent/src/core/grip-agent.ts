@@ -12,12 +12,13 @@ import {
 } from "@greppleai/grip-ai";
 import type { TuiMode } from "@greppleai/grip-tui";
 import chalk from "chalk";
-import { getAgentDir } from "../config.ts";
+import { getAgentDir, VERSION } from "../config.ts";
 import { InteractiveMode } from "../modes/interactive/interactive-mode.ts";
 import { stopThemeWatcher } from "../modes/interactive/theme/theme.ts";
 import { runPrintMode } from "../modes/print-mode.ts";
 import { runRpcMode } from "../modes/rpc/rpc-mode.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
+import { getGripUserAgent } from "../utils/grip-user-agent.ts";
 import { AgentSession, getDefaultActiveToolNames } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
@@ -415,7 +416,8 @@ function getAttributionHeaders(
 
 	if (model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai")) {
 		return {
-			"HTTP-Referer": "https://pi.dev",
+			"HTTP-Referer": "https://github.com/greppleai/grip",
+			"User-Agent": getGripUserAgent(VERSION),
 			"X-OpenRouter-Title": "grip",
 			"X-OpenRouter-Categories": "cli-agent",
 		};

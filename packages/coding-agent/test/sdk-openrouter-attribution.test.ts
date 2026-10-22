@@ -169,7 +169,8 @@ describe("GripAgent OpenRouter attribution headers", () => {
 	it("adds default attribution headers for OpenRouter models", async () => {
 		const headers = await captureHeaders(createModel("openrouter", "https://openrouter.ai/api/v1"));
 
-		expect(headers?.["HTTP-Referer"]).toBe("https://pi.dev");
+		expect(headers?.["HTTP-Referer"]).toBe("https://github.com/greppleai/grip");
+		expect(headers?.["User-Agent"]).toMatch(/^grip\//);
 		expect(headers?.["X-OpenRouter-Title"]).toBe("grip");
 		expect(headers?.["X-OpenRouter-Categories"]).toBe("cli-agent");
 	});
@@ -180,6 +181,7 @@ describe("GripAgent OpenRouter attribution headers", () => {
 		});
 
 		expect(headers?.["HTTP-Referer"]).toBeUndefined();
+		expect(headers?.["User-Agent"]).toBeUndefined();
 		expect(headers?.["X-OpenRouter-Title"]).toBeUndefined();
 		expect(headers?.["X-OpenRouter-Categories"]).toBeUndefined();
 	});
@@ -187,7 +189,7 @@ describe("GripAgent OpenRouter attribution headers", () => {
 	it("adds attribution headers for custom providers routed through OpenRouter", async () => {
 		const headers = await captureHeaders(createModel("custom-openrouter", "https://openrouter.ai/api/v1"));
 
-		expect(headers?.["HTTP-Referer"]).toBe("https://pi.dev");
+		expect(headers?.["HTTP-Referer"]).toBe("https://github.com/greppleai/grip");
 		expect(headers?.["X-OpenRouter-Title"]).toBe("grip");
 		expect(headers?.["X-OpenRouter-Categories"]).toBe("cli-agent");
 	});
@@ -196,6 +198,7 @@ describe("GripAgent OpenRouter attribution headers", () => {
 		const headers = await captureHeaders(createModel("openrouter", "https://openrouter.ai/api/v1"), {
 			providerHeaders: {
 				"HTTP-Referer": "https://provider.example",
+				"User-Agent": "custom-agent",
 				"X-OpenRouter-Categories": "provider-category",
 			},
 			requestHeaders: {
@@ -204,6 +207,7 @@ describe("GripAgent OpenRouter attribution headers", () => {
 		});
 
 		expect(headers?.["HTTP-Referer"]).toBe("https://provider.example");
+		expect(headers?.["User-Agent"]).toBe("custom-agent");
 		expect(headers?.["X-OpenRouter-Title"]).toBe("request-title");
 		expect(headers?.["X-OpenRouter-Categories"]).toBe("provider-category");
 	});
@@ -229,7 +233,7 @@ describe("GripAgent OpenRouter attribution headers", () => {
 		});
 
 		expect(observed).toMatchObject({
-			"HTTP-Referer": "https://pi.dev",
+			"HTTP-Referer": "https://github.com/greppleai/grip",
 			"X-OpenRouter-Title": "request-title",
 			"x-model": "model",
 			"x-provider": "provider",
