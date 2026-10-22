@@ -21,7 +21,7 @@ try {
   assert.match(version.stdout, /\d+\.\d+\.\d+/);
   const help = spawnSync(binary, ["--help"], { cwd: root, encoding: "utf8" });
   assert.equal(help.status, 0, help.stderr);
-  assert.match(`${help.stdout}${help.stderr}`, /--shared-broker/);
+  assert.match(`${help.stdout}${help.stderr}`, /--daemon\b/);
   const exportPath = join(root, "session.html");
   const exported = spawnSync(binary, ["--export", fixture, exportPath], { cwd: root, encoding: "utf8" });
   assert.equal(exported.status, 0, exported.stderr);
