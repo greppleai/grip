@@ -42,7 +42,7 @@ describe("version checks", () => {
 		await expect(checkForNewGripVersion("1.2.2")).resolves.toEqual({ version: "1.2.3" });
 	});
 
-	it("uses the npm package metadata api with a pi user agent", async () => {
+	it("uses the npm package metadata api with a grip user agent", async () => {
 		const fetchMock = vi.fn(async () => Response.json({ "dist-tags": { latest: "1.2.4" } }));
 		vi.stubGlobal("fetch", fetchMock);
 
@@ -51,7 +51,7 @@ describe("version checks", () => {
 			`https://registry.npmjs.org/${PACKAGE_NAME.replace("/", "%2f")}`,
 			expect.objectContaining({
 				headers: expect.objectContaining({
-					"User-Agent": expect.stringMatching(/^pi\/1\.2\.3 /),
+					"User-Agent": expect.stringMatching(/^grip\/1\.2\.3 /),
 					accept: "application/json",
 				}),
 			}),

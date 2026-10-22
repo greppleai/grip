@@ -10,6 +10,8 @@ export default defineConfig({
 	test: {
 		globals: true,
 		environment: "node",
+		// Source tests must not use assets inherited from a running Grip binary.
+		env: { GRIP_EMBEDDED_ASSET_DIR: "" },
 		testTimeout: 30000,
 		reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
 		silent: "passed-only",

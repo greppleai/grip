@@ -859,12 +859,16 @@ export class InteractiveMode {
 					label: choice,
 				}));
 			};
+		const commandsByName = new Map<string, SlashCommand>();
+		for (const command of slashCommands) {
+			if (!commandsByName.has(command.name)) commandsByName.set(command.name, command);
+		}
 		for (const [name, hint, choices] of [
 			["hooks", "<enable|disable>", ["enable", "disable"]],
 			["context-compression", "[on|off]", ["on", "off"]],
 			["compress-detection", "[on|off]", ["on", "off"]],
 		] as const) {
-			const command = slashCommands.find((candidate) => candidate.name === name);
+			const command = commandsByName.get(name);
 			if (command) {
 				command.argumentHint = hint;
 				command.getArgumentCompletions = choiceCompletions(choices);

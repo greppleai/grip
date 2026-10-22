@@ -18,6 +18,7 @@ packages/*/dist-firefox/
 .idea/
 .claude/
 .grepple/
+.planner/
 *.swp
 *.swo
 *~

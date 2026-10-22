@@ -95,7 +95,7 @@ Then just talk to Grip. By default, Grip gives the model file and shell tools. E
 
 ## Providers & Models
 
-For each built-in provider, Grip maintains a list of tool-capable models, updated with every release. Authenticate via subscription (`/login`) or API key, then select any model from that provider via `/model` (or Ctrl+L).
+For each built-in provider, Grip maintains a list of tool-capable models, updated with every release. Authenticate via subscription (`/login`) or API key, then open `/model` (or Ctrl+L) to choose a provider and model. The provider screen always appears, even with only one provider. See [model selection and extension migration](docs/usage.md#model-selection) for navigation, scoped/all switching, and direct or cross-provider search.
 
 **Subscriptions:**
 - Anthropic Claude Pro/Max
