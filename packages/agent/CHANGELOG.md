@@ -2,6 +2,20 @@
 
 All notable changes to `@greppleai/grip-agent-core` are documented in this file.
 
+## [0.1.3](https://github.com/greppleai/grip/compare/@greppleai/grip-agent-core-v0.1.2...@greppleai/grip-agent-core-v0.1.3) (2026-10-22)
+
+
+### Miscellaneous Chores
+
+* **@greppleai/grip-agent-core:** Synchronize grip versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-ai bumped from ^0.1.2 to ^0.1.3
+
 ## [0.1.2](https://github.com/greppleai/grip/compare/@greppleai/grip-agent-core-v0.1.1...@greppleai/grip-agent-core-v0.1.2) (2026-10-22)
 
 
