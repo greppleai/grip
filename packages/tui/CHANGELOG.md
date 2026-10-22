@@ -2,6 +2,13 @@
 
 All notable changes to `@greppleai/grip-tui` are documented in this file.
 
+## [0.1.5](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.1.4...@greppleai/grip-tui-v0.1.5) (2026-10-22)
+
+
+### Features
+
+* show selectable slash command arguments ([cdef6dd](https://github.com/greppleai/grip/commit/cdef6ddd00313fd871f86e13111e9673edd42848))
+
 ## [0.1.4](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.1.3...@greppleai/grip-tui-v0.1.4) (2026-10-22)
 
 

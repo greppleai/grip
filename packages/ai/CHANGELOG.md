@@ -2,6 +2,14 @@
 
 All notable changes to `@greppleai/grip-ai` are documented in this file.
 
+## [0.1.5](https://github.com/greppleai/grip/compare/@greppleai/grip-ai-v0.1.4...@greppleai/grip-ai-v0.1.5) (2026-10-22)
+
+
+### Features
+
+* add OpenRouter browser sign-in with PKCE ([a7ce0f3](https://github.com/greppleai/grip/commit/a7ce0f33357253f6b08981a81408747bced6f267))
+* send session ID header with LLM requests ([a127b1a](https://github.com/greppleai/grip/commit/a127b1af741fb0b8e591f741b418f1c704b9b51f))
+
 ## [0.1.4](https://github.com/greppleai/grip/compare/@greppleai/grip-ai-v0.1.3...@greppleai/grip-ai-v0.1.4) (2026-10-22)
 
 
