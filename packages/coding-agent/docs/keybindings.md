@@ -140,11 +140,13 @@ This routing remains configurable through the ordinary action bindings. For exam
 
 | Keybinding id | Default | Description |
 |--------|---------|-------------|
-| `app.model.select` | `ctrl+l` | Open model selector |
+| `app.model.select` | `ctrl+l` | Open provider-first model selector |
 | `app.model.cycleForward` | `ctrl+p` | Cycle to next model |
 | `app.model.cycleBackward` | `shift+ctrl+p` | Cycle to previous model |
 | `app.thinking.cycle` | `shift+tab` | Cycle thinking level |
 | `app.thinking.toggle` | `ctrl+t` | Collapse or expand thinking blocks |
+
+The model selector uses `tui.select.up` / `down`, `tui.select.pageUp` / `pageDown`, `tui.select.confirm`, and `tui.select.cancel`. `tui.input.tab` switches scoped/all models when a scope exists. Its hints follow these bindings. See [Model Selection](usage.md#model-selection) for navigation and restoring `app.model.select` after disabling a picker extension.
 
 ### Display and Message Queue
 

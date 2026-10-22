@@ -37,7 +37,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | Command | Description |
 |---------|-------------|
 | `/login`, `/logout` | Manage OAuth or API-key credentials |
-| `/model` | Switch models |
+| `/model [reference or query]` | Choose a provider and model, select an exact reference, or search across providers |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
@@ -60,6 +60,42 @@ Type `/` in the editor to open command completion. Extensions can register custo
 `/hooks disable` immediately prevents subsequent hook events in the current session; a hook execution already in progress is allowed to finish. `/hooks enable` resumes dispatch. Skipped events are not replayed, and a newly created or resumed session starts with hooks enabled. `/reload` preserves this enabled/disabled state while refreshing file-backed hook configuration.
 
 `/hooks` and `/sandbox` are user-only interactive commands hidden from model-visible command catalogs. `/sandbox` shows or clears the current backend, attaches a sandbox daemon, and manages local Docker sandbox containers; see [Workspace Sandbox](sandbox.md).
+
+## Model Selection
+
+Open `/model` or use `app.model.select` (Ctrl+L by default). The native picker **always starts with providers**, even when only one provider is available; it never skips straight to models.
+
+- Type to filter providers by display name or ID. Each row shows its ID, model count in the active scope, and a check mark for the current provider.
+- Use Up/Down or PageUp/PageDown to navigate. Enter opens the highlighted provider without changing the model or saved default.
+- In a provider, type to filter models by ID or readable name. Rows identify the provider, the current model has a check mark, and the highlighted model's readable name appears below the list. Enter selects the model and saves the primary model default.
+- Escape from models returns to providers and restores the previous provider filter and highlight. Reentering a provider starts with an empty model filter. Escape at the provider screen cancels without changing the model or default.
+- A nonempty filter edit selects the best match. Clearing a filter retains the selection's position where possible. Confirming an empty result does nothing.
+
+These are the default keys; selector hints follow your [keybindings](keybindings.md), including confirmation and cancellation.
+
+### Scoped and All Models
+
+If a model scope exists (configured with `/scoped-models`, `enabledModels`, or `--models`), the picker starts in **scoped** mode. Tab switches between scoped and all available models. Provider counts and membership reflect the active mode; a provider with no scoped models is absent until you switch to all.
+
+Switching scope in provider-first navigation returns to the provider screen and clears the filter. Models within a provider retain configured scoped order. In all mode, the current model comes first, followed by provider/model ID order. Providers are sorted by display name and ID. This is deterministic ordering, not newest-release ordering. Opening the picker refreshes the registry, including `models.json`; availability reflects configured authentication, not a live credential check.
+
+Model cycling (Ctrl+P / Shift+Ctrl+P) and `/scoped-models` configuration are unchanged. Choosing a model from all mode does not add it to your scope.
+
+### Direct References and Cross-provider Search
+
+- `/model provider/model-id` selects an exact available reference directly, without opening the picker. Exact matching respects the active model scope when one exists.
+- If the argument does not match an exact reference, `/model <query>` opens a model search across providers in the active scope. For example, `/model son` can find matching Sonnet models from multiple providers. Use Tab to include all available models when scoped mode is active.
+- In this cross-provider search, Tab keeps the query and search view; Escape cancels directly rather than opening providers. Clearing the query keeps the cross-provider model list. Bare `/model` always uses the provider-first flow.
+
+The `/compress-detection-model` picker uses the same provider-first navigation, but choosing a detector changes only its configuration, not the primary session model or primary default.
+
+### Migrating from provider-model-picker
+
+The native flow needs no extension, `/pm` command, or additional shortcut. Grip does not automatically disable your extension or rewrite personal configuration.
+
+1. Disable **every load source** for `provider-model-picker`. Use `grip config` to disable its resource in the applicable global or project scope, including auto-discovered local extensions. Remove any explicit `-e` / `--extension` launch argument or configured extension entry that still loads it. For a package, disable only the picker resource if you need its other resources; see [package filtering](packages.md#package-filtering). Removing an explicit entry alone is insufficient if the same extension is also auto-discovered.
+2. In `~/.grip/agent/keybindings.json`, check whether `app.model.select` was unbound with `[]`. Remove that override to inherit Ctrl+L, or merge `"app.model.select": "ctrl+l"` (or your preferred key) into the existing object. Keep unrelated bindings. Review any old extension shortcut overrides before removing them; do not unbind unrelated tree actions to free this key.
+3. Run `/reload`, or restart if you changed launch arguments. Verify `/model` and your configured model-selection shortcut both open Providers. `/pm` was extension-provided and is not a native command; use `/model` instead.
 
 ## Message Queue
 

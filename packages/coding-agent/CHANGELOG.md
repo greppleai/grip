@@ -129,6 +129,7 @@ All notable changes to Grip are documented in this file.
 - Removed full-width backgrounds and trailing padding from hook, compaction, branch, skill, and default custom-message cards; their colored labels remain.
 - Removed the full-width user-message background and trailing padding while preserving message spacing and alt-screen navigation markers.
 - Colored bash command text with the accent color and elapsed time by execution state, leaving backend location details muted.
+- Made `/model` and the model-selection shortcut provider-first, even with one provider, with filtering, backtracking, and scoped/all navigation; exact references and cross-provider query search remain available without a picker extension.
 
 ### Fixed
 
