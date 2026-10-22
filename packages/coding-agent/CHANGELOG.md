@@ -2,6 +2,36 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.1.5](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.4...@greppleai/grip-v0.1.5) (2026-10-22)
+
+
+### Features
+
+* add OpenRouter browser sign-in with PKCE ([a7ce0f3](https://github.com/greppleai/grip/commit/a7ce0f33357253f6b08981a81408747bced6f267))
+* feat/provider-first-model-picker - add native picker ([8f48702](https://github.com/greppleai/grip/commit/8f487023b263acc2e326c74059dd052949104fac))
+* show selectable slash command arguments ([cdef6dd](https://github.com/greppleai/grip/commit/cdef6ddd00313fd871f86e13111e9673edd42848))
+
+
+### Bug Fixes
+
+* bootstrap existing Lima VMs and separate message borders ([d4efede](https://github.com/greppleai/grip/commit/d4efede291816e9d1e56552a9e6eb41f3dc2c3ee))
+* identify Grip in OpenRouter attribution headers ([5b4b7d8](https://github.com/greppleai/grip/commit/5b4b7d8dcab5b23c048097e13b56bf17ebbfa2e3))
+* pad completed assistant message borders ([1a080a9](https://github.com/greppleai/grip/commit/1a080a9443f6cb43c111aa5a0fc2fac47122ebec))
+
+
+### Performance Improvements
+
+* feat/provider-first-model-picker - index command lookups ([21d0f92](https://github.com/greppleai/grip/commit/21d0f927e2f945d3de51a5e8c32a7c0c5267b743))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.1.4 to ^0.1.5
+    * @greppleai/grip-ai bumped from ^0.1.4 to ^0.1.5
+    * @greppleai/grip-tui bumped from ^0.1.4 to ^0.1.5
+
 ## [0.1.4](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.3...@greppleai/grip-v0.1.4) (2026-10-22)
 
 
