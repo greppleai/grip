@@ -90,10 +90,12 @@ describe("issue #3217 scoped model ordering", () => {
 		);
 
 		await waitForAsyncRender();
+		expect(stripAnsi(selector.render(120).join("\n"))).toContain("Providers");
+		selector.handleInput("\r");
 
 		const renderedLines = stripAnsi(selector.render(120).join("\n"))
 			.split("\n")
-			.filter((line) => line.includes(`[${modelOne.provider}]`));
+			.filter((line) => /^(?:→ | {2})/.test(line) && line.includes(`[${modelOne.provider}]`));
 		const orderedIds = renderedLines.slice(0, 3).map((line) => {
 			const [modelId] = line.trim().replace(/^→\s*/, "").split(" [");
 			return modelId?.trim() ?? "";

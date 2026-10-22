@@ -55,8 +55,10 @@ describe("model selector filter resets selection to top", () => {
 		);
 
 		await vi.waitFor(() => {
-			expect(stripAnsi(selector.render(120).join("\n"))).toContain("beta-1");
+			expect(stripAnsi(selector.render(120).join("\n"))).toContain("faux [faux] (4 models)");
 		});
+		selector.handleInput("\r");
+		expect(stripAnsi(selector.render(120).join("\n"))).toContain("beta-1");
 		expect(selectedModelId(stripAnsi(selector.render(120).join("\n")))).toBe("alpha-1");
 
 		selector.handleInput("\x1b[B");
@@ -103,8 +105,10 @@ describe("model selector filter resets selection to top", () => {
 		);
 
 		await vi.waitFor(() => {
-			expect(stripAnsi(selector.render(120).join("\n"))).toContain("alpha-3");
+			expect(stripAnsi(selector.render(120).join("\n"))).toContain("faux [faux] (3 models)");
 		});
+		selector.handleInput("\r");
+		expect(stripAnsi(selector.render(120).join("\n"))).toContain("alpha-3");
 		expect(selectedModelId(stripAnsi(selector.render(120).join("\n")))).toBe("alpha-1");
 
 		for (const character of "alpha") selector.handleInput(character);

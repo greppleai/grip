@@ -810,11 +810,15 @@ describe("background compression detection", () => {
 			undefined,
 			false,
 		);
-		await vi.waitFor(() => expect(selector.render(120).join("")).toContain(model.id));
+		await vi.waitFor(() => expect(selector.render(120).join("")).toContain(`${model.provider}] (1 models)`));
+		selector.handleInput("\r");
+		expect(harness.settingsManager.getCompressionDetectionModel()).toBeUndefined();
+		expect(harness.session.model).toBe(model);
 		selector.handleInput("\r");
 		expect(harness.settingsManager.getCompressionDetectionModel()).toBe(`${model.provider}/${model.id}`);
 		expect(harness.settingsManager.getDefaultModel()).toBe("main");
 		expect(harness.settingsManager.getDefaultProvider()).toBe("primary");
+		expect(harness.session.model).toBe(model);
 	});
 	it("restores detector cost and suggested verdicts from a reopened JSONL session", async () => {
 		const harness = await createHarness();
