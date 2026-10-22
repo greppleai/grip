@@ -916,11 +916,43 @@ export class InteractiveMode {
 			}
 		}
 
-		return new CombinedAutocompleteProvider(
+		const base = new CombinedAutocompleteProvider(
 			[...slashCommands, ...templateCommands, ...extensionCommands, ...skillCommandList, ...ruleCommandList],
 			this.activeSession.getCwd(),
 			this.fdPath,
 		);
+		const provider: AutocompleteProvider = {
+			getSuggestions: async (lines, cursorLine, cursorCol, options) => {
+				const beforeCursor = (lines[cursorLine] ?? "").slice(0, cursorCol);
+				const nameMatch = beforeCursor.match(/^\/sandbox[ \t]+(start[ \t]+--name(?:[ \t]+([^\s]*))?)$/);
+				if (!options.force || !nameMatch) return base.getSuggestions(lines, cursorLine, cursorCol, options);
+				if (options.signal.aborted) return null;
+				try {
+					const instances = await this.createLimaSandboxService().list({
+						workspaceRoot: this.activeSession.getCwd(),
+						allWorkspaces: true,
+					});
+					if (options.signal.aborted) return null;
+					const prefix = nameMatch[2] ?? "";
+					const items = instances
+						.filter((instance) => /^[a-z0-9][a-z0-9-]*$/.test(instance.name) && instance.name.startsWith(prefix))
+						.map((instance) => ({
+							value: `start --name ${instance.name}`,
+							label: instance.name,
+							description: instance.status,
+						}));
+					return items.length > 0 ? { items, prefix: nameMatch[1]! } : null;
+				} catch {
+					// A failed Lima lookup must not fall back to directory suggestions.
+					return null;
+				}
+			},
+			applyCompletion: (lines, cursorLine, cursorCol, item, prefix) =>
+				base.applyCompletion(lines, cursorLine, cursorCol, item, prefix),
+			shouldTriggerFileCompletion: (lines, cursorLine, cursorCol) =>
+				base.shouldTriggerFileCompletion(lines, cursorLine, cursorCol),
+		};
+		return provider;
 	}
 
 	private setupAutocompleteProvider(): void {
