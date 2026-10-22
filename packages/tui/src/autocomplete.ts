@@ -288,6 +288,8 @@ export interface SlashCommand {
 	name: string;
 	description?: string;
 	argumentHint?: string;
+	/** Show the command itself after a trailing space when it takes no arguments. */
+	showWithoutArguments?: boolean;
 	// Function to get argument completions for this command
 	// Returns null if no argument completion is available
 	getArgumentCompletions?(argumentPrefix: string): Awaitable<AutocompleteItem[] | null>;
@@ -385,8 +387,9 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 			};
 		}
 
-		if (!options.force && textBeforeCursor.startsWith("/")) {
-			return await this.getSlashCommandSuggestions(textBeforeCursor);
+		if (textBeforeCursor.startsWith("/")) {
+			const commandSuggestions = await this.getSlashCommandSuggestions(textBeforeCursor);
+			if (commandSuggestions || !options.force) return commandSuggestions;
 		}
 
 		const pathMatch = this.extractPathPrefix(textBeforeCursor, options.force ?? false);
@@ -425,7 +428,14 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 			const name = "name" in candidate ? candidate.name : candidate.value;
 			return name === commandName;
 		});
-		if (!command || !("getArgumentCompletions" in command) || !command.getArgumentCompletions) {
+		if (!command) return null;
+		if (!("getArgumentCompletions" in command) || !command.getArgumentCompletions) {
+			if ("showWithoutArguments" in command && command.showWithoutArguments && !argumentText.trim()) {
+				return {
+					items: [{ value: commandName, label: `/${commandName}`, description: command.description }],
+					prefix: textBeforeCursor,
+				};
+			}
 			return null;
 		}
 
@@ -457,14 +467,15 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 		// Slash commands are at the start of the line and don't contain path separators after the first /.
 		if (isSlashCommandCompletion(prefix, beforePrefix)) {
 			// This is a command name completion
-			const newLine = `${beforePrefix}/${item.value} ${adjustedAfterCursor}`;
+			const suffix = prefix.includes(" ") ? "" : " ";
+			const newLine = `${beforePrefix}/${item.value}${suffix}${adjustedAfterCursor}`;
 			const newLines = [...lines];
 			newLines[cursorLine] = newLine;
 
 			return {
 				lines: newLines,
 				cursorLine,
-				cursorCol: beforePrefix.length + item.value.length + 2, // +2 for "/" and space
+				cursorCol: beforePrefix.length + item.value.length + 1 + suffix.length,
 			};
 		}
 

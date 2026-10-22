@@ -29,6 +29,9 @@ function createProvider(list: () => Promise<SandboxNameFixture[]>) {
 async function suggestionsFor(provider: AutocompleteProvider, text: string) {
 	return provider.getSuggestions([text], 0, text.length, { signal: new AbortController().signal, force: true });
 }
+async function automaticSuggestions(provider: AutocompleteProvider, text: string) {
+	return provider.getSuggestions([text], 0, text.length, { signal: new AbortController().signal, force: false });
+}
 
 describe("/sandbox start --name autocomplete", () => {
 	it("lists Lima sandboxes from all workspaces and replaces only the argument", async () => {
@@ -63,6 +66,7 @@ describe("/sandbox start --name autocomplete", () => {
 		for (const text of ["/sandbox start --name", "/sandbox start --name "]) {
 			const suggestions = await suggestionsFor(provider, text);
 			expect(suggestions?.items[0]?.label).toBe("grip-dev");
+			expect((await automaticSuggestions(provider, text))?.items[0]?.label).toBe("grip-dev");
 			if (suggestions) {
 				expect(
 					provider.applyCompletion([text], 0, text.length, suggestions.items[0]!, suggestions.prefix).lines,
@@ -79,5 +83,42 @@ describe("/sandbox start --name autocomplete", () => {
 		expect(await suggestionsFor(provider, "/sandbox start --name ")).toBeNull();
 		// Other completion contexts still use the existing provider.
 		expect(await suggestionsFor(provider, "ordinary prompt ")).not.toBeNull();
+	});
+});
+
+describe("built-in slash command argument choices", () => {
+	it("shows no-argument commands after a space and completes back to the runnable command", async () => {
+		const provider = createProvider(async () => []);
+		const text = "/new ";
+		const suggestions = await automaticSuggestions(provider, text);
+		expect(suggestions?.items).toEqual([{ value: "new", label: "/new", description: "Start a new session" }]);
+		expect(
+			provider.applyCompletion([text], 0, text.length, suggestions!.items[0]!, suggestions!.prefix).lines,
+		).toEqual(["/new"]);
+		expect(await automaticSuggestions(provider, "/new not-an-option")).toBeNull();
+	});
+
+	it("offers supported actions and nested sandbox options while typing", async () => {
+		const provider = createProvider(async () => []);
+		for (const [text, expected] of [
+			["/hooks ", ["enable", "disable"]],
+			["/context-compression o", ["on", "off"]],
+			["/compress-detection ", ["on", "off"]],
+			["/sandbox ", ["status", "clear", "--attach", "start", "list", "stop"]],
+			["/sandbox start --", ["--name", "--template", "--update"]],
+		] as const) {
+			const suggestions = await automaticSuggestions(provider, text);
+			expect(suggestions?.items.map((item) => item.label)).toEqual(expected);
+		}
+		const options = await automaticSuggestions(provider, "/sandbox start --");
+		expect(
+			provider.applyCompletion(
+				["/sandbox start --"],
+				0,
+				"/sandbox start --".length,
+				options!.items[0]!,
+				options!.prefix,
+			).lines,
+		).toEqual(["/sandbox start --name "]);
 	});
 });

@@ -2700,6 +2700,52 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.isShowingAutocomplete(), false);
 		});
 
+		it("shows /new after a trailing space and submits the selected command", async () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setAutocompleteProvider(
+				new CombinedAutocompleteProvider(
+					[{ name: "new", description: "Start a new session", showWithoutArguments: true }],
+					process.cwd(),
+				),
+			);
+			let submitted = "";
+			editor.onSubmit = (text) => {
+				submitted = text;
+			};
+			editor.setText("/new");
+			editor.handleInput(" ");
+			await flushAutocomplete();
+			assert.strictEqual(editor.isShowingAutocomplete(), true);
+			assert.ok(editor.render(60).some((line) => line.includes("Start a new session")));
+			editor.handleInput("\r");
+			assert.strictEqual(submitted, "/new");
+		});
+
+		it("uses arrow keys to choose a slash command argument below the editor", async () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setAutocompleteProvider(
+				new CombinedAutocompleteProvider(
+					[
+						{
+							name: "hooks",
+							getArgumentCompletions: () => [
+								{ value: "enable", label: "enable" },
+								{ value: "disable", label: "disable" },
+							],
+						},
+					],
+					process.cwd(),
+				),
+			);
+			editor.setText("/hooks");
+			editor.handleInput(" ");
+			await flushAutocomplete();
+			assert.strictEqual(editor.isShowingAutocomplete(), true);
+			assert.ok(editor.render(60).some((line) => line.includes("disable")));
+			editor.handleInput("\x1b[B"); // Down selects disable.
+			editor.handleInput("\t");
+			assert.strictEqual(editor.getText(), "/hooks disable");
+		});
 		it("ignores invalid slash command argument completion results", async () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			const provider = new CombinedAutocompleteProvider(

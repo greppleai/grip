@@ -818,10 +818,29 @@ export class InteractiveMode {
 	}
 
 	private createBaseAutocompleteProvider(): AutocompleteProvider {
-		// Define commands for autocomplete
+		// Commands without arguments remain selectable after a trailing space (e.g. /new ).
+		const noArgumentCommands = new Set([
+			"settings",
+			"scoped-models",
+			"share",
+			"copy",
+			"session",
+			"changelog",
+			"hotkeys",
+			"fork",
+			"clone",
+			"tree",
+			"login",
+			"logout",
+			"new",
+			"reload",
+			"resume",
+			"quit",
+		]);
 		const slashCommands: SlashCommand[] = BUILTIN_SLASH_COMMANDS.map((command) => ({
 			name: command.name,
 			description: command.description,
+			showWithoutArguments: noArgumentCommands.has(command.name),
 		}));
 
 		const cdCommand = slashCommands.find((command) => command.name === "cd");
@@ -831,6 +850,47 @@ export class InteractiveMode {
 				this.session.supportsDirectoryChange() ? getDirectoryCompletions(prefix, this.activeSession.getCwd()) : [];
 		}
 
+		const choiceCompletions =
+			(choices: readonly string[]) =>
+			(prefix: string): AutocompleteItem[] | null => {
+				if (prefix.includes(" ")) return null;
+				return fuzzyFilter([...choices], prefix, (choice) => choice).map((choice) => ({
+					value: choice,
+					label: choice,
+				}));
+			};
+		for (const [name, hint, choices] of [
+			["hooks", "<enable|disable>", ["enable", "disable"]],
+			["context-compression", "[on|off]", ["on", "off"]],
+			["compress-detection", "[on|off]", ["on", "off"]],
+		] as const) {
+			const command = slashCommands.find((candidate) => candidate.name === name);
+			if (command) {
+				command.argumentHint = hint;
+				command.getArgumentCompletions = choiceCompletions(choices);
+			}
+		}
+
+		const sandboxCommand = slashCommands.find((command) => command.name === "sandbox");
+		if (sandboxCommand) {
+			sandboxCommand.argumentHint = "<status|clear|--attach|start|list|stop>";
+			sandboxCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
+				if (!prefix.includes(" ")) {
+					return fuzzyFilter(["status", "clear", "--attach", "start", "list", "stop"], prefix, (item) => item).map(
+						(item) => ({
+							value: item === "start" || item === "stop" || item === "--attach" ? `${item} ` : item,
+							label: item,
+						}),
+					);
+				}
+				const startMatch = prefix.match(/^start\s+(--[^\s]*)$/);
+				if (!startMatch) return null;
+				return fuzzyFilter(["--name", "--template", "--update"], startMatch[1]!, (item) => item).map((item) => ({
+					value: `start ${item}${item === "--update" ? "" : " "}`,
+					label: item,
+				}));
+			};
+		}
 		const modelCommand = slashCommands.find((command) => command.name === "model");
 		if (modelCommand) {
 			modelCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
@@ -931,7 +991,7 @@ export class InteractiveMode {
 			getSuggestions: async (lines, cursorLine, cursorCol, options) => {
 				const beforeCursor = (lines[cursorLine] ?? "").slice(0, cursorCol);
 				const nameMatch = beforeCursor.match(/^\/sandbox[ \t]+(start[ \t]+--name(?:[ \t]+([^\s]*))?)$/);
-				if (!options.force || !nameMatch) return base.getSuggestions(lines, cursorLine, cursorCol, options);
+				if (!nameMatch) return base.getSuggestions(lines, cursorLine, cursorCol, options);
 				if (options.signal.aborted) return null;
 				try {
 					const instances = await this.createLimaSandboxService().list({

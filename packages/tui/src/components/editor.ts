@@ -1053,6 +1053,10 @@ export class Editor implements Component, Focusable {
 
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
 		const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
+		if (char === " " && this.isInSlashCommandContext(textBeforeCursor)) {
+			this.tryTriggerAutocomplete();
+			return;
+		}
 		if (char === "@" || char === "#") {
 			const charBeforeSymbol = textBeforeCursor[textBeforeCursor.length - 2];
 			if (textBeforeCursor.length === 1 || charBeforeSymbol === " " || charBeforeSymbol === "\t") {
