@@ -5516,10 +5516,34 @@ export class InteractiveMode {
 			this.loadingAnimation = undefined;
 		}
 		this.statusContainer.clear();
+		const sandboxState = this.activeSandboxBackendConnected
+			? this.sessionSandboxStates.get(getSessionSandboxKey(this.activeSession))
+			: undefined;
+		let resumedSessionKey: string | undefined;
+		let previousSandboxState: SessionSandboxState | undefined;
+		const setup = sandboxState
+			? (nextSession: Session) => {
+					resumedSessionKey = getSessionSandboxKey(nextSession);
+					previousSandboxState = this.sessionSandboxStates.get(resumedSessionKey);
+					this.sessionSandboxStates.set(resumedSessionKey, sandboxState);
+				}
+			: undefined;
+		const switchSession = async (cwdOverride?: string) => {
+			try {
+				return await this.runtimeHost.switchSession(sessionPath, {
+					withSession: options?.withSession,
+					setup,
+					...(cwdOverride === undefined ? {} : { cwdOverride }),
+				});
+			} finally {
+				if (resumedSessionKey && resumedSessionKey !== getSessionSandboxKey(this.activeSession)) {
+					if (previousSandboxState) this.sessionSandboxStates.set(resumedSessionKey, previousSandboxState);
+					else this.sessionSandboxStates.delete(resumedSessionKey);
+				}
+			}
+		};
 		try {
-			const result = await this.runtimeHost.switchSession(sessionPath, {
-				withSession: options?.withSession,
-			});
+			const result = await switchSession();
 			if (result.cancelled) {
 				return result;
 			}
@@ -5533,10 +5557,7 @@ export class InteractiveMode {
 					this.showStatus("Resume cancelled");
 					return { cancelled: true };
 				}
-				const result = await this.runtimeHost.switchSession(sessionPath, {
-					cwdOverride: selectedCwd,
-					withSession: options?.withSession,
-				});
+				const result = await switchSession(selectedCwd);
 				if (result.cancelled) {
 					return result;
 				}

@@ -1,6 +1,6 @@
 # Workspace Sandbox
 
-`/sandbox` is the user-only interactive command for workspace tool backends. It can show or clear the active backend, attach an existing sandbox daemon, or manage a Lima VM. Connections are session-local: switching back to an earlier session reconnects its remembered sandbox while Grip remains running. Local Grip retains provider credentials, model calls, session history, extensions, RPC, and UI; subagent workspace tools inherit the active backend.
+`/sandbox` is the user-only interactive command for workspace tool backends. It can show or clear the active backend, attach an existing sandbox daemon, or manage a Lima VM. Connections are remembered in memory while Grip runs. If `/resume` switches sessions while a sandbox is connected, the selected session uses that active connection; without a live connection, switching back to a session reconnects its remembered sandbox (if any). Local Grip retains provider credentials, model calls, session history, extensions, RPC, and UI; subagent workspace tools inherit the active backend.
 
 The command appears in slash-command completion but not in model-visible catalogs, system prompts, tool definitions, templates, skills, or rules. This is not a permission boundary: a model with host shell access may still invoke Lima directly.
 

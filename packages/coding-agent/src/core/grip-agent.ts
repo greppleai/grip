@@ -228,6 +228,8 @@ export interface CreateGripAgentSessionOptions {
 }
 export interface GripAgentSwitchSessionOptions extends ExtensionSwitchSessionOptions {
 	cwdOverride?: string;
+	/** Prepare the selected session before its agent session is built and rebound. */
+	setup?: (session: Session) => void | Promise<void>;
 }
 
 export interface GripAgentForkResult extends ExtensionSessionActionResult {
@@ -1516,6 +1518,7 @@ export class GripAgent {
 		if (this.shouldValidateSessionCwdOnHost()) {
 			assertSessionCwdExists(nextSession, this.services.cwd);
 		}
+		await options?.setup?.(nextSession);
 		const result = await this.buildAgentSession(nextSession, {
 			type: "session_start",
 			reason: "resume",

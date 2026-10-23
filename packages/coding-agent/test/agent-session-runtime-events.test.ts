@@ -197,6 +197,47 @@ describe("GripAgent session lifecycle events", () => {
 		runtimeHost.setRebindSession(undefined);
 	});
 
+	it("prepares resumed sessions before rebinding and skips setup when cancelled", async () => {
+		let cancel = false;
+		const { runtimeHost } = await createRuntimeHost((pi) => {
+			pi.on("session_before_switch", () => {
+				if (cancel) return { cancel: true };
+			});
+		});
+		await runtimeHost.session.prompt("hello");
+		const sessionFile = runtimeHost.session.sessionFile!;
+		const sessionId = runtimeHost.session.session.getSessionId();
+		await runtimeHost.newSession();
+		const previousAgentSession = runtimeHost.session;
+		const phases: string[] = [];
+		runtimeHost.setRebindSession(async () => {
+			phases.push("rebind");
+			expect(runtimeHost.session.session.getSessionId()).toBe(sessionId);
+		});
+
+		expect(
+			await runtimeHost.switchSession(sessionFile, {
+				setup: (selected) => {
+					phases.push("setup");
+					expect(selected.getSessionId()).toBe(sessionId);
+					expect(runtimeHost.session).toBe(previousAgentSession);
+				},
+			}),
+		).toEqual({ cancelled: false });
+		expect(phases).toEqual(["setup", "rebind"]);
+
+		cancel = true;
+		phases.length = 0;
+		expect(
+			await runtimeHost.switchSession(sessionFile, {
+				setup: () => {
+					phases.push("setup");
+				},
+			}),
+		).toEqual({ cancelled: true });
+		expect(phases).toEqual([]);
+	});
+
 	it("emits session_before_fork and session_start and honors cancellation", async () => {
 		const events: RecordedSessionEvent[] = [];
 		let cancelNextFork = false;

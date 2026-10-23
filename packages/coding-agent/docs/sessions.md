@@ -22,7 +22,7 @@ For the JSONL file format, active `Session` API, and `SessionManager` lifecycle 
 
 | Command | Description |
 |---------|-------------|
-| `/resume` | Browse and select previous sessions |
+| `/resume` | Browse and select previous sessions, reusing the active sandbox connection if connected |
 | `/new` | Start a new session, reusing the active sandbox connection if connected |
 | `/name <name>` | Set the current session display name |
 | `/session` | Show session info |
