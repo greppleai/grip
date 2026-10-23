@@ -5440,7 +5440,7 @@ export class AgentSession {
 		const choice = await runner
 			.getUIContext()
 			.select(
-				`Run on host?\nReason: ${JSON.stringify(options.question)}\nCommand: ${JSON.stringify(command)}\nHost cwd: ${JSON.stringify(hostCwd)}`,
+				`Run on host?\n\nReason: ${JSON.stringify(options.question)}\n\nCommand: ${JSON.stringify(command)}\nHost cwd: ${JSON.stringify(hostCwd)}`,
 				["No", "Yes"],
 				{ signal },
 			);
@@ -5480,15 +5480,19 @@ export class AgentSession {
 		const signal = options.signal ?? this.agent.signal;
 		if (signal?.aborted) throw new Error("Host process cancelled");
 		const hostCwd = await operations.mapWorkspaceDirectoryToHost(options.cwd ?? operations.cwd);
-		const explanation =
-			options.explanation === undefined ? "" : `\nExplanation (unverified): ${JSON.stringify(options.explanation)}`;
-		const choice = await runner
-			.getUIContext()
-			.select(
-				`Run on host (no shell)?\nReason: ${JSON.stringify(options.question)}${explanation}\nExecutable: ${JSON.stringify(executable)}\nArguments: ${JSON.stringify(args)}\nHost cwd: ${JSON.stringify(hostCwd)}`,
-				["No", "Yes"],
-				{ signal },
-			);
+		const approval = [
+			"Run on host (no shell)?",
+			"",
+			`Reason: ${JSON.stringify(options.question)}`,
+			...(options.explanation === undefined
+				? []
+				: ["", "Explanation (unverified):", `  ${JSON.stringify(options.explanation)}`]),
+			"",
+			`Executable: ${JSON.stringify(executable)}`,
+			`Arguments: ${JSON.stringify(args)}`,
+			`Host cwd: ${JSON.stringify(hostCwd)}`,
+		].join("\n");
+		const choice = await runner.getUIContext().select(approval, ["No", "Yes"], { signal });
 		if (choice !== "Yes" || signal?.aborted) throw new Error("Host process was not approved");
 		if (
 			runner !== this._extensionRunner ||

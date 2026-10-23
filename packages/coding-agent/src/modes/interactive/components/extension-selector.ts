@@ -23,6 +23,7 @@ export class ExtensionSelectorComponent extends Container {
 	private onCancelCallback: () => void;
 	private titleText: Text;
 	private baseTitle: string;
+	private countdownSeconds: number | undefined;
 	private countdown: CountdownTimer | undefined;
 	private onToggleToolsExpanded: (() => void) | undefined;
 
@@ -44,7 +45,8 @@ export class ExtensionSelectorComponent extends Container {
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
 
-		this.titleText = new Text(theme.fg("accent", theme.bold(title)), 1, 0);
+		this.titleText = new Text("", 1, 0);
+		this.updateTitle();
 		this.addChild(this.titleText);
 		this.addChild(new Spacer(1));
 
@@ -52,7 +54,10 @@ export class ExtensionSelectorComponent extends Container {
 			this.countdown = new CountdownTimer(
 				opts.timeout,
 				opts.tui,
-				(s) => this.titleText.setText(theme.fg("accent", theme.bold(`${this.baseTitle} (${s}s)`))),
+				(s) => {
+					this.countdownSeconds = s;
+					this.updateTitle();
+				},
 				() => this.onCancelCallback(),
 			);
 		}
@@ -77,6 +82,20 @@ export class ExtensionSelectorComponent extends Container {
 		this.updateList();
 	}
 
+	private updateTitle(): void {
+		const [heading, ...body] = this.baseTitle.split("\n");
+		const label = this.countdownSeconds === undefined ? heading : `${heading} (${this.countdownSeconds}s)`;
+		this.titleText.setText(
+			[theme.fg("accent", theme.bold(label)), ...body.map((line) => (line ? theme.fg("text", line) : ""))].join(
+				"\n",
+			),
+		);
+	}
+
+	override invalidate(): void {
+		super.invalidate();
+		this.updateTitle();
+	}
 	private updateList(): void {
 		this.listContainer.clear();
 		for (let i = 0; i < this.options.length; i++) {

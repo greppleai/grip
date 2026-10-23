@@ -661,7 +661,7 @@ describe("remote canonical workspace tool routing", () => {
 			await expect(readFile(join(guestSubdirectory, "host-marker.txt"))).rejects.toThrow();
 			expect(select).toHaveBeenCalledTimes(2);
 			expect(select).toHaveBeenCalledWith(
-				`Run on host?\nReason: "Publish this repository?"\nCommand: ${JSON.stringify(command)}\nHost cwd: ${JSON.stringify(hostSubdirectory)}`,
+				`Run on host?\n\nReason: "Publish this repository?"\n\nCommand: ${JSON.stringify(command)}\nHost cwd: ${JSON.stringify(hostSubdirectory)}`,
 				["No", "Yes"],
 				{ signal: undefined },
 			);
@@ -708,7 +708,7 @@ describe("remote canonical workspace tool routing", () => {
 			await expect(readFile(join(guestRoot, "direct.txt"))).rejects.toThrow();
 			expect(select).toHaveBeenCalledTimes(2);
 			expect(select).toHaveBeenCalledWith(
-				`Run on host (no shell)?\nReason: "Run direct program?"\nExplanation (unverified): "Refresh refs without exposing credentials"\nExecutable: ${JSON.stringify(process.execPath)}\nArguments: ${JSON.stringify(args)}\nHost cwd: ${JSON.stringify(hostRoot)}`,
+				`Run on host (no shell)?\n\nReason: "Run direct program?"\n\nExplanation (unverified):\n  "Refresh refs without exposing credentials"\n\nExecutable: ${JSON.stringify(process.execPath)}\nArguments: ${JSON.stringify(args)}\nHost cwd: ${JSON.stringify(hostRoot)}`,
 				["No", "Yes"],
 				{ signal: undefined },
 			);
