@@ -41,6 +41,7 @@ interface CdCommandContext {
 	showError: (message: string) => void;
 	showWarning: (message: string) => void;
 	showStatus: (message: string) => void;
+	updateToolBackendStatus: () => void;
 }
 
 const interactiveModePrototype = InteractiveMode.prototype as unknown as InteractiveModePrototype;
@@ -66,6 +67,7 @@ function createContext(cwd: string): CdCommandContext {
 		showError: vi.fn(),
 		showWarning: vi.fn(),
 		showStatus: vi.fn(),
+		updateToolBackendStatus: vi.fn(),
 	};
 }
 
@@ -110,8 +112,28 @@ describe("InteractiveMode /cd", () => {
 		expect(context.renderCurrentSessionState).not.toHaveBeenCalled();
 		expect(context.activeSession.getCwd()).toBe("/host/project");
 		expect(context.showStatus).toHaveBeenCalledWith("Working directory: /workspace/subdirectory");
+		expect(context.updateToolBackendStatus).toHaveBeenCalledOnce();
 
 		await interactiveModePrototype.handleCdCommand.call(context, "/cd");
 		expect(context.session.changeSandboxWorkingDirectory).toHaveBeenLastCalledWith("/workspace");
+	});
+
+	it("explains guest directory failures without exposing the protocol error", async () => {
+		const context = Object.setPrototypeOf(createContext("/host/project"), InteractiveMode.prototype);
+		context.activeSandboxBackendConnected = true;
+		context.session.supportsDirectoryChange = () => false;
+		context.session.getToolBackendInfo = () => ({
+			type: "remote",
+			configured: true,
+			workspace: { root: "/workspace" },
+		});
+		context.session.changeSandboxWorkingDirectory = vi.fn(async () => {
+			throw new Error("Remote workspace request handler failed");
+		});
+		await interactiveModePrototype.handleCdCommand.call(context, "/cd /workspace/planner");
+		expect(context.showError).toHaveBeenCalledWith(
+			"Directory unavailable in sandbox: /workspace/planner (it must exist within the mounted workspace /workspace)",
+		);
+		expect(context.updateToolBackendStatus).not.toHaveBeenCalled();
 	});
 });

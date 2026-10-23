@@ -85,7 +85,15 @@ export class FooterComponent implements Component {
 	}
 
 	private formatLocation(): string {
-		let location = formatCwdForFooter(this.session.session.getCwd(), process.env.HOME || process.env.USERPROFILE);
+		const backend = this.session.getToolBackendInfo?.();
+		const locationCwd =
+			backend?.type === "remote" && backend.configured
+				? this.session.getToolOperations().cwd
+				: this.session.session.getCwd();
+		let location =
+			backend?.type === "remote" && backend.configured
+				? locationCwd
+				: formatCwdForFooter(locationCwd, process.env.HOME || process.env.USERPROFILE);
 		const branch = this.footerData.getGitBranch();
 		if (branch) location = `${location} (${branch})`;
 		const sessionName = this.session.session.getSessionName();

@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { getDirectoryCompletions } from "../src/utils/directory-completions.ts";
+import { join, posix } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { getDirectoryCompletions, getSandboxDirectoryCompletions } from "../src/utils/directory-completions.ts";
 
 const tempDirectories: string[] = [];
 
@@ -42,5 +42,49 @@ describe("getDirectoryCompletions", () => {
 		expect(getDirectoryCompletions("dir", cwd)).toEqual([
 			{ value: '"directory with spaces/"', label: "directory with spaces/" },
 		]);
+	});
+});
+
+describe("getSandboxDirectoryCompletions", () => {
+	const directories = new Set([
+		"/workspace",
+		"/workspace/grip",
+		"/workspace/grip/nested",
+		"/workspace/grip/nested/child",
+		"/workspace/grip/directory with spaces",
+		"/workspace/planner",
+	]);
+	const operations = {
+		readdir: vi.fn(async (directory: string) => {
+			if (directory === "/workspace") return ["grip", "planner"];
+			if (directory === "/workspace/grip") return ["nested", "directory with spaces", "file.txt", "outside-link"];
+			if (directory === "/workspace/grip/nested") return ["child"];
+			return [];
+		}),
+		resolveWorkspaceDirectory: vi.fn(async (directory: string) => {
+			const normalized = posix.normalize(directory);
+			if (!directories.has(normalized)) throw new Error("Remote workspace request handler failed");
+			return normalized;
+		}),
+	};
+
+	it("uses guest cwd for relative and quoted directory paths, not host files", async () => {
+		expect(await getSandboxDirectoryCompletions("nes", "/workspace/grip", "posix", operations)).toEqual([
+			{ value: "nested/", label: "nested/" },
+		]);
+		expect(await getSandboxDirectoryCompletions("nested/", "/workspace/grip", "posix", operations)).toEqual([
+			{ value: "nested/child/", label: "child/" },
+		]);
+		expect(await getSandboxDirectoryCompletions('"dir', "/workspace/grip", "posix", operations)).toEqual([
+			{ value: '"directory with spaces/"', label: "directory with spaces/" },
+		]);
+	});
+
+	it("completes siblings only if they are inside the guest workspace", async () => {
+		expect(await getSandboxDirectoryCompletions("../pl", "/workspace/grip", "posix", operations)).toEqual([
+			{ value: "../planner/", label: "planner/" },
+		]);
+		expect(await getSandboxDirectoryCompletions("../../", "/workspace/grip", "posix", operations)).toEqual([]);
+		expect(await getSandboxDirectoryCompletions("file", "/workspace/grip", "posix", operations)).toEqual([]);
 	});
 });

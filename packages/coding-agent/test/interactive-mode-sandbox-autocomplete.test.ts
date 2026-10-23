@@ -1,4 +1,4 @@
-import type { AutocompleteProvider } from "@greppleai/grip-tui";
+import type { AutocompleteItem, AutocompleteProvider } from "@greppleai/grip-tui";
 import { describe, expect, it, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
@@ -7,16 +7,22 @@ interface SandboxNameFixture {
 	status: string;
 }
 
-function createProvider(list: () => Promise<SandboxNameFixture[]>) {
+function createProvider(
+	list: () => Promise<SandboxNameFixture[]>,
+	sandboxCompletions?: (prefix: string) => Promise<AutocompleteItem[]>,
+) {
 	const mode = Object.assign(Object.create(InteractiveMode.prototype) as InteractiveMode, {
 		runtimeHost: {
 			session: {
 				session: { getCwd: () => process.cwd() },
+				supportsDirectoryChange: () => !sandboxCompletions,
+				getSandboxDirectoryCompletions: sandboxCompletions,
 				settingsManager: { getEnableSkillCommands: () => false },
 				promptTemplates: [],
 				extensionRunner: { getRegisteredCommands: () => [] },
 			},
 		},
+		activeSandboxBackendConnected: Boolean(sandboxCompletions),
 		skillCommands: new Map(),
 		fdPath: null,
 		createLimaSandboxService: () => ({ list }),
@@ -97,16 +103,15 @@ describe("built-in slash command argument choices", () => {
 		).toEqual(["/quit"]);
 	});
 
-	it("offers --sandbox for a new session", async () => {
+	it("keeps /new selectable after a space without suggesting arguments", async () => {
 		const provider = createProvider(async () => []);
-		for (const text of ["/new ", "/new --"]) {
-			const suggestions = await automaticSuggestions(provider, text);
-			expect(suggestions?.items).toEqual([{ value: "--sandbox", label: "--sandbox" }]);
-			expect(
-				provider.applyCompletion([text], 0, text.length, suggestions!.items[0]!, suggestions!.prefix).lines,
-			).toEqual(["/new --sandbox"]);
-		}
-		expect(await automaticSuggestions(provider, "/new not-an-option")).toBeNull();
+		const text = "/new ";
+		const suggestions = await automaticSuggestions(provider, text);
+		expect(suggestions?.items).toEqual([expect.objectContaining({ value: "new", label: "/new" })]);
+		expect(
+			provider.applyCompletion([text], 0, text.length, suggestions!.items[0]!, suggestions!.prefix).lines,
+		).toEqual(["/new"]);
+		expect(await automaticSuggestions(provider, "/new --")).toBeNull();
 	});
 
 	it("offers supported actions and nested sandbox options while typing", async () => {
@@ -132,5 +137,18 @@ describe("built-in slash command argument choices", () => {
 				options!.prefix,
 			).lines,
 		).toEqual(["/sandbox start --name "]);
+	});
+});
+
+describe("/cd sandbox autocomplete", () => {
+	it("uses guest completions and never falls back to host directories", async () => {
+		const guest = vi.fn(async (prefix: string) =>
+			prefix === "pl" ? [{ value: "planner/", label: "planner/" }] : [],
+		);
+		const provider = createProvider(async () => [], guest);
+		const suggestions = await automaticSuggestions(provider, "/cd pl");
+		expect(guest).toHaveBeenCalledWith("pl");
+		expect(suggestions?.items).toEqual([{ value: "planner/", label: "planner/" }]);
+		expect(await automaticSuggestions(provider, "/cd missing")).toBeNull();
 	});
 });

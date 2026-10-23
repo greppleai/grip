@@ -816,19 +816,6 @@ export class InteractiveMode {
 				path: command.sourceInfo.path,
 			}));
 	}
-	private configureNewCommandAutocomplete(commandsByName: Map<string, SlashCommand>): void {
-		const command = commandsByName.get("new");
-		if (!command) return;
-		command.argumentHint = "[--sandbox]";
-		command.getArgumentCompletions = (prefix) => {
-			if (prefix.includes(" ")) return null;
-			return fuzzyFilter(["--sandbox"], prefix, (option) => option).map((option) => ({
-				value: option,
-				label: option,
-			}));
-		};
-	}
-
 	private createBaseAutocompleteProvider(): AutocompleteProvider {
 		// Commands without arguments remain selectable after a trailing space (e.g. /quit ).
 		const noArgumentCommands = new Set([
@@ -841,6 +828,7 @@ export class InteractiveMode {
 			"hotkeys",
 			"fork",
 			"clone",
+			"new",
 			"tree",
 			"login",
 			"logout",
@@ -857,8 +845,12 @@ export class InteractiveMode {
 		const cdCommand = slashCommands.find((command) => command.name === "cd");
 		if (cdCommand) {
 			cdCommand.argumentHint = "<directory>";
-			cdCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] =>
-				this.session.supportsDirectoryChange() ? getDirectoryCompletions(prefix, this.activeSession.getCwd()) : [];
+			cdCommand.getArgumentCompletions = (prefix: string): Promise<AutocompleteItem[]> | AutocompleteItem[] => {
+				if (this.activeSandboxBackendConnected) return this.session.getSandboxDirectoryCompletions(prefix);
+				return this.session.supportsDirectoryChange()
+					? getDirectoryCompletions(prefix, this.activeSession.getCwd())
+					: [];
+			};
 		}
 
 		const choiceCompletions =
@@ -885,7 +877,6 @@ export class InteractiveMode {
 				command.getArgumentCompletions = choiceCompletions(choices);
 			}
 		}
-		this.configureNewCommandAutocomplete(commandsByName);
 
 		const sandboxCommand = slashCommands.find((command) => command.name === "sandbox");
 		if (sandboxCommand) {
@@ -2275,7 +2266,10 @@ export class InteractiveMode {
 			return theme.fg("dim", `tools: local ${info.cwd}`);
 		}
 		return info.configured
-			? theme.fg("accent", `tools: remote ${info.url} ${info.cwd}`)
+			? theme.fg(
+					"accent",
+					`tools: remote ${info.url} ${this.activeSandboxBackendConnected ? this.session.getToolOperations().cwd : info.cwd}`,
+				)
 			: theme.fg("warning", `tools: remote not configured ${info.cwd}`);
 	}
 
@@ -3246,11 +3240,11 @@ export class InteractiveMode {
 				run: async () => {
 					this.editor.setText("");
 					const option = text.slice("/new".length).trim();
-					if (option && option !== "--sandbox") {
-						this.showWarning("Usage: /new [--sandbox]");
+					if (option) {
+						this.showWarning("Usage: /new");
 						return;
 					}
-					await this.handleClearCommand(option === "--sandbox");
+					await this.handleClearCommand();
 				},
 			};
 		}
@@ -5988,10 +5982,14 @@ export class InteractiveMode {
 		}
 		try {
 			const directory = await this.session.changeSandboxWorkingDirectory(argument ?? backend.workspace.root);
+			this.updateToolBackendStatus();
 			this.showStatus(`Working directory: ${directory}`);
 		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
 			this.showError(
-				`Failed to change sandbox directory: ${error instanceof Error ? error.message : String(error)}`,
+				message === "Remote workspace request handler failed"
+					? `Directory unavailable in sandbox: ${argument ?? backend.workspace.root} (it must exist within the mounted workspace ${backend.workspace.root})`
+					: `Failed to change sandbox directory: ${message}`,
 			);
 		}
 	}
@@ -6969,16 +6967,15 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private async handleClearCommand(reuseSandbox = false): Promise<void> {
+	private async handleClearCommand(): Promise<void> {
 		if (this.loadingAnimation) {
 			this.loadingAnimation.stop();
 			this.loadingAnimation = undefined;
 		}
 		this.statusContainer.clear();
-		const sandboxState =
-			reuseSandbox && this.activeSandboxBackendConnected
-				? this.sessionSandboxStates.get(getSessionSandboxKey(this.activeSession))
-				: undefined;
+		const sandboxState = this.activeSandboxBackendConnected
+			? this.sessionSandboxStates.get(getSessionSandboxKey(this.activeSession))
+			: undefined;
 		let newSessionKey: string | undefined;
 		try {
 			const result = await this.runtimeHost.newSession(

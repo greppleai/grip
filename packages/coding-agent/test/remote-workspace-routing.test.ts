@@ -521,9 +521,13 @@ describe("remote canonical workspace tool routing", () => {
 			const otherClient = await createRemoteToolOperations(address.url);
 			const otherHost = new WorkspaceToolHost({ cwd: otherClient.cwd, operations: otherClient });
 			try {
+				await expect(harness.session.getSandboxDirectoryCompletions("../")).resolves.toEqual([]);
 				await expect(harness.session.changeSandboxWorkingDirectory("../outside")).rejects.toThrow("outside");
 				await expect(harness.session.changeSandboxWorkingDirectory("outside-link")).rejects.toThrow();
 				await expect(harness.session.changeSandboxWorkingDirectory("missing")).rejects.toThrow();
+				expect(await harness.session.getSandboxDirectoryCompletions("sub")).toEqual([
+					{ value: "subdirectory/", label: "subdirectory/" },
+				]);
 				expect(operations.cwd).toBe(workspaceRoot);
 				expect(await harness.session.changeSandboxWorkingDirectory("subdirectory")).toBe(guestSubdirectory);
 				expect(harness.session.session).toBe(session);

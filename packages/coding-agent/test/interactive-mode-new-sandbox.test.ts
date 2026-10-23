@@ -50,10 +50,10 @@ function createMode(connected: boolean, cancelled = false) {
 	return { command, states, newSession, activateSandboxDaemon, mode };
 }
 
-describe("/new --sandbox", () => {
+describe("/new sandbox inheritance", () => {
 	it("reuses the connected sandbox for the new session without starting another VM", async () => {
 		const { command, states, newSession, activateSandboxDaemon } = createMode(true);
-		await command("/new --sandbox")?.run();
+		await command("/new")?.run();
 		expect(newSession).toHaveBeenCalledOnce();
 		expect(states.get("/project\0next")).toBe(states.get("/project\0previous"));
 		expect(activateSandboxDaemon).toHaveBeenCalledWith({
@@ -68,7 +68,7 @@ describe("/new --sandbox", () => {
 		const attached = states.get("/project\0previous")!;
 		attached.containerId = undefined;
 		attached.url = "ws://attached";
-		await command("/new --sandbox")?.run();
+		await command("/new")?.run();
 		expect(states.get("/project\0next")).toBe(attached);
 		expect(activateSandboxDaemon).toHaveBeenCalledWith({
 			url: "ws://attached",
@@ -77,31 +77,31 @@ describe("/new --sandbox", () => {
 		});
 		expect((mode as unknown as { activeSandboxContainerId?: string }).activeSandboxContainerId).toBeUndefined();
 	});
-	it("does not reuse an inactive sandbox or change bare /new", async () => {
+
+	it("starts locally when no sandbox is connected, even if one is remembered", async () => {
 		const inactive = createMode(false);
-		await inactive.command("/new --sandbox")?.run();
+		await inactive.command("/new")?.run();
 		expect(inactive.newSession).toHaveBeenCalledWith(undefined);
+		expect(inactive.states.has("/project\0next")).toBe(false);
 		expect(inactive.activateSandboxDaemon).not.toHaveBeenCalled();
-		const bare = createMode(true);
-		await bare.command("/new")?.run();
-		expect(bare.newSession).toHaveBeenCalledWith(undefined);
-		expect(bare.activateSandboxDaemon).not.toHaveBeenCalled();
 	});
 
 	it("leaves the original sandbox alone when the new session is cancelled", async () => {
 		const { command, states, activateSandboxDaemon } = createMode(true, true);
-		await command("/new --sandbox")?.run();
+		await command("/new")?.run();
 		expect(states.has("/project\0next")).toBe(false);
 		expect(states.has("/project\0previous")).toBe(true);
 		expect(activateSandboxDaemon).not.toHaveBeenCalled();
 	});
 
-	it("rejects unsupported /new options", async () => {
-		const { command, newSession, mode } = createMode(true);
-		await command("/new --other")?.run();
-		expect(newSession).not.toHaveBeenCalled();
-		expect((mode as unknown as { showWarning: ReturnType<typeof vi.fn> }).showWarning).toHaveBeenCalledWith(
-			"Usage: /new [--sandbox]",
-		);
+	it("rejects the removed --sandbox argument and other unsupported options", async () => {
+		for (const text of ["/new --sandbox", "/new --other"]) {
+			const { command, newSession, mode } = createMode(true);
+			await command(text)?.run();
+			expect(newSession).not.toHaveBeenCalled();
+			expect((mode as unknown as { showWarning: ReturnType<typeof vi.fn> }).showWarning).toHaveBeenCalledWith(
+				"Usage: /new",
+			);
+		}
 	});
 });

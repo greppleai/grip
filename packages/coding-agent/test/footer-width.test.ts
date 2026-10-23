@@ -110,6 +110,22 @@ describe("formatCwdForFooter", () => {
 		expect(formatCwdForFooter("/home/user/project", "/home/user")).toBe("~/project");
 	});
 });
+describe("FooterComponent workspace location", () => {
+	beforeAll(() => initTheme(undefined, false));
+	it("shows the active guest cwd instead of the host session cwd", () => {
+		const session = createSession({ sessionName: "" });
+		const operations = { cwd: "/workspace/grip" };
+		Object.assign(session, {
+			getToolBackendInfo: () => ({ type: "remote", configured: true }),
+			getToolOperations: () => operations,
+		});
+		const footer = new FooterComponent(session, createFooterData(1));
+		expect(footer.render(100)[0]).toContain("/workspace/grip");
+		expect(footer.render(100)[0]).not.toContain("/tmp/project");
+		operations.cwd = "/workspace/grip/nested";
+		expect(footer.render(100)[0]).toContain("/workspace/grip/nested");
+	});
+});
 
 describe("FooterComponent width handling", () => {
 	beforeAll(() => {

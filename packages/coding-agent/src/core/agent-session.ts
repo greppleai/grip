@@ -63,6 +63,7 @@ import {
 import { Text } from "@greppleai/grip-tui";
 import { type Static, type TSchema, Type } from "typebox";
 import { theme } from "../modes/interactive/theme/theme.ts";
+import { getSandboxDirectoryCompletions } from "../utils/directory-completions.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizePath, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
@@ -1423,6 +1424,14 @@ export class AgentSession {
 				),
 			),
 		);
+	}
+	/** Complete only directories available inside the connected sandbox's mounted workspace. */
+	async getSandboxDirectoryCompletions(prefix: string): Promise<import("@greppleai/grip-tui").AutocompleteItem[]> {
+		const operations = this._sandboxToolOperations;
+		const backend = operations?.getBackendInfo();
+		if (!operations || operations !== this._toolOperations || backend?.type !== "remote" || !backend.configured)
+			return [];
+		return getSandboxDirectoryCompletions(prefix, operations.cwd, backend.workspace.pathFlavor, operations);
 	}
 
 	/** Change only the connected sandbox's working directory, never the host session or mount. */
