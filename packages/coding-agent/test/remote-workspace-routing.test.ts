@@ -646,7 +646,7 @@ describe("remote canonical workspace tool routing", () => {
 				expectedCwd: guestRoot,
 				hostWorkspaceRoot: hostRoot,
 			});
-			await harness.session.bindExtensions({ uiContext: { select } as ExtensionUIContext });
+			await harness.session.bindExtensions({ uiContext: { select } as unknown as ExtensionUIContext });
 			const ctx = harness.session.extensionRunner.createContext();
 			expect(ctx.isSandbox()).toBe(true);
 			expect(await ctx.toolOperations.mapWorkspaceDirectoryToHost?.(guestSubdirectory)).toBe(hostSubdirectory);
@@ -692,7 +692,7 @@ describe("remote canonical workspace tool routing", () => {
 				expectedCwd: guestRoot,
 				hostWorkspaceRoot: hostRoot,
 			});
-			await harness.session.bindExtensions({ uiContext: { select } as ExtensionUIContext });
+			await harness.session.bindExtensions({ uiContext: { select } as unknown as ExtensionUIContext });
 			const ctx = harness.session.extensionRunner.createContext();
 			const options = {
 				question: "Run direct program?",
@@ -743,7 +743,7 @@ describe("remote canonical workspace tool routing", () => {
 			await expect(ctx.execHostCommand(command, { question: "test" })).rejects.toThrow("approval UI");
 			await expect(ctx.execHostProcess("git", ["push"], { question: "test" })).rejects.toThrow("approval UI");
 			const select = vi.fn<ExtensionUIContext["select"]>().mockResolvedValue("Yes");
-			await harness.session.bindExtensions({ uiContext: { select } as ExtensionUIContext });
+			await harness.session.bindExtensions({ uiContext: { select } as unknown as ExtensionUIContext });
 			await expect(ctx.execHostCommand(command, { question: "test" })).rejects.toThrow("mapping");
 			await expect(ctx.execHostProcess("git", ["push"], { question: "test" })).rejects.toThrow("mapping");
 			await harness.session.clearRemoteSandbox();

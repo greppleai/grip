@@ -16,6 +16,13 @@ function createContext(tokens: number | null, compact = vi.fn()): ExtensionConte
 		cwd: process.cwd(),
 		toolOperations: new LocalToolOperations(process.cwd()),
 		getToolBackendInfo: () => ({ type: "local", cwd: process.cwd() }),
+		isSandbox: () => false,
+		execHostCommand: async () => {
+			throw new Error("Unexpected host command");
+		},
+		execHostProcess: async () => {
+			throw new Error("Unexpected host process");
+		},
 		getLspStatus: () => ({
 			owner: "standalone",
 			enabled: false,

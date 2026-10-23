@@ -61,7 +61,7 @@ import {
 	streamSimple,
 	validateToolArguments,
 } from "@greppleai/grip-ai";
-import { Text } from "@greppleai/grip-tui";
+import { type AutocompleteItem, Text } from "@greppleai/grip-tui";
 import { type Static, type TSchema, Type } from "typebox";
 import { keyText } from "../modes/interactive/components/keybinding-hints.ts";
 import { theme } from "../modes/interactive/theme/theme.ts";
@@ -1452,7 +1452,7 @@ export class AgentSession {
 		);
 	}
 	/** Complete only directories available inside the connected sandbox's mounted workspace. */
-	async getSandboxDirectoryCompletions(prefix: string): Promise<import("@greppleai/grip-tui").AutocompleteItem[]> {
+	async getSandboxDirectoryCompletions(prefix: string): Promise<AutocompleteItem[]> {
 		const operations = this._sandboxToolOperations;
 		const backend = operations?.getBackendInfo();
 		if (!operations || operations !== this._toolOperations || backend?.type !== "remote" || !backend.configured)

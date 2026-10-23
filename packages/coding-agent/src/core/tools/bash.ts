@@ -220,8 +220,7 @@ function rebuildBashResultRenderComponent(
 	startedAt: number | undefined,
 	endedAt: number | undefined,
 	backendInfo: ToolBackendInfo | undefined,
-	timeout: number | undefined,
-	outputMode: BashToolInput["output_mode"],
+	bashArgs: Partial<BashToolInput> | undefined,
 ): void {
 	const state = component.state;
 	component.clear();
@@ -233,7 +232,7 @@ function rebuildBashResultRenderComponent(
 		const endTime = endedAt ?? Date.now();
 		component.addChild(
 			new Text(
-				`\n${theme.fg(options.isPartial ? "muted" : isError ? "error" : "success", `${label} ${formatDuration(endTime - startedAt)}`)}${timeout !== undefined ? theme.fg("muted", ` (timeout ${timeout}s)`) : ""}${formatBackendSuffix(backendInfo)}`,
+				`\n${theme.fg(options.isPartial ? "muted" : isError ? "error" : "success", `${label} ${formatDuration(endTime - startedAt)}`)}${bashArgs?.timeout !== undefined ? theme.fg("muted", ` (timeout ${bashArgs.timeout}s)`) : ""}${formatBackendSuffix(backendInfo)}`,
 				0,
 				0,
 			),
@@ -242,7 +241,7 @@ function rebuildBashResultRenderComponent(
 	component.addChild({
 		render: (width) => {
 			if (width < 1) return [];
-			let hint = theme.fg("muted", `model output: ${outputMode ?? "always"}`);
+			let hint = theme.fg("muted", `model output: ${bashArgs?.output_mode ?? "always"}`);
 			if (!options.expanded && output && state.cachedSkipped) {
 				const expandKey = keyText("app.tools.expand");
 				hint +=
@@ -429,8 +428,7 @@ export function createBashToolDefinition(operations: ToolOperations, options?: B
 				state.startedAt,
 				state.endedAt,
 				ops.getBackendInfo?.(),
-				(context.args as Partial<BashToolInput> | undefined)?.timeout,
-				(context.args as Partial<BashToolInput> | undefined)?.output_mode,
+				context.args as Partial<BashToolInput> | undefined,
 			);
 			component.invalidate();
 			return component;
