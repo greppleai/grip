@@ -384,7 +384,7 @@ export class LimaSandboxService {
 			local
 				? '  grip_bin="$HOME/.local/bin/grip"; test -x "$grip_bin"'
 				: '  grip_bin="$(command -v grip)"; case "$grip_bin" in /*) ;; *) exit 25;; esac',
-			`  systemd-run --user --unit="$unit" --property=Restart=no --property=KillMode=control-group -- sh -c 'set -eu; umask 077; GRIP_DAEMON_TOKEN="$(cat "$HOME/.cache/grip/shared-lima/daemon-${config.daemonPort}.token")"; test -n "$GRIP_DAEMON_TOKEN"; export GRIP_DAEMON_TOKEN; exec "$1" --daemon --daemon-host 127.0.0.1 --daemon-allow-insecure-transport --daemon-port ${config.daemonPort} --daemon-cwd "$2" --daemon-shared-parent "$2" --daemon-allow-root --daemon-allow-process-exec >"$HOME/.cache/grip/shared-lima/daemon-${config.daemonPort}.log" 2>&1 </dev/null' sh "$grip_bin" ${shellQuote(config.workspaceMountPath)} >/dev/null`,
+			`  systemd-run --user --unit="$unit" --property=Restart=no --property=KillMode=control-group -- sh -c 'set -eu; umask 077; GRIP_DAEMON_TOKEN="$(cat "$HOME/.cache/grip/shared-lima/daemon-${config.daemonPort}.token")"; test -n "$GRIP_DAEMON_TOKEN"; export GRIP_DAEMON_TOKEN; exec "$1" --daemon --daemon-host 127.0.0.1 --daemon-allow-insecure-transport --daemon-port ${config.daemonPort} --daemon-cwd "$2" --daemon-shared-parent "$2" --daemon-allow-root --daemon-allow-process-exec --daemon-allow-full-filesystem >"$HOME/.cache/grip/shared-lima/daemon-${config.daemonPort}.log" 2>&1 </dev/null' sh "$grip_bin" ${shellQuote(config.workspaceMountPath)} >/dev/null`,
 			'  pid=""; attempts=0',
 			'  while test "$attempts" -lt 50; do',
 			'    pid="$(systemctl --user show -P MainPID "$unit")" || exit 25',
@@ -499,7 +499,7 @@ export class LimaSandboxService {
 					'case "$load" in',
 					'  loaded) test "$(systemctl --user show -P MainPID "$unit")" = 0; systemctl --user start "$unit" ;;',
 					'  not-found|"")',
-					`    systemd-run --user --unit="$unit" --property=Restart=no --property=KillMode=control-group -- sh -c 'set -eu; umask 077; GRIP_DAEMON_TOKEN="$(cat "$HOME/.cache/grip/shared-lima/daemon-${port}.token")"; test -n "$GRIP_DAEMON_TOKEN"; export GRIP_DAEMON_TOKEN; exec "$1" --daemon --daemon-host 127.0.0.1 --daemon-allow-insecure-transport --daemon-port ${port} --daemon-cwd "$2" --daemon-shared-parent "$2" --daemon-allow-root --daemon-allow-process-exec >"$HOME/.cache/grip/shared-lima/daemon-${port}.log" 2>&1 </dev/null' sh "$HOME/.local/bin/grip" ${shellQuote(config.workspaceMountPath)} >/dev/null ;;`,
+					`    systemd-run --user --unit="$unit" --property=Restart=no --property=KillMode=control-group -- sh -c 'set -eu; umask 077; GRIP_DAEMON_TOKEN="$(cat "$HOME/.cache/grip/shared-lima/daemon-${port}.token")"; test -n "$GRIP_DAEMON_TOKEN"; export GRIP_DAEMON_TOKEN; exec "$1" --daemon --daemon-host 127.0.0.1 --daemon-allow-insecure-transport --daemon-port ${port} --daemon-cwd "$2" --daemon-shared-parent "$2" --daemon-allow-root --daemon-allow-process-exec --daemon-allow-full-filesystem >"$HOME/.cache/grip/shared-lima/daemon-${port}.log" 2>&1 </dev/null' sh "$HOME/.local/bin/grip" ${shellQuote(config.workspaceMountPath)} >/dev/null ;;`,
 					"  *) exit 45 ;;",
 					"esac",
 					'pid=""; attempts=0',
@@ -605,7 +605,7 @@ export class LimaSandboxService {
 			'test ! -e "$HOME/.cache/grip/shared-lima" && test ! -L "$HOME/.cache/grip/shared-lima" || exit 29',
 			`if test -f "$HOME/${pidFile}"; then old_pid="$(cat "$HOME/${pidFile}")"; kill "$old_pid" 2>/dev/null || true; fi`,
 			`token="$(head -c 32 /dev/urandom | base64 | tr -d '\\n')"`,
-			`nohup env GRIP_DAEMON_TOKEN="$token" "${this.env.GRIP_SANDBOX_GUEST_BINARY ? "$HOME/.local/bin/grip" : '$(command -v grip || printf %s "$HOME/.local/bin/grip")'}" --daemon --daemon-host 127.0.0.1 --daemon-allow-insecure-transport --daemon-port ${config.daemonPort} --daemon-cwd ${shellQuote(config.workspaceMountPath)} --daemon-allow-root --daemon-allow-process-exec >"$HOME/${logFile}" 2>&1 </dev/null &`,
+			`nohup env GRIP_DAEMON_TOKEN="$token" "${this.env.GRIP_SANDBOX_GUEST_BINARY ? "$HOME/.local/bin/grip" : '$(command -v grip || printf %s "$HOME/.local/bin/grip")'}" --daemon --daemon-host 127.0.0.1 --daemon-allow-insecure-transport --daemon-port ${config.daemonPort} --daemon-cwd ${shellQuote(config.workspaceMountPath)} --daemon-allow-root --daemon-allow-process-exec --daemon-allow-full-filesystem >"$HOME/${logFile}" 2>&1 </dev/null &`,
 			`echo $! >"$HOME/${pidFile}"`,
 			'rmdir "$mode_lock" || exit 28',
 			"trap - EXIT",

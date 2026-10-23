@@ -22,6 +22,8 @@ export interface DaemonConfiguration {
 	/** Canonical fixed parent mount for explicitly enabled shared-channel mode. */
 	readonly sharedParentRoot?: string;
 	readonly temporaryRoot?: string;
+	/** Explicit opt-in for daemons running inside an isolated guest; never enabled by default for attached daemons. */
+	readonly allowFullFilesystem: boolean;
 	readonly token?: string;
 	readonly allowedOrigins: readonly string[];
 	readonly tls?: DaemonTlsConfiguration;
@@ -65,6 +67,7 @@ interface ParsedDaemonInputs {
 	tlsCertPath?: string;
 	tlsKeyPath?: string;
 	allowInsecureTransport?: boolean;
+	allowFullFilesystem?: boolean;
 	allowProcessExec?: boolean;
 	allowRoot?: boolean;
 	forwardedEnvironment: string[];
@@ -103,6 +106,7 @@ const BOOLEAN_FLAGS = new Map<string, keyof ParsedDaemonInputs>([
 	["--daemon-allow-insecure-transport", "allowInsecureTransport"],
 	["--daemon-allow-process-exec", "allowProcessExec"],
 	["--daemon-allow-root", "allowRoot"],
+	["--daemon-allow-full-filesystem", "allowFullFilesystem"],
 	["--daemon-trust-project-lsp", "trustProjectLsp"],
 ]);
 
@@ -478,6 +482,9 @@ export async function parseDaemonCommand(
 	const allowProcessExec =
 		inputs.allowProcessExec ??
 		parseBoolean(environment.GRIP_DAEMON_ALLOW_PROCESS_EXEC, "GRIP_DAEMON_ALLOW_PROCESS_EXEC");
+	const allowFullFilesystem =
+		inputs.allowFullFilesystem ??
+		parseBoolean(environment.GRIP_DAEMON_ALLOW_FULL_FILESYSTEM, "GRIP_DAEMON_ALLOW_FULL_FILESYSTEM");
 	const trustProjectLsp =
 		inputs.trustProjectLsp ??
 		parseBoolean(environment.GRIP_DAEMON_TRUST_PROJECT_LSP, "GRIP_DAEMON_TRUST_PROJECT_LSP");
@@ -522,6 +529,7 @@ export async function parseDaemonCommand(
 			workspaceRoot,
 			sharedParentRoot,
 			temporaryRoot,
+			allowFullFilesystem,
 			token,
 			allowedOrigins: Object.freeze(allowedOrigins),
 			tls,

@@ -91,6 +91,7 @@ it("checks the installed version, uses private persistent PID/token files and wa
 			expect(script).toContain("--property=Restart=no");
 			expect(script).toContain("\"$grip_bin\" '/workspace'");
 			expect(script).toContain('--daemon-cwd "$2" --daemon-shared-parent "$2"');
+			expect(script).toContain("--daemon-allow-full-filesystem");
 			expect(script).not.toContain('kill "$pid"');
 			expect(script).not.toContain(secret);
 			expect(await service.ensureSharedDaemon(options, owner)).toBe(secret);

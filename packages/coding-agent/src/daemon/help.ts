@@ -9,12 +9,13 @@ Usage:
 Options:
   --daemon-host <ip>                    Bind IP (default: 127.0.0.1)
   --daemon-port <port>                  Bind port (default: 8787)
-  --daemon-cwd <directory>              Confined workspace root (default: current directory)
+  --daemon-cwd <directory>              Workspace root and default filesystem boundary (default: current directory)
   --daemon-origin <origin>              Allow an exact browser Origin (repeatable)
   --daemon-tls-cert <file>              Native TLS certificate
   --daemon-tls-key <file>               Native TLS private key
   --daemon-allow-insecure-transport     Acknowledge non-loopback transport without native TLS
   --daemon-allow-process-exec           Enable the unsafe process-execution capability
+  --daemon-allow-full-filesystem        Allow workspace tools to access the entire daemon filesystem (isolated guests only)
   --daemon-allow-root                   Allow running as root inside an intentional OS sandbox
   --daemon-env <NAME>                   Forward an approved environment name (repeatable)
   --daemon-lsp-config <file>            Operator-owned daemon LSP configuration
@@ -32,11 +33,11 @@ Environment:
   GRIP_DAEMON_ORIGINS                   Comma-separated exact browser origins
   GRIP_DAEMON_TLS_CERT, GRIP_DAEMON_TLS_KEY, GRIP_DAEMON_TLS_PASSPHRASE
   GRIP_DAEMON_ALLOW_INSECURE_TRANSPORT, GRIP_DAEMON_ALLOW_PROCESS_EXEC, GRIP_DAEMON_ALLOW_ROOT
-  GRIP_DAEMON_ENV, GRIP_DAEMON_LSP_CONFIG, GRIP_DAEMON_TRUST_PROJECT_LSP
+  GRIP_DAEMON_ENV, GRIP_DAEMON_LSP_CONFIG, GRIP_DAEMON_TRUST_PROJECT_LSP, GRIP_DAEMON_ALLOW_FULL_FILESYSTEM
   GRIP_DAEMON_MAX_CONNECTIONS, GRIP_DAEMON_MAX_PENDING_CONNECTIONS
   GRIP_DAEMON_HANDSHAKE_TIMEOUT_MS, GRIP_DAEMON_SHUTDOWN_TIMEOUT_MS
 
 Security:
   Non-loopback binds require GRIP_DAEMON_TOKEN and TLS unless insecure transport is explicitly acknowledged.
-  Process execution is an RCE capability and requires OS-level isolation.`);
+  Process execution and full-filesystem access require OS-level isolation.`);
 }

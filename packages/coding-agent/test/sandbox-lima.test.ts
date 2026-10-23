@@ -73,6 +73,7 @@ describe("Lima sandbox core", () => {
 		expect(runner.calls[0]?.args.join(" ")).toContain('"location":"/host/project"');
 		const daemonScript = runner.calls[2]?.args.at(-1) ?? "";
 		expect(daemonScript).toContain("--daemon --daemon-host");
+		expect(daemonScript).toContain("--daemon-allow-full-filesystem");
 		expect(daemonScript).toContain("&\necho $!");
 		expect(daemonScript).not.toContain("&;");
 		expect(daemonScript).not.toContain("vm-token");

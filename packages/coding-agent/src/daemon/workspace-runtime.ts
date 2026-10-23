@@ -208,6 +208,7 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 	readonly cwd: string;
 	private readonly local: LocalToolOperations;
 	private readonly allowedRoots: readonly string[];
+	private readonly allowFullFilesystem: boolean;
 	private readonly allowProcessExec: boolean;
 	private readonly environment: NodeJS.ProcessEnv;
 	private readonly maxBufferedOutputBytes: number;
@@ -229,6 +230,7 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 			const value = process.env[name];
 			if (value !== undefined) this.environment[name] = value;
 		}
+		this.allowFullFilesystem = configuration.allowFullFilesystem;
 	}
 
 	createChildEnvironment(extra: Record<string, string> = {}): Record<string, string> {
@@ -249,7 +251,7 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 
 	private lexicalPath(path: string): string {
 		const candidate = resolve(this.cwd, path);
-		if (!this.allowedRoots.some((root) => this.isWithinAllowedRoot(candidate, root))) {
+		if (!this.allowFullFilesystem && !this.allowedRoots.some((root) => this.isWithinAllowedRoot(candidate, root))) {
 			throw new Error(`Path escapes the daemon workspace and allowed temporary root: ${path}`);
 		}
 		return candidate;
@@ -297,7 +299,8 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 				const parentStat = await lstat(parent);
 				if (parentStat.isSymbolicLink()) {
 					this.lexicalPath(await realpath(parent));
-					throw new Error(`Writable parent uses a symbolic link: ${path}`);
+					if (!this.allowFullFilesystem) throw new Error(`Writable parent uses a symbolic link: ${path}`);
+					return;
 				}
 				const canonicalParent = await realpath(parent);
 				this.lexicalPath(canonicalParent);
@@ -371,6 +374,13 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 	}
 
 	async mkdir(path: string, options?: ToolMkdirOptions): Promise<void> {
+		if (this.allowFullFilesystem && options?.recursive) {
+			try {
+				if ((await lstat(await this.existingPath(path))).isDirectory()) return;
+			} catch (error) {
+				if (!isMissingPath(error)) throw error;
+			}
+		}
 		await fsMkdir(await this.writablePath(path), options);
 	}
 

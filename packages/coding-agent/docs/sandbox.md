@@ -8,6 +8,8 @@ The command appears in slash-command completion but not in model-visible catalog
 
 Inside a connected sandbox, `/cd <directory>` changes the guest working directory for subsequent tools within the existing mounted workspace. `/cd` without an argument returns to the guest workspace root. It does not change the host session directory, remount the workspace, or reconnect the daemon. The guest working directory resets to the mount root after a session switch or reconnection.
 
+Lima-managed sandboxes allow workspace tools (`read`, `write`, `edit`, `ls`, `find`, and `grep`) to access paths anywhere in the guest filesystem, including outside the mounted workspace. This does not mount additional host directories; guest OS permissions still apply. `/cd` remains within the mounted workspace. An attached daemon stays workspace-confined by default: only enable `--daemon-allow-full-filesystem` when the daemon runs inside an intentionally isolated guest, never on an untrusted host. Existing guest daemons need an update or restart to enable this access.
+
 ## Commands
 
 ```text

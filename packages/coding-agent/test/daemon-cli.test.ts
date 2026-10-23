@@ -201,6 +201,22 @@ describe("grip --daemon CLI and lifecycle", () => {
 			},
 			workspaceRoot,
 		);
+		expect(command.configuration?.allowFullFilesystem).toBe(false);
+		expect(
+			(
+				await parseDaemonCommand(
+					[
+						"--daemon",
+						"--daemon-cwd",
+						workspaceRoot,
+						"--daemon-allow-full-filesystem",
+						...(process.getuid?.() === 0 ? ["--daemon-allow-root"] : []),
+					],
+					{},
+					workspaceRoot,
+				)
+			).configuration?.allowFullFilesystem,
+		).toBe(true);
 		expect(command.configuration).toMatchObject({
 			host: "127.0.0.1",
 			port: 9123,

@@ -54,6 +54,7 @@ async function createServer(
 	token?: string,
 	lspConfigPath?: string,
 	temporaryRoot?: string,
+	allowFullFilesystem = false,
 ) {
 	const port = await reservePort();
 	const command = await parseDaemonCommand(
@@ -66,6 +67,7 @@ async function createServer(
 			"--daemon-allow-root",
 			...(lspConfigPath ? ["--daemon-lsp-config", lspConfigPath] : []),
 			...(allowProcessExec ? ["--daemon-allow-process-exec"] : []),
+			...(allowFullFilesystem ? ["--daemon-allow-full-filesystem"] : []),
 		],
 		{
 			...(token ? { GRIP_DAEMON_TOKEN: token } : {}),
@@ -359,6 +361,46 @@ describe("remote canonical workspace tool routing", () => {
 		await operations.dispose();
 		await server.close();
 		harness.cleanup();
+	});
+
+	it("allows file tools across the guest filesystem only when explicitly enabled", async () => {
+		const workspaceRoot = await createTemporaryDirectory();
+		const guestDirectory = await createTemporaryDirectory();
+		const externalFile = join(guestDirectory, "guest.txt");
+		await writeFile(externalFile, "outside mount\n");
+		await symlink(guestDirectory, join(workspaceRoot, "guest-link"));
+		const { server, address } = await createServer(workspaceRoot, false, undefined, undefined, undefined, true);
+		const operations = await createRemoteToolOperations(address.url);
+		const host = new WorkspaceToolHost({ cwd: operations.cwd, operations });
+		try {
+			const readText = text(
+				await host.execute("read", { toolCallId: "guest-read", arguments: { path: externalFile } }),
+			);
+			expect(readText).toContain("outside mount");
+			const firstHash = readText
+				.split("\n")
+				.find((line) => line.includes("│"))
+				?.slice(0, 3);
+			if (!firstHash) throw new Error("Read result did not contain a hashline anchor");
+			await host.execute("edit", {
+				toolCallId: "guest-edit",
+				arguments: {
+					path: externalFile,
+					changes: [{ hash_range_inclusive: [firstHash, firstHash], content_lines: ["edited"] }],
+				},
+			});
+			expect(await readFile(externalFile, "utf8")).toBe("edited\n");
+			await host.execute("write", {
+				toolCallId: "guest-write",
+				arguments: { path: join(workspaceRoot, "guest-link", "new.txt"), content: "written" },
+			});
+			expect(await readFile(join(guestDirectory, "new.txt"), "utf8")).toBe("written");
+			await expect(operations.resolveWorkspaceDirectory(guestDirectory)).rejects.toThrow();
+		} finally {
+			await host.dispose();
+			await operations.dispose();
+			await server.close();
+		}
 	});
 
 	it("preserves cancellation, canonical errors, confinement, and mutation ordering", async () => {
