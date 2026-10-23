@@ -22,6 +22,7 @@ import {
 	expandTildePath,
 	getAgentDir,
 	getPackageDir,
+	isBunBinary,
 	VERSION,
 } from "./config.ts";
 import { AuthStorage } from "./core/auth-storage.ts";
@@ -64,6 +65,7 @@ import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
 import { ExtensionSelectorComponent } from "./modes/interactive/components/extension-selector.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
 import { handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
+import { cleanupWindowsBinarySelfUpdateLeftovers } from "./utils/binary-self-update.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
 
@@ -684,7 +686,10 @@ async function runCliPreflight(args: string[], options: MainOptions | undefined)
 		process.env.GRIP_OFFLINE = "1";
 		process.env.GRIP_SKIP_VERSION_CHECK = "1";
 	}
-	if (process.platform === "win32") cleanupWindowsSelfUpdateQuarantine(getPackageDir());
+	if (process.platform === "win32") {
+		if (isBunBinary) await cleanupWindowsBinarySelfUpdateLeftovers();
+		else cleanupWindowsSelfUpdateQuarantine(getPackageDir());
+	}
 	if (await handlePackageCommand(args)) return true;
 	return handleConfigCommand(args);
 }

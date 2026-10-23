@@ -181,3 +181,4 @@ All notable changes to Grip are documented in this file.
 
 - Fixed the `tools:` backend indicator disappearing from the footer after `/reload`.
 - Fixed image loading in standalone binaries by extracting the image resize worker from the executable.
+- Fixed `grip update` failing for standalone binary installs; it now downloads the matching release executable, verifies its SHA-256 checksum, and replaces the binary in place (including on Windows).

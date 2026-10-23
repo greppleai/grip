@@ -14,7 +14,9 @@ import {
 } from "./config.ts";
 import { type ConfiguredPackage, DefaultPackageManager } from "./core/package-manager.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
+import { updateBinaryExecutable } from "./utils/binary-self-update.ts";
 import { spawnProcess } from "./utils/child-process.ts";
+import { getGripUserAgent } from "./utils/grip-user-agent.ts";
 import { getLatestGripRelease, isNewerPackageVersion } from "./utils/version-check.ts";
 import {
 	cleanupWindowsSelfUpdateQuarantine,
@@ -334,6 +336,7 @@ function printSelfUpdateNote(note: string): void {
 
 interface SelfUpdatePlan {
 	shouldRun: boolean;
+	version?: string;
 	note?: string;
 }
 
@@ -342,8 +345,13 @@ async function getSelfUpdatePlan(force: boolean): Promise<SelfUpdatePlan> {
 
 	try {
 		const latestRelease = await getLatestGripRelease(VERSION);
-		if (!latestRelease || isNewerPackageVersion(latestRelease.version, VERSION)) {
-			return { shouldRun: true, ...(latestRelease?.note ? { note: latestRelease.note } : {}) };
+		if (!latestRelease) return { shouldRun: true };
+		if (isNewerPackageVersion(latestRelease.version, VERSION)) {
+			return {
+				shouldRun: true,
+				version: latestRelease.version,
+				...(latestRelease.note ? { note: latestRelease.note } : {}),
+			};
 		}
 	} catch {
 		return { shouldRun: true };
@@ -351,6 +359,24 @@ async function getSelfUpdatePlan(force: boolean): Promise<SelfUpdatePlan> {
 
 	console.log(chalk.green(`${APP_NAME} is already up to date (v${VERSION})`));
 	return { shouldRun: false };
+}
+
+async function updateBinarySelf(plan: SelfUpdatePlan): Promise<void> {
+	if (plan.note) printSelfUpdateNote(plan.note);
+	const target = plan.version ? `v${plan.version}` : "the latest release";
+	console.log(chalk.dim(`Updating ${APP_NAME} executable ${process.execPath} to ${target}...`));
+	try {
+		const result = await updateBinaryExecutable({
+			...(plan.version ? { version: plan.version } : {}),
+			userAgent: getGripUserAgent(VERSION),
+		});
+		console.log(chalk.green(`Updated ${APP_NAME} (${result.executablePath})`));
+	} catch (error: unknown) {
+		const message = error instanceof Error ? error.message : "Unknown binary update error";
+		console.error(chalk.red(`Error: ${message}`));
+		console.error(chalk.dim(getSelfUpdateUnavailableInstruction(PACKAGE_NAME)));
+		process.exitCode = 1;
+	}
 }
 async function runSelfUpdate(command: SelfUpdateCommand): Promise<void> {
 	console.log(chalk.dim(`Updating ${APP_NAME} with ${command.display}...`));
@@ -438,6 +464,10 @@ async function updateSelf(force: boolean, npmCommand?: string[]): Promise<void> 
 	const selfUpdatePlan = await getSelfUpdatePlan(force);
 	if (!selfUpdatePlan.shouldRun) return;
 	const installMethod = detectInstallMethod();
+	if (installMethod === "bun-binary") {
+		await updateBinarySelf(selfUpdatePlan);
+		return;
+	}
 	if (process.platform === "win32" && installMethod !== "npm" && installMethod !== "pnpm") {
 		console.error(chalk.red(`${APP_NAME} self-update on Windows is only supported for npm and pnpm installs.`));
 		console.error(chalk.dim(`Detected install method: ${installMethod}. Update ${APP_NAME} manually.`));

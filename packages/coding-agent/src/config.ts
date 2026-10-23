@@ -300,6 +300,7 @@ export function getSelfUpdateUnavailableInstruction(packageName: string, npmComm
 }
 export function getUpdateInstruction(packageName: string): string {
 	const method = detectInstallMethod();
+	if (method === "bun-binary") return `Run: ${APP_NAME} update --self`;
 	const command = getSelfUpdateCommandForMethod(method, packageName);
 	if (command) {
 		return `Run: ${command.display}`;
