@@ -30,6 +30,8 @@ The editor can be replaced temporarily by built-in UI such as `/settings` or by 
 
 See [Keybindings](keybindings.md) for all shortcuts and customization.
 
+Grip does not download or install `fd` or `rg` automatically. Install `fd` (or `fdfind`) for `@` file suggestions and local `find`, and ripgrep (`rg`) for local `grep`; put them on `PATH`. Previously installed binaries in the user agent's `bin` directory remain usable. Remote workspace implementations may provide their own search tools.
+
 ## Slash Commands
 
 Type `/` in the editor to open command completion. Extensions can register custom commands, skills are available as `/skill:name`, and prompt templates expand via `/templatename`.

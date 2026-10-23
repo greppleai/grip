@@ -5,7 +5,7 @@ import { spawn } from "child_process";
 import path from "path";
 import { type Static, Type } from "typebox";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
-import { ensureTool } from "../../utils/tools-manager.ts";
+import { getToolPath } from "../../utils/tools-manager.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import type { ToolOperations } from "./operations.ts";
 import { resolveToCwd } from "./path-utils.ts";
@@ -248,9 +248,9 @@ async function dispatchFindExecution(
 	const searchPath = resolveToCwd(request.searchDir || ".", request.cwd);
 	const effectiveLimit = request.limit ?? DEFAULT_LIMIT;
 	if (request.operations.glob) return executeOperationsFind(request, searchPath, effectiveLimit);
-	const fdPath = await ensureTool("fd", true);
+	const fdPath = getToolPath("fd");
 	throwIfFindAborted(request.signal);
-	if (!fdPath) throw new Error("fd is not available and could not be downloaded");
+	if (!fdPath) throw new Error("fd is not available; install fd (or fdfind) and ensure it is on PATH");
 	return executeFdFind(fdPath, request, searchPath, effectiveLimit, registerStop);
 }
 

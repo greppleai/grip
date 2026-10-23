@@ -162,7 +162,7 @@ import { getGripUserAgent } from "../../utils/grip-user-agent.ts";
 import { openBrowser } from "../../utils/open-browser.ts";
 import { getCwdRelativePath } from "../../utils/paths.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
-import { ensureTool } from "../../utils/tools-manager.ts";
+import { getToolPath } from "../../utils/tools-manager.ts";
 import { checkForNewGripVersion, type LatestGripRelease } from "../../utils/version-check.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BashExecutionComponent } from "./components/bash-execution.ts";
@@ -1241,10 +1241,8 @@ export class InteractiveMode {
 		// Load changelog (only show new entries, skip for resumed sessions)
 		this.changelogMarkdown = this.getChangelogForDisplay();
 
-		// Ensure fd and rg are available (downloads if missing, adds to PATH via getBinDir)
-		// Both are needed: fd for autocomplete, rg for grep tool and bash commands
-		const [fdPath] = await Promise.all([ensureTool("fd"), ensureTool("rg")]);
-		this.fdPath = fdPath;
+		// Use an installed fd for fuzzy file completion; do not install tools on startup.
+		this.fdPath = getToolPath("fd");
 
 		if (this.session.scopedModels.length > 0 && (this.options.verbose || !this.settingsManager.getQuietStartup())) {
 			const modelList = this.session.scopedModels

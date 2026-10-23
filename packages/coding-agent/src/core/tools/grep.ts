@@ -5,7 +5,7 @@ import { spawn } from "child_process";
 import path from "path";
 import { type Static, Type } from "typebox";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
-import { ensureTool } from "../../utils/tools-manager.ts";
+import { getToolPath } from "../../utils/tools-manager.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import type { ToolGrepMatch, ToolOperations } from "./operations.ts";
 import { resolveToCwd } from "./path-utils.ts";
@@ -388,8 +388,8 @@ async function executeGrep(
 		linesTruncated: false,
 	};
 	if (operations.grep) return executeOperationsGrep(operations, executionInput, formatState);
-	const rgPath = await ensureTool("rg", true);
-	if (!rgPath) throw new Error("ripgrep (rg) is not available and could not be downloaded");
+	const rgPath = getToolPath("rg");
+	if (!rgPath) throw new Error("ripgrep (rg) is not available; install rg and ensure it is on PATH");
 	return executeRipgrep(rgPath, executionInput, formatState, signal);
 }
 
