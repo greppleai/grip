@@ -136,19 +136,11 @@ function formatBackendSuffix(backendInfo: ToolBackendInfo | undefined): string {
 
 function formatBashCall(args: Partial<BashToolInput> | undefined, backendInfo?: ToolBackendInfo): string {
 	const command = str(args?.command);
-	const timeout = args?.timeout;
-	const timeoutSuffix = timeout ? theme.fg("muted", ` (timeout ${timeout}s)`) : "";
-	const outputModeSuffix =
-		args?.output_mode && args.output_mode !== "always"
-			? theme.fg("muted", ` (model output: ${args.output_mode})`)
-			: "";
 	const commandDisplay = command === null ? invalidArgText(theme) : command ? command : theme.fg("toolOutput", "...");
 	return (
 		formatBackendIcon(backendInfo, theme) +
 		theme.fg("toolTitle", theme.bold("$ ")) +
-		theme.fg("accent", theme.bold(commandDisplay)) +
-		timeoutSuffix +
-		outputModeSuffix
+		theme.fg("accent", theme.bold(commandDisplay))
 	);
 }
 
@@ -228,6 +220,8 @@ function rebuildBashResultRenderComponent(
 	startedAt: number | undefined,
 	endedAt: number | undefined,
 	backendInfo: ToolBackendInfo | undefined,
+	timeout: number | undefined,
+	outputMode: BashToolInput["output_mode"],
 ): void {
 	const state = component.state;
 	component.clear();
@@ -239,25 +233,27 @@ function rebuildBashResultRenderComponent(
 		const endTime = endedAt ?? Date.now();
 		component.addChild(
 			new Text(
-				`\n${theme.fg(options.isPartial ? "muted" : isError ? "error" : "success", `${label} ${formatDuration(endTime - startedAt)}`)}${formatBackendSuffix(backendInfo)}`,
+				`\n${theme.fg(options.isPartial ? "muted" : isError ? "error" : "success", `${label} ${formatDuration(endTime - startedAt)}`)}${timeout !== undefined ? theme.fg("muted", ` (timeout ${timeout}s)`) : ""}${formatBackendSuffix(backendInfo)}`,
 				0,
 				0,
 			),
 		);
 	}
-	if (!options.expanded && output) {
-		component.addChild({
-			render: (width) => {
-				if (!state.cachedSkipped || width < 1) return [];
+	component.addChild({
+		render: (width) => {
+			if (width < 1) return [];
+			let hint = theme.fg("muted", `model output: ${outputMode ?? "always"}`);
+			if (!options.expanded && output && state.cachedSkipped) {
 				const expandKey = keyText("app.tools.expand");
-				const hint =
+				hint +=
+					theme.fg("dim", " · ") +
 					theme.fg("warning", `${state.cachedSkipped} lines hidden`) +
 					(expandKey ? theme.fg("accent", ` · ${expandKey} to expand`) : "");
-				return ["", truncateToWidth(hint, width, "...")];
-			},
-			invalidate: () => {},
-		});
-	}
+			}
+			return ["", truncateToWidth(hint, width, "...")];
+		},
+		invalidate: () => {},
+	});
 }
 
 function appendBashStatus(text: string, status: string): string {
@@ -433,6 +429,8 @@ export function createBashToolDefinition(operations: ToolOperations, options?: B
 				state.startedAt,
 				state.endedAt,
 				ops.getBackendInfo?.(),
+				(context.args as Partial<BashToolInput> | undefined)?.timeout,
+				(context.args as Partial<BashToolInput> | undefined)?.output_mode,
 			);
 			component.invalidate();
 			return component;

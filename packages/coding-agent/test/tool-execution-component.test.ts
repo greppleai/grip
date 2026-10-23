@@ -251,7 +251,7 @@ describe("ToolExecutionComponent parity", () => {
 		const component = new ToolExecutionComponent(
 			"bash",
 			"tool-bash-colors",
-			{ command: "echo hello" },
+			{ command: "echo hello", timeout: 115, output_mode: "on_fail" },
 			{},
 			createBashToolDefinition(operations),
 			createFakeTui(),
@@ -259,18 +259,23 @@ describe("ToolExecutionComponent parity", () => {
 		);
 		component.markExecutionStarted();
 		expect(component.render(120).join("\n")).toContain(theme.fg("accent", theme.bold("echo hello")));
-		component.updateArgs({ command: "echo hello", output_mode: "on_fail" });
-		expect(stripAnsi(component.render(120).join("\n"))).toContain("model output: on_fail");
+		expect(stripAnsi(component.render(120).join("\n"))).not.toContain("timeout 115s");
 
 		component.updateResult(
 			{ content: [{ type: "text", text: "working" }], details: undefined, isError: false },
 			true,
 		);
-		expect(component.render(120).join("\n")).toContain(`${theme.getFgAnsi("muted")}Elapsed `);
+		const partialLines = stripAnsi(component.render(120).join("\n")).split("\n");
+		const elapsedLine = partialLines.find((line) => line.includes("Elapsed "));
+		expect(elapsedLine).toContain("timeout 115s");
+		expect(partialLines.findIndex((line) => line.includes("model output: on_fail"))).toBeGreaterThan(
+			partialLines.findIndex((line) => line.includes("Elapsed ")),
+		);
 
 		component.updateResult({ content: [{ type: "text", text: "done" }], details: undefined, isError: false }, false);
 		const success = component.render(120).join("\n");
 		expect(success).toContain(`${theme.getFgAnsi("success")}Took `);
+		expect(stripAnsi(success.split("\n").find((line) => line.includes("Took "))!)).toContain("timeout 115s");
 		expect(success).toContain(theme.fg("muted", ` [local ${operations.cwd}]`));
 
 		component.updateResult({ content: [{ type: "text", text: "failed" }], details: undefined, isError: true }, false);
@@ -282,7 +287,7 @@ describe("ToolExecutionComponent parity", () => {
 		const component = new ToolExecutionComponent(
 			"bash",
 			"tool-bash-preview",
-			{ command: "produce lines" },
+			{ command: "produce lines", output_mode: "never" },
 			{},
 			createBashToolDefinition(operations),
 			createFakeTui(),
@@ -299,7 +304,7 @@ describe("ToolExecutionComponent parity", () => {
 			const collapsed = stripAnsi(lines.join("\n"));
 			expect(collapsed).not.toContain("entry-77");
 			expect(collapsed).toContain("entry-82");
-			expect(collapsed).toContain("77 lines hidden · ctrl+o to expand");
+			expect(collapsed).toContain("model output: never · 77 lines hidden · ctrl+o to expand");
 			expect(collapsed.indexOf("entry-82")).toBeLessThan(collapsed.indexOf("77 lines hidden"));
 			expect(collapsed.indexOf("Took ")).toBeLessThan(collapsed.indexOf("77 lines hidden"));
 			const hintLine = lines.find((line) => line.includes("77 lines hidden"));
@@ -307,11 +312,15 @@ describe("ToolExecutionComponent parity", () => {
 			expect(hintLine).toContain(theme.fg("accent", " · ctrl+o to expand"));
 			expect(lines.findIndex((line) => line.includes("77 lines hidden"))).toBe(lines.length - 2);
 			expect(lines.every((line) => visibleWidth(line) <= 120)).toBe(true);
+			const narrowLines = component.render(40);
+			expect(stripAnsi(narrowLines.join("\n"))).toContain("model output: never");
+			expect(narrowLines.every((line) => visibleWidth(line) <= 40)).toBe(true);
 
 			component.setExpanded(true);
 			const expanded = stripAnsi(component.render(120).join("\n"));
 			expect(expanded).toContain("entry-1");
 			expect(expanded).not.toContain("lines hidden");
+			expect(expanded).toContain("model output: never");
 		} finally {
 			setKeybindings(previousKeybindings);
 		}
@@ -370,6 +379,7 @@ describe("ToolExecutionComponent parity", () => {
 		);
 		component.updateResult({ content: [{ type: "text", text: "short" }], isError: false }, false);
 		expect(stripAnsi(component.render(120).join("\n"))).not.toContain("lines hidden");
+		expect(stripAnsi(component.render(120).join("\n"))).toContain("model output: always");
 	});
 
 	test("bash renderer does not duplicate final full output truncation details", async () => {
