@@ -91,10 +91,11 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 	return formatInstructionResourcesForPrompt(skills, {
 		intro: [
 			"The following skills provide specialized instructions for specific tasks.",
-			"Use the read tool to load a skill's file when the task matches its description.",
-			"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
+			"Use load_skill with a skill name (or an array of names) when the task matches its description.",
+			"When a loaded skill references a relative path, resolve it against the skill directory reported by load_skill and use that absolute path in tool commands.",
 		],
 		containerTag: "available_skills",
 		itemTag: "skill",
+		includeLocation: false,
 	});
 }

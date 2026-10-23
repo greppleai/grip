@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadRulesFromDir, type Rule } from "../../src/core/rules.ts";
 import { loadSkillsFromDir, type Skill } from "../../src/core/skills.ts";
+import { createSyntheticSourceInfo } from "../../src/core/source-info.ts";
 import { createTestResourceLoader } from "../utilities.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 
@@ -265,6 +266,102 @@ describe("AgentSession lazy session tool loading", () => {
 		expect(harness.session.getActiveToolNames()).toContain("read_skill_tool");
 	});
 
+	it("loads skills by name or name array, including session content, and activates associated tools", async () => {
+		const runs: string[] = [];
+		const { resourceLoader, skills } = createMutableResourceLoader();
+		const harness = await createHarness({ resourceLoader });
+		harnesses.push(harness);
+		harness.session.registerSessionTool(makeLazyTool("named_skill_tool", runs), { lazy: true });
+
+		const skillDir = join(harness.tempDir, "different-directory-name");
+		mkdirSync(skillDir, { recursive: true });
+		writeFileSync(
+			join(skillDir, "SKILL.md"),
+			"---\nname: named-skill\ndescription: Skill loaded by name.\ntools: named_skill_tool\n---\n\n# Named Skill\n",
+		);
+		skills.push(...loadSkillsFromDir({ dir: skillDir, source: "path" }).skills);
+		harness.session.registerSessionSkill({
+			name: "virtual-skill",
+			description: "In-memory skill",
+			filePath: "<virtual-skill>",
+			baseDir: harness.tempDir,
+			disableModelInvocation: false,
+			content: "# Virtual Skill\n",
+		});
+
+		expect(harness.session.getActiveToolNames()).toContain("load_skill");
+		expect(harness.session.systemPrompt).toContain("<name>named-skill</name>");
+		expect(harness.session.systemPrompt).not.toContain("<location>");
+		expect(harness.session.getActiveToolNames()).not.toContain("named_skill_tool");
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("load_skill", { name: ["named-skill", "virtual-skill", "named-skill"] }), {
+				stopReason: "toolUse",
+			}),
+			fauxAssistantMessage(fauxToolCall("named_skill_tool", {}), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("Load the named skills");
+
+		const skillResult = harness.session.messages.find(
+			(message) => message.role === "toolResult" && message.toolName === "load_skill",
+		);
+		const content = getMessageText(skillResult);
+		expect(content).toContain('Skill: "named-skill"');
+		expect(content).toContain(`Skill directory: ${JSON.stringify(skillDir)}`);
+		expect(content).toContain("# Named Skill");
+		expect(content).toContain('Skill: "virtual-skill"');
+		expect(content).toContain("# Virtual Skill");
+		expect(content.match(/Skill: /g)).toHaveLength(2);
+		expect(runs).toEqual(["named_skill_tool"]);
+	});
+
+	it("does not load hidden or unknown skills or activate their tools", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const runs: string[] = [];
+		harness.session.registerSessionTool(makeLazyTool("hidden_tool", runs), { lazy: true });
+		harness.session.registerSessionSkill({
+			name: "hidden-skill",
+			description: "Only available to explicit user commands",
+			filePath: "<hidden-skill>",
+			disableModelInvocation: true,
+			tools: ["hidden_tool"],
+			content: "# Hidden Skill\n",
+		});
+		expect(harness.session.systemPrompt).not.toContain("<name>hidden-skill</name>");
+		const definition = harness.session.getToolDefinition("load_skill");
+		expect(definition).toBeDefined();
+		const context = harness.session.extensionRunner.createContext();
+		await expect(
+			definition!.execute("skill-1", { name: "hidden-skill" }, undefined, undefined, context),
+		).rejects.toThrow("Skill not available: hidden-skill");
+		await expect(
+			definition!.execute("skill-2", { name: "/tmp/SKILL.md" }, undefined, undefined, context),
+		).rejects.toThrow("Skill not available: /tmp/SKILL.md");
+		expect(harness.session.getActiveToolNames()).not.toContain("hidden_tool");
+		expect(runs).toEqual([]);
+	});
+
+	it("does not read remote skill files through the host filesystem", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const skillPath = join(harness.tempDir, "remote-only.md");
+		writeFileSync(skillPath, "# Host decoy\n");
+		harness.session.registerSessionSkill({
+			name: "remote-only",
+			description: "Remote skill",
+			filePath: skillPath,
+			baseDir: harness.tempDir,
+			sourceInfo: createSyntheticSourceInfo(skillPath, { source: "remote" }),
+			disableModelInvocation: false,
+		});
+		const definition = harness.session.getToolDefinition("load_skill");
+		const context = harness.session.extensionRunner.createContext();
+		await expect(
+			definition!.execute("skill-remote", { name: "remote-only" }, undefined, undefined, context),
+		).rejects.toThrow("Remote skill not available: remote-only");
+	});
 	it("loads rule frontmatter tools when the model reads the rule file", async () => {
 		const runs: string[] = [];
 		const { resourceLoader, rules } = createMutableResourceLoader();

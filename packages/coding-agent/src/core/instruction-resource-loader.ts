@@ -87,6 +87,7 @@ interface InstructionResourcePromptFormatOptions {
 	intro: string[];
 	containerTag: string;
 	itemTag: string;
+	includeLocation?: boolean;
 }
 
 export interface InstructionResourceLoaderOptions {
@@ -755,7 +756,7 @@ export function formatInstructionResourcesForPrompt(
 		lines.push(`  <${options.itemTag}>`);
 		lines.push(`    <name>${escapeXml(resource.name)}</name>`);
 		lines.push(`    <description>${escapeXml(resource.description)}</description>`);
-		lines.push(`    <location>${escapeXml(resource.filePath)}</location>`);
+		if (options.includeLocation !== false) lines.push(`    <location>${escapeXml(resource.filePath)}</location>`);
 		lines.push(`  </${options.itemTag}>`);
 	}
 	lines.push(`</${options.containerTag}>`);

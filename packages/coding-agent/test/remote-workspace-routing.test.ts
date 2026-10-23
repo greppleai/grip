@@ -18,6 +18,8 @@ import { GripAgent } from "../src/core/grip-agent.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { InMemorySessionManager } from "../src/core/session/in-memory-session-manager.ts";
 import { LocalSessionManager } from "../src/core/session/local-session-manager.ts";
+import type { Skill } from "../src/core/skills.ts";
+import { createSyntheticSourceInfo } from "../src/core/source-info.ts";
 import {
 	borrowToolOperations,
 	createRemoteToolOperations,
@@ -96,6 +98,60 @@ afterEach(async () => {
 });
 
 describe("remote canonical workspace tool routing", () => {
+	it("loads guest skills through the remote backend and local skills from the host by name", async () => {
+		const guestRoot = await createTemporaryDirectory();
+		const localRoot = await createTemporaryDirectory();
+		const guestSkillDir = join(guestRoot, "guest-skill");
+		const localSkillDir = join(localRoot, "local-skill");
+		await mkdir(guestSkillDir);
+		await mkdir(localSkillDir);
+		const guestSkillPath = join(guestSkillDir, "SKILL.md");
+		const localSkillPath = join(localSkillDir, "SKILL.md");
+		await writeFile(guestSkillPath, "# Guest Skill\n");
+		await writeFile(localSkillPath, "# Host Skill\n");
+		const skills: Skill[] = [
+			{
+				name: "guest-skill",
+				description: "Skill in the guest",
+				filePath: guestSkillPath,
+				baseDir: guestSkillDir,
+				sourceInfo: createSyntheticSourceInfo(guestSkillPath, { source: "remote" }),
+				disableModelInvocation: false,
+			},
+			{
+				name: "local-skill",
+				description: "Skill on the host",
+				filePath: localSkillPath,
+				baseDir: localSkillDir,
+				sourceInfo: createSyntheticSourceInfo(localSkillPath, { source: "path" }),
+				disableModelInvocation: false,
+			},
+		];
+		const { server, address } = await createServer(guestRoot);
+		const operations = await createRemoteToolOperations(address.url);
+		const resourceLoader = { ...createTestResourceLoader(), getSkills: () => ({ skills, diagnostics: [] }) };
+		const harness = await createHarness({ toolOperations: operations, resourceLoader });
+		try {
+			const definition = harness.session.getToolDefinition("load_skill");
+			expect(definition).toBeDefined();
+			const result = await definition!.execute(
+				"load-remote-skills",
+				{ name: ["guest-skill", "local-skill"] },
+				undefined,
+				undefined,
+				harness.session.extensionRunner.createContext(),
+			);
+			expect(text(result)).toContain("# Guest Skill");
+			expect(text(result)).toContain("# Host Skill");
+			expect(text(result)).toContain(`Skill directory: ${JSON.stringify(localSkillDir)}`);
+		} finally {
+			await harness.session.dispose();
+			await operations.dispose();
+			await server.close();
+			harness.cleanup();
+		}
+	});
+
 	it("executes all seven canonical tools once through the daemon host with updates and details", async () => {
 		const workspaceRoot = await createTemporaryDirectory();
 		const { server, address } = await createServer(workspaceRoot);

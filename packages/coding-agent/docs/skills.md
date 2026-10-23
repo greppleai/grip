@@ -64,11 +64,11 @@ For project-level Claude Code skills, add to `.grip/settings.json`:
 ## How Skills Work
 
 1. At startup, Grip scans skill locations and extracts names and descriptions
-2. The system prompt includes available skills in XML format per the [specification](https://agentskills.io/integrate-skills)
-3. When a task matches, the agent uses `read` to load the full SKILL.md (models don't always do this; use prompting or `/skill:name` to force it)
+2. The system prompt includes available skill names and descriptions in XML, without file locations
+3. When a task matches, the agent calls `load_skill` with a skill name (or an array of names) to load the full instructions. The tool reports the skill directory for resolving relative references. Use `/skill:name` to force a skill from the UI.
 4. The agent follows the instructions, using relative paths to reference scripts and assets
 
-This is progressive disclosure: only descriptions are always in context, full instructions load on-demand.
+This is progressive disclosure: only descriptions are always in context, full instructions load on-demand. For example, use `load_skill({"name":"pdf-processing"})` for one skill or `load_skill({"name":["pdf-processing","data-analysis"]})` for several. Skills with `disable-model-invocation: true` remain user-only via `/skill:name`.
 
 ## Skill Commands
 
@@ -146,7 +146,7 @@ Per the [Agent Skills specification](https://agentskills.io/specification#frontm
 | `compatibility` | No | Max 500 chars. Environment requirements. |
 | `metadata` | No | Arbitrary key-value mapping. |
 | `allowed-tools` | No | Space-delimited list of pre-approved tools (experimental). |
-| `tools` | No | Tool name or YAML list of lazy tools to load automatically when the skill is loaded via `read` or `/skill:name`. |
+| `tools` | No | Tool name or YAML list of lazy tools to load automatically when the skill is loaded via `load_skill`, `read`, or `/skill:name`. |
 | `disable-model-invocation` | No | When `true`, skill is hidden from system prompt. Users must use `/skill:name`. |
 
 Example with associated lazy tools:

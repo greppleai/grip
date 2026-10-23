@@ -246,7 +246,8 @@ describe("skills", () => {
 			expect(result).toContain("<skill>");
 			expect(result).toContain("<name>test-skill</name>");
 			expect(result).toContain("<description>A test skill.</description>");
-			expect(result).toContain("<location>/path/to/skill/SKILL.md</location>");
+			expect(result).not.toContain("<location>");
+			expect(result).not.toContain("/path/to/skill/SKILL.md");
 		});
 
 		it("should include intro text before XML", () => {
@@ -264,7 +265,7 @@ describe("skills", () => {
 			const introText = result.substring(0, xmlStart);
 
 			expect(introText).toContain("The following skills provide specialized instructions");
-			expect(introText).toContain("Use the read tool to load a skill's file");
+			expect(introText).toContain("Use load_skill with a skill name");
 		});
 
 		it("should escape XML special characters", () => {

@@ -15,6 +15,7 @@ import { createWriteToolDefinition } from "../src/core/tools/write.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
+import { createHarness } from "./suite/harness.ts";
 
 interface CapturedToolUpdateContent {
 	type: string;
@@ -168,6 +169,64 @@ describe("ToolExecutionComponent parity", () => {
 		expect(rendered).toContain("README.md");
 	});
 
+	test("renders load_skill like compact skill reads, expandable and with visible errors", async () => {
+		const harness = await createHarness();
+		const previousKeybindings = getKeybindings();
+		setKeybindings(new KeybindingsManager());
+		try {
+			for (const name of ["first-skill", "second-skill"]) {
+				harness.session.registerSessionSkill({
+					name,
+					description: name,
+					filePath: `<${name}>`,
+					baseDir: process.cwd(),
+					disableModelInvocation: false,
+					content: `# ${name} instructions\n`,
+				});
+			}
+			const definition = harness.session.getToolDefinition("load_skill");
+			expect(definition).toBeDefined();
+			const args = { name: ["first-skill", "second-skill"] };
+			const result = await definition!.execute(
+				"tool-skill",
+				args,
+				undefined,
+				undefined,
+				harness.session.extensionRunner.createContext(),
+			);
+			const component = new ToolExecutionComponent(
+				"load_skill",
+				"tool-skill",
+				args,
+				{},
+				definition,
+				createFakeTui(),
+				process.cwd(),
+			);
+			component.updateResult({ ...result, isError: false }, false);
+			const collapsed = stripAnsi(component.render(120).join("\n"));
+			expect(collapsed).toContain("[skill] first-skill, second-skill");
+			expect(collapsed).toContain("ctrl+o to expand");
+			expect(collapsed).not.toContain("# first-skill instructions");
+			expect(collapsed).not.toContain("# second-skill instructions");
+
+			component.setExpanded(true);
+			const expanded = stripAnsi(component.render(120).join("\n"));
+			expect(expanded).toContain("# first-skill instructions");
+			expect(expanded).toContain("# second-skill instructions");
+			expect(expanded).not.toContain("ctrl+o to expand");
+
+			component.setExpanded(false);
+			component.updateResult(
+				{ content: [{ type: "text", text: "Skill not available: unknown" }], isError: true },
+				false,
+			);
+			expect(stripAnsi(component.render(120).join("\n"))).toContain("Skill not available: unknown");
+		} finally {
+			setKeybindings(previousKeybindings);
+			harness.cleanup();
+		}
+	});
 	test("bash execute emits an initial empty partial update before output arrives", async () => {
 		const updates: Array<{ content: CapturedToolUpdateContent[]; details?: unknown }> = [];
 		const operations = new LocalToolOperations(process.cwd());

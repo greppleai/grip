@@ -16,6 +16,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { readFile as fsReadFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, posix, sep, win32 } from "node:path";
 import type {
@@ -62,6 +63,7 @@ import {
 } from "@greppleai/grip-ai";
 import { Text } from "@greppleai/grip-tui";
 import { type Static, type TSchema, Type } from "typebox";
+import { keyText } from "../modes/interactive/components/keybinding-hints.ts";
 import { theme } from "../modes/interactive/theme/theme.ts";
 import { getSandboxDirectoryCompletions } from "../utils/directory-completions.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
@@ -219,6 +221,7 @@ import {
 	type ToolOperations,
 } from "./tools/operations.ts";
 import type { ReadToolOperationsSelection } from "./tools/read.ts";
+import { getTextOutput } from "./tools/render-utils.ts";
 import { createSessionEntryGetToolDefinition, createSessionSearchToolDefinition } from "./tools/session-history.ts";
 import {
 	createCreateSubagentToolDefinition,
@@ -238,7 +241,7 @@ import { WORKSPACE_TOOL_NAMES, WorkspaceToolHost } from "./tools/workspace-tool-
 // Skill Block Parsing
 // ============================================================================
 
-const CORE_DEFAULT_TOOL_NAMES = ["read", "bash", "edit", "write", "websearch"] as const;
+const CORE_DEFAULT_TOOL_NAMES = ["read", "bash", "edit", "write", "websearch", "load_skill"] as const;
 const SESSION_HISTORY_TOOL_NAMES = ["session_search", "session_entry_get"] as const;
 export const SUBAGENT_TOOL_NAMES = ["subagent", "subagent_runs", "create_subagent"] as const;
 export const DEFAULT_ACTIVE_TOOL_NAMES = [...CORE_DEFAULT_TOOL_NAMES, ...SESSION_HISTORY_TOOL_NAMES] as const;
@@ -5497,6 +5500,75 @@ export class AgentSession {
 		return execCommand(executable, args, hostCwd, { signal, timeout: options.timeout });
 	}
 
+	private _createLoadSkillToolDefinition(): ToolDefinition {
+		const parameters = Type.Object({
+			name: Type.Union([Type.String(), Type.Array(Type.String())], {
+				description: "Name of a listed skill, or an array of skill names to load in one call",
+			}),
+		});
+		return {
+			name: "load_skill",
+			label: "Load skill",
+			description:
+				"Load the full instructions for one or more available skills by name. Use the reported skill directory to resolve relative references. Hidden skills and unknown names are not available.",
+			promptSnippet: "Load instructions for available skills by name (or an array of names)",
+			parameters,
+			renderCall: (args, renderTheme, context) => {
+				const names = getToolNameArgs(args as SessionToolNameArgs | undefined);
+				const expandKey = keyText("app.tools.expand");
+				const hint = !context.expanded && expandKey ? renderTheme.fg("dim", ` (${expandKey} to expand)`) : "";
+				return new Text(
+					renderTheme.fg("customMessageLabel", `\x1b[1m[skill]\x1b[22m `) +
+						renderTheme.fg("customMessageText", names.join(", ")) +
+						hint,
+					0,
+					0,
+				);
+			},
+			renderResult: (result, options, renderTheme, context) => {
+				const output = options.expanded || context.isError ? getTextOutput(result, context.showImages) : "";
+				return new Text(
+					output ? `\n${renderTheme.fg(context.isError ? "error" : "toolOutput", output)}` : "",
+					0,
+					0,
+				);
+			},
+			executionMode: "sequential",
+			execute: async (_toolCallId, params: SessionToolNameParameters, signal) => {
+				if (signal?.aborted) throw new Error("Skill load cancelled");
+				const names = [...new Set(Array.isArray(params.name) ? params.name : [params.name])];
+				if (names.length === 0 || names.some((name) => !name)) throw new Error("Specify at least one skill name");
+				const availableSkills = new Map(
+					this.getRegisteredSkills()
+						.filter((skill) => !skill.disableModelInvocation)
+						.map((skill) => [skill.name, skill]),
+				);
+				const missing = names.filter((name) => !availableSkills.has(name));
+				if (missing.length > 0) throw new Error(`Skill not available: ${missing.join(", ")}`);
+				const skills = names.map((name) => availableSkills.get(name)!);
+				const content = await Promise.all(
+					skills.map(async (skill) => {
+						let text = skill.content;
+						if (text === undefined && getSourceBackend(skill.sourceInfo) === "remote") {
+							if (this.getToolBackendInfo().type !== "remote")
+								throw new Error(`Remote skill not available: ${skill.name}`);
+							text = (await this.getToolOperations().readFile(skill.filePath)).toString("utf-8");
+						} else if (text === undefined) {
+							text = await fsReadFile(resolvePath(skill.filePath, this._cwd), "utf-8");
+						}
+						return {
+							type: "text" as const,
+							text: `Skill: ${JSON.stringify(skill.name)}\nSkill directory: ${JSON.stringify(skill.baseDir)}\nFile: ${JSON.stringify(skill.filePath)}\n\n${text}`,
+						};
+					}),
+				);
+				if (signal?.aborted) throw new Error("Skill load cancelled");
+				for (const skill of skills) this._loadAssociatedInstructionTools(skill);
+				return { content, details: { names } };
+			},
+		};
+	}
+
 	private _createLoadToolDefinition(): ToolDefinition {
 		const parameters = Type.Object({
 			name: Type.Union([Type.String(), Type.Array(Type.String())], {
@@ -5901,6 +5973,7 @@ export class AgentSession {
 			this._baseToolDefinitions = new Map(Object.entries(baseToolDefinitions));
 			this._initializeRuntimeLsp(operations);
 
+			this._baseToolDefinitions.set("load_skill", this._createLoadSkillToolDefinition());
 			this._baseToolDefinitions.set("load_tool", this._createLoadToolDefinition());
 			this._baseToolDefinitions.set("unload_tool", this._createUnloadToolDefinition());
 

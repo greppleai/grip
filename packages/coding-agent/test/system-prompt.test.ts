@@ -63,6 +63,34 @@ describe("buildSystemPrompt", () => {
 		});
 	});
 
+	describe("skill discovery", () => {
+		const skill = {
+			name: "sample-skill",
+			description: "A skill for prompt tests.",
+			filePath: "/example/SKILL.md",
+			baseDir: "/example",
+			sourceInfo: {
+				path: "/example/SKILL.md",
+				source: "test",
+				scope: "temporary" as const,
+				origin: "top-level" as const,
+			},
+			disableModelInvocation: false,
+		};
+
+		test("lists skills by name when load_skill is available even without read", () => {
+			const prompt = buildSystemPrompt({ selectedTools: ["load_skill"], skills: [skill], cwd: process.cwd() });
+			expect(prompt).toContain("<available_skills>");
+			expect(prompt).toContain("<name>sample-skill</name>");
+			expect(prompt).toContain("Use load_skill with a skill name");
+			expect(prompt).not.toContain("<location>");
+		});
+
+		test("does not list skills if load_skill is unavailable", () => {
+			const prompt = buildSystemPrompt({ selectedTools: ["read"], skills: [skill], cwd: process.cwd() });
+			expect(prompt).not.toContain("<available_skills>");
+		});
+	});
 	describe("custom tool snippets", () => {
 		test("includes custom tools in available tools section when promptSnippet is provided", () => {
 			const prompt = buildSystemPrompt({

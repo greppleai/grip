@@ -15,7 +15,7 @@ export interface SystemPromptContextFile {
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
-	/** Tools to include in prompt. Default: [read, bash, edit, write] */
+	/** Tools to include in prompt. Default: [read, bash, edit, write, load_skill] */
 	selectedTools?: string[];
 	/** Optional one-line tool snippets keyed by tool name. */
 	toolSnippets?: Record<string, string>;
@@ -41,6 +41,7 @@ interface SystemPromptFinalizationOptions {
 	skills: Skill[];
 	rules: Rule[];
 	hasRead: boolean;
+	hasLoadSkill: boolean;
 }
 
 function getCurrentPromptDate(): string {
@@ -150,7 +151,7 @@ function finalizeSystemPrompt(prompt: string, options: SystemPromptFinalizationO
 		}
 		prompt += "</project_context>\n";
 	}
-	if (options.hasRead && options.skills.length > 0) prompt += formatSkillsForPrompt(options.skills);
+	if (options.hasLoadSkill && options.skills.length > 0) prompt += formatSkillsForPrompt(options.skills);
 	if (options.hasRead && options.rules.length > 0) prompt += formatRulesForPrompt(options.rules);
 	prompt += `\nCurrent date: ${options.date}`;
 	prompt += `\nCurrent working directory: ${options.promptCwd}`;
@@ -159,7 +160,7 @@ function finalizeSystemPrompt(prompt: string, options: SystemPromptFinalizationO
 
 /** Build the system prompt with tools, guidelines, and context */
 export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
-	const tools = options.selectedTools || ["read", "bash", "edit", "write"];
+	const tools = options.selectedTools || ["read", "bash", "edit", "write", "load_skill"];
 	const basePrompt = options.customPrompt || buildDefaultSystemPrompt(options, tools);
 	return finalizeSystemPrompt(basePrompt, {
 		appendSystemPrompt: options.appendSystemPrompt,
@@ -169,5 +170,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		skills: options.skills ?? [],
 		rules: options.rules ?? [],
 		hasRead: !options.selectedTools || tools.includes("read"),
+		hasLoadSkill: tools.includes("load_skill"),
 	});
 }
