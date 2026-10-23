@@ -2,6 +2,13 @@
 
 All notable changes to `@greppleai/grip-ai` are documented in this file.
 
+## [0.1.6](https://github.com/greppleai/grip/compare/@greppleai/grip-ai-v0.1.5...@greppleai/grip-ai-v0.1.6) (2026-10-23)
+
+
+### Features
+
+* use Grepple logo on authentication callback pages ([d2b8aa7](https://github.com/greppleai/grip/commit/d2b8aa7ff4e3920bb2a690d587495f4e5d4ad959))
+
 ## [0.1.5](https://github.com/greppleai/grip/compare/@greppleai/grip-ai-v0.1.4...@greppleai/grip-ai-v0.1.5) (2026-10-22)
 
 
