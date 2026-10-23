@@ -42,6 +42,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | `/new [--sandbox]` | Start a new session; `--sandbox` reuses the active sandbox connection |
+| `/cd [directory]` | Change working directory (within the existing guest mount when sandboxed) |
 | `/name <name>` | Set session display name |
 | `/session` | Show session file, ID, messages, tokens, and cost |
 | `/tree` | Jump to any point in the session and continue from there |

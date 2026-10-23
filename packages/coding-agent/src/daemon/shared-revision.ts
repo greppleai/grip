@@ -79,6 +79,7 @@ export function withSharedRevisionGuard<T>(
 			"Shared edit requires expected SHA-256; shared write requires expected SHA-256, expected absence or explicit unsafeOverwrite",
 		);
 	}
-	const target = resolve(root, args.path);
+	const options = params.executionOptions as { cwd?: string } | undefined;
+	const target = resolve(options?.cwd ?? root, args.path);
 	return withFileMutationGuard((filePath) => checkRevision(filePath, target, revision, operations, context), action);
 }

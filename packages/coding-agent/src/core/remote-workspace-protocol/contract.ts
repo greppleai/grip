@@ -416,6 +416,10 @@ export type RemoteWorkspaceServerMessage = Static<typeof RemoteWorkspaceServerMe
 
 const EmptyParamsSchema = Type.Object({}, closedObject);
 const PathParamsSchema = Type.Object({ path: Type.String({ minLength: 1, maxLength: 32_768 }) }, closedObject);
+const WorkspaceStatParamsSchema = Type.Object(
+	{ path: Type.String({ minLength: 1, maxLength: 32_768 }), workspaceOnly: Type.Optional(Type.Boolean()) },
+	closedObject,
+);
 const CatalogGetParamsSchema = EmptyParamsSchema;
 const SessionEnvironmentSchema = Type.Object(
 	{
@@ -448,6 +452,7 @@ const ToolInvokeParamsSchema = Type.Object(
 				imageAutoResize: Type.Optional(Type.Boolean()),
 				shellCommandPrefix: Type.Optional(Type.String({ maxLength: 32_768 })),
 				sessionEnvironment: Type.Optional(SessionEnvironmentSchema),
+				cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 32_768 })),
 			},
 			closedObject,
 		),
@@ -594,6 +599,7 @@ const StatResultSchema = Type.Object(
 			Type.Literal("absent"),
 		]),
 		workspace: RemoteWorkspaceIdentitySchema,
+		canonicalPath: Type.Optional(Type.String({ minLength: 1, maxLength: 32_768 })),
 	},
 	closedObject,
 );
@@ -661,7 +667,7 @@ const parameterValidators = {
 	"workspace.read": Compile(PathParamsSchema),
 	"workspace.write": Compile(WriteParamsSchema),
 	"workspace.mkdir": Compile(MkdirParamsSchema),
-	"workspace.stat": Compile(PathParamsSchema),
+	"workspace.stat": Compile(WorkspaceStatParamsSchema),
 	"workspace.readdir": Compile(PathParamsSchema),
 	"workspace.glob": Compile(GlobParamsSchema),
 	"workspace.grep": Compile(GrepParamsSchema),

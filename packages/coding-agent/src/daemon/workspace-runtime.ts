@@ -260,6 +260,14 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 		const canonical = await realpath(candidate);
 		return this.lexicalPath(canonical);
 	}
+	async resolveWorkingDirectory(path: string): Promise<string> {
+		const directory = await this.existingPath(path);
+		if (!this.isWithinAllowedRoot(directory, this.cwd)) {
+			throw new Error(`Working directory is outside the mounted workspace: ${path}`);
+		}
+		if (!(await lstat(directory)).isDirectory()) throw new Error(`Not a directory: ${path}`);
+		return directory;
+	}
 
 	private async existingWritablePath(candidate: string, path: string): Promise<string | undefined> {
 		try {
@@ -465,15 +473,17 @@ async function synchronizeDaemonToolFile(
 	toolName: string,
 	invocationArguments: unknown,
 	runtime: DaemonRequestRuntime,
+	cwd: string,
 ): Promise<void> {
 	if (!runtime.lspRuntime) return;
 	const args = invocationArguments as { path?: unknown };
 	if (typeof args.path !== "string") return;
+	const filePath = resolve(cwd, args.path);
 	try {
 		if (toolName === "read") {
-			await runtime.lspRuntime.fileSync.handleFileRead(args.path, runtime.operations);
+			await runtime.lspRuntime.fileSync.handleFileRead(filePath, runtime.operations);
 		} else if (toolName === "write" || toolName === "edit") {
-			await runtime.lspRuntime.fileSync.handleFileWrite(args.path, runtime.operations);
+			await runtime.lspRuntime.fileSync.handleFileWrite(filePath, runtime.operations);
 		}
 	} catch {
 		// Synchronization remains best-effort, matching local AgentSession behavior.
@@ -482,6 +492,20 @@ async function synchronizeDaemonToolFile(
 
 function marksToolSideEffect(kind: RemoteWorkspaceOperationKind, toolName: string, sharedMode: boolean): boolean {
 	return kind !== "read" && !(sharedMode && (toolName === "edit" || toolName === "write"));
+}
+
+interface ResolvedDaemonToolCwd {
+	cwd: string;
+	executionOptions: WorkspaceToolExecutionOptions;
+}
+
+async function resolveDaemonToolCwd(
+	options: WorkspaceToolExecutionOptions,
+	runtime: DaemonRequestRuntime,
+): Promise<ResolvedDaemonToolCwd> {
+	if (!options.cwd) return { cwd: runtime.operations.cwd, executionOptions: options };
+	const cwd = await runtime.operations.resolveWorkingDirectory(options.cwd);
+	return { cwd, executionOptions: { ...options, cwd } };
 }
 
 async function invokeDaemonTool(
@@ -495,17 +519,21 @@ async function invokeDaemonTool(
 	if (marksToolSideEffect(kind, toolName, runtime.sharedMode)) context.markSideEffectStarted();
 	let updateQueue = Promise.resolve();
 	try {
+		const { cwd, executionOptions } = await resolveDaemonToolCwd(
+			params.executionOptions as WorkspaceToolExecutionOptions,
+			runtime,
+		);
 		const result = await runtime.host.executePrepared(toolName, {
 			toolCallId: request.id,
 			arguments: params.arguments,
 			signal: context.signal,
-			executionOptions: params.executionOptions as WorkspaceToolExecutionOptions,
+			executionOptions,
 			onUpdate: (update) => {
 				updateQueue = updateQueue.then(() => context.sendUpdate(portableToolResult(update)));
 			},
 		});
 		await updateQueue;
-		await synchronizeDaemonToolFile(toolName, params.arguments, runtime);
+		await synchronizeDaemonToolFile(toolName, params.arguments, runtime, cwd);
 		if (kind !== "read") context.markCommitted();
 		return portableToolResult(result);
 	} catch (error) {
@@ -606,7 +634,15 @@ function getDaemonLspStatus(runtime: DaemonRequestRuntime): Record<string, unkno
 		servers: runtime.lspRuntime.manager.getStatus().map((status) => sanitizeLspStatus(status, runtime.configuration)),
 	};
 }
-async function statDaemonWorkspace(path: string, runtime: DaemonRequestRuntime): Promise<unknown> {
+async function statDaemonWorkspace(
+	path: string,
+	runtime: DaemonRequestRuntime,
+	workspaceOnly = false,
+): Promise<unknown> {
+	if (workspaceOnly) {
+		const canonicalPath = await runtime.operations.resolveWorkingDirectory(path);
+		return withDaemonWorkspace({ kind: "directory", canonicalPath }, runtime.workspace);
+	}
 	try {
 		const value = await runtime.operations.stat(path);
 		return withDaemonWorkspace(
@@ -660,7 +696,7 @@ async function dispatchDaemonWorkspaceRequest(
 			context.markCommitted();
 			return {};
 		case "workspace.stat":
-			return statDaemonWorkspace(params.path as string, runtime);
+			return statDaemonWorkspace(params.path as string, runtime, params.workspaceOnly === true);
 		case "workspace.readdir":
 			return withDaemonWorkspace(
 				{ entries: await runtime.operations.readdir(params.path as string) },

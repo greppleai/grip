@@ -13,7 +13,12 @@ import { createEditToolDefinition, type EditToolDefinition, type EditToolOptions
 import { createFindToolDefinition, type FindToolDefinition, type FindToolOptions } from "./find.ts";
 import { createGrepToolDefinition, type GrepToolDefinition, type GrepToolOptions } from "./grep.ts";
 import { createLsToolDefinition, type LsToolDefinition, type LsToolOptions } from "./ls.ts";
-import { LocalToolOperations, type ToolOperations, type WorkspaceToolExecutionOptions } from "./operations.ts";
+import {
+	borrowToolOperations,
+	LocalToolOperations,
+	type ToolOperations,
+	type WorkspaceToolExecutionOptions,
+} from "./operations.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import {
 	createReadToolDefinition,
@@ -302,13 +307,40 @@ export class WorkspaceToolHost {
 		return { executeRemotely: !readOperations, readOperations };
 	}
 
+	private createScopedToolDefinition(
+		name: string,
+		operations: ToolOperations,
+		cwd: string | undefined,
+	): WorkspaceToolDefinition | undefined {
+		if (!cwd) return undefined;
+		const factories: Partial<Record<WorkspaceToolName, () => WorkspaceToolDefinition>> = {
+			edit: () => createEditToolDefinition(operations, this.toolOptions?.edit),
+			write: () => createWriteToolDefinition(operations, this.toolOptions?.write),
+			grep: () => createGrepToolDefinition(operations, this.toolOptions?.grep),
+			find: () => createFindToolDefinition(operations, this.toolOptions?.find),
+			ls: () => createLsToolDefinition(operations, this.toolOptions?.ls),
+		};
+		return factories[name as WorkspaceToolName]?.();
+	}
+
 	private resolveLocalDefinition<TParams extends TSchema, TDetails>(
 		request: HostedToolExecution<TParams, TDetails>,
 		definition: ToolDefinition<TParams, TDetails>,
 		readOperations: ReadToolOperations | undefined,
 	): ToolDefinition<TParams, TDetails> {
-		if (request.name === "read" && (readOperations || request.executionOptions?.imageAutoResize !== undefined)) {
-			return createReadToolDefinition(this.operations, {
+		const cwd = request.executionOptions?.cwd;
+		// Bind only this invocation's cwd; never mutate the shared daemon host or its mount root.
+		const operations = cwd
+			? (new Proxy(borrowToolOperations(this.operations), {
+					get: (target, property, receiver) =>
+						property === "cwd" ? cwd : Reflect.get(target, property, receiver),
+				}) as ToolOperations)
+			: this.operations;
+		if (
+			request.name === "read" &&
+			(cwd || readOperations || request.executionOptions?.imageAutoResize !== undefined)
+		) {
+			return createReadToolDefinition(operations, {
 				...this.toolOptions?.read,
 				...(request.executionOptions?.imageAutoResize === undefined
 					? {}
@@ -318,14 +350,15 @@ export class WorkspaceToolHost {
 		}
 		if (
 			request.name === "bash" &&
-			(request.executionOptions?.shellCommandPrefix !== undefined ||
+			(cwd ||
+				request.executionOptions?.shellCommandPrefix !== undefined ||
 				request.executionOptions?.sessionEnvironment !== undefined)
 		) {
-			const sessionEnvironment = request.executionOptions.sessionEnvironment;
+			const sessionEnvironment = request.executionOptions?.sessionEnvironment;
 			const configuredSpawnHook = this.toolOptions?.bash?.spawnHook;
-			return createBashToolDefinition(this.operations, {
+			return createBashToolDefinition(operations, {
 				...this.toolOptions?.bash,
-				commandPrefix: request.executionOptions.shellCommandPrefix,
+				commandPrefix: request.executionOptions?.shellCommandPrefix,
 				exposeSessionEnvironment: false,
 				spawnHook: sessionEnvironment
 					? (spawnContext) => {
@@ -335,7 +368,10 @@ export class WorkspaceToolHost {
 					: configuredSpawnHook,
 			}) as unknown as ToolDefinition<TParams, TDetails>;
 		}
-		return definition;
+		return (this.createScopedToolDefinition(request.name, operations, cwd) ?? definition) as ToolDefinition<
+			TParams,
+			TDetails
+		>;
 	}
 
 	private startRemoteExecution<TParams extends TSchema, TDetails>(

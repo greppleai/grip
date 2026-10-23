@@ -134,6 +134,8 @@ export interface WorkspaceToolExecutionOptions {
 	imageAutoResize?: boolean;
 	shellCommandPrefix?: string;
 	sessionEnvironment?: GripSessionEnvironment;
+	/** Per-invocation guest working directory; the daemon workspace root remains unchanged. */
+	cwd?: string;
 }
 
 interface NormalizedRemoteWorkspaceUrl {
@@ -490,6 +492,10 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 		return this.requireOperations().stat(path);
 	}
 
+	async resolveWorkspaceDirectory(path: string): Promise<string> {
+		return this.requireOperations().resolveWorkspaceDirectory(path);
+	}
+
 	async readdir(path: string): Promise<string[]> {
 		return this.requireOperations().readdir(path);
 	}
@@ -518,7 +524,13 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	}
 
 	executeWorkspaceTool(name: string, invocation: WorkspaceToolRemoteInvocation): Promise<AgentToolResult<unknown>> {
-		return this.requireOperations().executeWorkspaceTool(name, invocation);
+		return this.requireOperations().executeWorkspaceTool(name, {
+			...invocation,
+			executionOptions: {
+				...invocation.executionOptions,
+				...(this.cwd === this.requireOperations().cwd ? {} : { cwd: this.cwd }),
+			},
+		});
 	}
 
 	getRemoteLspStatus(): RemoteLspStatus {
@@ -854,7 +866,9 @@ export class RemoteToolOperations implements ToolOperations {
 			requireRecord(invocation.arguments, "shared mutation arguments").path,
 			"shared mutation path",
 		);
-		return this.sharedExpectedRevision(path, invocation.signal, name === "write");
+		const cwd = invocation.executionOptions.cwd;
+		const target = cwd ? (this.workspacePathFlavor === "windows" ? win32 : posix).resolve(cwd, path) : path;
+		return this.sharedExpectedRevision(target, invocation.signal, name === "write");
 	}
 
 	/** Observe exact bytes for CAS, or a daemon-confirmed absent target for creation. */
@@ -983,6 +997,15 @@ export class RemoteToolOperations implements ToolOperations {
 			isDirectory: () => result.kind === "directory",
 			isFile: () => result.kind === "file",
 		};
+	}
+
+	async resolveWorkspaceDirectory(path: string): Promise<string> {
+		const result = requireRecord(
+			await this.request("workspace.stat", { path, workspaceOnly: true }),
+			"workspace directory result",
+		);
+		if (result.kind !== "directory") throw new Error(`Not a workspace directory: ${path}`);
+		return requireString(result.canonicalPath, "workspace directory canonical path");
 	}
 
 	async readdir(path: string): Promise<string[]> {

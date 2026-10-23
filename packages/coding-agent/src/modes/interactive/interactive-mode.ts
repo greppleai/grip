@@ -5975,13 +5975,42 @@ export class InteractiveMode {
 
 	// =========================================================================
 	// Command handlers
+	private async handleSandboxCdCommand(text: string): Promise<void> {
+		const backend = this.session.getToolBackendInfo();
+		if (backend.type !== "remote" || !backend.configured) {
+			this.showWarning("Changing directories is not supported with the active workspace backend.");
+			return;
+		}
+		const argument = this.getPathCommandArgument(text, "/cd");
+		if (text !== "/cd" && !argument) {
+			this.showError("Usage: /cd [directory]");
+			return;
+		}
+		try {
+			const directory = await this.session.changeSandboxWorkingDirectory(argument ?? backend.workspace.root);
+			this.showStatus(`Working directory: ${directory}`);
+		} catch (error) {
+			this.showError(
+				`Failed to change sandbox directory: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+
+	private async handleUnavailableCdCommand(text: string): Promise<void> {
+		if (this.activeSandboxBackendConnected) {
+			await this.handleSandboxCdCommand(text);
+		} else {
+			this.showWarning("Changing directories is not supported with the active workspace backend.");
+		}
+	}
+
 	private async handleCdCommand(text: string): Promise<void> {
 		if (!this.session.isIdle || this.session.isBashRunning) {
 			this.showWarning("Wait for the current operation to finish before changing directories.");
 			return;
 		}
 		if (!this.session.supportsDirectoryChange()) {
-			this.showWarning("Changing directories is not supported with the active workspace backend.");
+			await this.handleUnavailableCdCommand(text);
 			return;
 		}
 

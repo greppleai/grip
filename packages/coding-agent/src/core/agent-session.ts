@@ -169,6 +169,7 @@ import {
 	type LspRuntimeState,
 	type LspSessionStatus,
 } from "./lsp/integration.ts";
+import type { PortablePathFlavor } from "./lsp/portable-path.ts";
 import type { LspConnectionFactoryRegistry } from "./lsp/transport.ts";
 import {
 	type BashExecutionMessage,
@@ -1063,6 +1064,12 @@ function extractJsonCandidates(text: string): unknown[] {
 // AgentSession Class
 // ============================================================================
 
+function isWithinSandboxMount(directory: string, root: string, flavor: PortablePathFlavor): boolean {
+	const paths = flavor === "windows" ? win32 : posix;
+	const relativePath = paths.relative(root, directory);
+	return relativePath !== ".." && !relativePath.startsWith(`..${paths.sep}`) && !paths.isAbsolute(relativePath);
+}
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly session: Session;
@@ -1418,6 +1425,26 @@ export class AgentSession {
 		);
 	}
 
+	/** Change only the connected sandbox's working directory, never the host session or mount. */
+	async changeSandboxWorkingDirectory(target: string): Promise<string> {
+		const operations = this._sandboxToolOperations;
+		const backend = operations?.getBackendInfo();
+		if (!operations || operations !== this._toolOperations || backend?.type !== "remote" || !backend.configured) {
+			throw new Error("No connected sandbox is active");
+		}
+		const paths = backend.workspace.pathFlavor === "windows" ? win32 : posix;
+		const candidate = paths.resolve(operations.cwd, target);
+		if (!isWithinSandboxMount(candidate, backend.workspace.root, backend.workspace.pathFlavor)) {
+			throw new Error(`Directory is outside the mounted workspace: ${target}`);
+		}
+		const directory = await operations.resolveWorkspaceDirectory(candidate);
+		if (!isWithinSandboxMount(directory, backend.workspace.root, backend.workspace.pathFlavor)) {
+			throw new Error(`Directory is outside the mounted workspace: ${target}`);
+		}
+		operations.cwd = directory;
+		this._refreshBaseSystemPrompt();
+		return directory;
+	}
 	private async _activateSessionRemoteOperations(
 		expectedCwd: string,
 		configure: (operations: DeferredRemoteToolOperations) => Promise<ToolBackendInfo>,

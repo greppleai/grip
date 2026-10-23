@@ -6,6 +6,8 @@ The command appears in slash-command completion but not in model-visible catalog
 
 `/new --sandbox` starts a fresh conversation in the same connected sandbox (started or attached) without starting another VM. Plain `/new` starts a local session; if there is no active sandbox, `/new --sandbox` does the same. Sandbox connections are remembered in memory only while Grip remains running.
 
+Inside a connected sandbox, `/cd <directory>` changes the guest working directory for subsequent tools within the existing mounted workspace. `/cd` without an argument returns to the guest workspace root. It does not change the host session directory, remount the workspace, or reconnect the daemon. The guest working directory resets to the mount root after a session switch or reconnection.
+
 ## Commands
 
 ```text

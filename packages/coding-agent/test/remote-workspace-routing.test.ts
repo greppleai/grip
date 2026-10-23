@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -459,6 +459,68 @@ describe("remote canonical workspace tool routing", () => {
 		await sandboxExpected.dispose();
 		await server.close();
 	});
+	it("changes sandbox cwd without replacing the session or disconnecting the mounted workspace", async () => {
+		const workspaceRoot = await createTemporaryDirectory();
+		const guestSubdirectory = join(workspaceRoot, "subdirectory");
+		await mkdir(guestSubdirectory);
+		await writeFile(join(guestSubdirectory, "guest.txt"), "inside sandbox");
+		const hostRoot = await createTemporaryDirectory();
+		const temporaryRoot = await createTemporaryDirectory();
+		await symlink(temporaryRoot, join(workspaceRoot, "outside-link"));
+		const { server, address } = await createServer(workspaceRoot, true, undefined, undefined, temporaryRoot);
+		const deferred = new DeferredRemoteToolOperations(hostRoot);
+		const harness = await createHarness({ toolOperations: deferred });
+		try {
+			await harness.session.activateSandboxDaemon({ url: address.url, token: "", expectedCwd: workspaceRoot });
+			const session = harness.session.session;
+			const originalHostCwd = session.getCwd();
+			const operations = harness.session.getToolOperations();
+			const host = new WorkspaceToolHost({ cwd: operations.cwd, operations });
+			const otherClient = await createRemoteToolOperations(address.url);
+			const otherHost = new WorkspaceToolHost({ cwd: otherClient.cwd, operations: otherClient });
+			try {
+				await expect(harness.session.changeSandboxWorkingDirectory("../outside")).rejects.toThrow("outside");
+				await expect(harness.session.changeSandboxWorkingDirectory("outside-link")).rejects.toThrow();
+				await expect(harness.session.changeSandboxWorkingDirectory("missing")).rejects.toThrow();
+				expect(operations.cwd).toBe(workspaceRoot);
+				expect(await harness.session.changeSandboxWorkingDirectory("subdirectory")).toBe(guestSubdirectory);
+				expect(harness.session.session).toBe(session);
+				expect(session.getCwd()).toBe(originalHostCwd);
+				expect(harness.session.getToolBackendInfo()).toMatchObject({
+					type: "remote",
+					cwd: workspaceRoot,
+					workspace: { root: workspaceRoot },
+				});
+				expect(
+					text(await host.execute("read", { toolCallId: "read-cd", arguments: { path: "guest.txt" } })),
+				).toContain("inside sandbox");
+				await host.execute("write", {
+					toolCallId: "write-cd",
+					arguments: { path: "written.txt", content: "guest" },
+				});
+				expect(await readFile(join(guestSubdirectory, "written.txt"), "utf8")).toBe("guest");
+				expect(
+					text(await host.execute("bash", { toolCallId: "bash-cd", arguments: { command: "pwd" } })),
+				).toContain(guestSubdirectory);
+				expect(await readFile(join(guestSubdirectory, "guest.txt"), "utf8")).toBe("inside sandbox");
+				expect(text(await otherHost.execute("ls", { toolCallId: "other-ls", arguments: {} }))).toContain(
+					"subdirectory/",
+				);
+				expect(otherClient.cwd).toBe(workspaceRoot);
+				expect(harness.session.getToolBackendInfo()).toMatchObject({ type: "remote", configured: true });
+			} finally {
+				await host.dispose();
+				await otherHost.dispose();
+				await otherClient.dispose();
+			}
+		} finally {
+			await harness.session.dispose();
+			harness.cleanup();
+			await deferred.dispose();
+			await server.close();
+		}
+	});
+
 	it("aborts the active LLM loop when the sandbox connection drops without running tools on the host", async () => {
 		const workspaceRoot = await createTemporaryDirectory();
 		const { server, address } = await createServer(workspaceRoot);

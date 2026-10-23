@@ -19,6 +19,8 @@ interface CdCommandSession {
 	isIdle: boolean;
 	isBashRunning: boolean;
 	supportsDirectoryChange: () => boolean;
+	getToolBackendInfo?: () => unknown;
+	changeSandboxWorkingDirectory?: (target: string) => Promise<string>;
 }
 
 interface CdCommandSwitchResult {
@@ -30,6 +32,7 @@ interface CdCommandRuntimeHost {
 }
 
 interface CdCommandContext {
+	activeSandboxBackendConnected?: boolean;
 	activeSession: CdCommandActiveSession;
 	session: CdCommandSession;
 	runtimeHost: CdCommandRuntimeHost;
@@ -89,5 +92,26 @@ describe("InteractiveMode /cd", () => {
 
 		expect(context.showError).toHaveBeenCalledWith("Directory not found: missing");
 		expect(context.runtimeHost.changeDirectory).not.toHaveBeenCalled();
+	});
+	it("changes the guest cwd in-place without changing the host session or its mount", async () => {
+		const context = Object.setPrototypeOf(createContext("/host/project"), InteractiveMode.prototype);
+		context.activeSandboxBackendConnected = true;
+		context.session.supportsDirectoryChange = () => false;
+		context.session.getToolBackendInfo = () => ({
+			type: "remote",
+			configured: true,
+			workspace: { root: "/workspace" },
+		});
+		context.session.changeSandboxWorkingDirectory = vi.fn(async () => "/workspace/subdirectory");
+
+		await interactiveModePrototype.handleCdCommand.call(context, "/cd subdirectory");
+		expect(context.session.changeSandboxWorkingDirectory).toHaveBeenCalledWith("subdirectory");
+		expect(context.runtimeHost.changeDirectory).not.toHaveBeenCalled();
+		expect(context.renderCurrentSessionState).not.toHaveBeenCalled();
+		expect(context.activeSession.getCwd()).toBe("/host/project");
+		expect(context.showStatus).toHaveBeenCalledWith("Working directory: /workspace/subdirectory");
+
+		await interactiveModePrototype.handleCdCommand.call(context, "/cd");
+		expect(context.session.changeSandboxWorkingDirectory).toHaveBeenLastCalledWith("/workspace");
 	});
 });
