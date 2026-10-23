@@ -1,10 +1,10 @@
 {
 	"name": "@greppleai/grip-install",
-	"version": "0.1.6",
+	"version": "0.1.7",
 	"private": true,
 	"description": "Lockfile root used by the grip installer and updater.",
 	"dependencies": {
-		"@greppleai/grip": "0.1.6"
+		"@greppleai/grip": "0.1.7"
 	},
 	"overrides": {
 		"rimraf": "6.1.2",

@@ -2,6 +2,24 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.1.7](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.6...@greppleai/grip-v0.1.7) (2026-10-23)
+
+
+### Bug Fixes
+
+* **coding-agent:** resolve check diagnostics ([b3410ed](https://github.com/greppleai/grip/commit/b3410edd7eb3074e43ff34227882d0eada35ec09))
+* **coding-agent:** support grip update for standalone binary installs ([098a1b5](https://github.com/greppleai/grip/commit/098a1b5c669db5198faaddc8d59d2176b76b5da2))
+* **coding-agent:** support grip update for standalone binary installs ([18bc18e](https://github.com/greppleai/grip/commit/18bc18e4c95a9adfa1e93269680a7e423df0aa14))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.1.6 to ^0.1.7
+    * @greppleai/grip-ai bumped from ^0.1.6 to ^0.1.7
+    * @greppleai/grip-tui bumped from ^0.1.6 to ^0.1.7
+
 ## [0.1.6](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.5...@greppleai/grip-v0.1.6) (2026-10-23)
 
 
