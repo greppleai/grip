@@ -816,9 +816,21 @@ export class InteractiveMode {
 				path: command.sourceInfo.path,
 			}));
 	}
+	private configureNewCommandAutocomplete(commandsByName: Map<string, SlashCommand>): void {
+		const command = commandsByName.get("new");
+		if (!command) return;
+		command.argumentHint = "[--sandbox]";
+		command.getArgumentCompletions = (prefix) => {
+			if (prefix.includes(" ")) return null;
+			return fuzzyFilter(["--sandbox"], prefix, (option) => option).map((option) => ({
+				value: option,
+				label: option,
+			}));
+		};
+	}
 
 	private createBaseAutocompleteProvider(): AutocompleteProvider {
-		// Commands without arguments remain selectable after a trailing space (e.g. /new ).
+		// Commands without arguments remain selectable after a trailing space (e.g. /quit ).
 		const noArgumentCommands = new Set([
 			"settings",
 			"scoped-models",
@@ -832,7 +844,6 @@ export class InteractiveMode {
 			"tree",
 			"login",
 			"logout",
-			"new",
 			"reload",
 			"resume",
 			"quit",
@@ -874,6 +885,7 @@ export class InteractiveMode {
 				command.getArgumentCompletions = choiceCompletions(choices);
 			}
 		}
+		this.configureNewCommandAutocomplete(commandsByName);
 
 		const sandboxCommand = slashCommands.find((command) => command.name === "sandbox");
 		if (sandboxCommand) {
@@ -887,12 +899,14 @@ export class InteractiveMode {
 						}),
 					);
 				}
-				const startMatch = prefix.match(/^start\s+(--[^\s]*)$/);
+				const startMatch = prefix.match(/^start\s+(--[^\s]*)?$/);
 				if (!startMatch) return null;
-				return fuzzyFilter(["--name", "--template", "--update"], startMatch[1]!, (item) => item).map((item) => ({
-					value: `start ${item}${item === "--update" ? "" : " "}`,
-					label: item,
-				}));
+				return fuzzyFilter(["--name", "--template", "--update"], startMatch[1] ?? "", (item) => item).map(
+					(item) => ({
+						value: `start ${item}${item === "--update" ? "" : " "}`,
+						label: item,
+					}),
+				);
 			};
 		}
 		const modelCommand = slashCommands.find((command) => command.name === "model");
@@ -3224,6 +3238,19 @@ export class InteractiveMode {
 				run: async () => {
 					this.editor.setText("");
 					await this.handleSandboxCommand(text);
+				},
+			};
+		}
+		if (this.matchesEditorCommand(text, "/new")) {
+			return {
+				run: async () => {
+					this.editor.setText("");
+					const option = text.slice("/new".length).trim();
+					if (option && option !== "--sandbox") {
+						this.showWarning("Usage: /new [--sandbox]");
+						return;
+					}
+					await this.handleClearCommand(option === "--sandbox");
 				},
 			};
 		}
@@ -6913,22 +6940,37 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private async handleClearCommand(): Promise<void> {
+	private async handleClearCommand(reuseSandbox = false): Promise<void> {
 		if (this.loadingAnimation) {
 			this.loadingAnimation.stop();
 			this.loadingAnimation = undefined;
 		}
 		this.statusContainer.clear();
+		const sandboxState =
+			reuseSandbox && this.activeSandboxBackendConnected
+				? this.sessionSandboxStates.get(getSessionSandboxKey(this.activeSession))
+				: undefined;
+		let newSessionKey: string | undefined;
 		try {
-			const result = await this.runtimeHost.newSession();
-			if (result.cancelled) {
-				return;
-			}
+			const result = await this.runtimeHost.newSession(
+				sandboxState
+					? {
+							setup: async (nextSession) => {
+								newSessionKey = getSessionSandboxKey(nextSession);
+								this.sessionSandboxStates.set(newSessionKey, sandboxState);
+							},
+						}
+					: undefined,
+			);
+			if (result.cancelled) return;
 			this.renderCurrentSessionState();
 			this.chatContainer.addChild(new Spacer(1));
 			this.chatContainer.addChild(new Text(`${theme.fg("accent", "✓ New session started")}`, 1, 1));
 			this.ui.requestRender();
 		} catch (error: unknown) {
+			if (newSessionKey && newSessionKey !== getSessionSandboxKey(this.activeSession)) {
+				this.sessionSandboxStates.delete(newSessionKey);
+			}
 			await this.handleFatalRuntimeError("Failed to create session", error);
 		}
 	}

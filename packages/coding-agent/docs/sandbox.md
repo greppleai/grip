@@ -4,6 +4,8 @@
 
 The command appears in slash-command completion but not in model-visible catalogs, system prompts, tool definitions, templates, skills, or rules. This is not a permission boundary: a model with host shell access may still invoke Lima directly.
 
+`/new --sandbox` starts a fresh conversation in the same connected sandbox (started or attached) without starting another VM. Plain `/new` starts a local session; if there is no active sandbox, `/new --sandbox` does the same. Sandbox connections are remembered in memory only while Grip remains running.
+
 ## Commands
 
 ```text

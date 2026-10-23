@@ -87,14 +87,25 @@ describe("/sandbox start --name autocomplete", () => {
 });
 
 describe("built-in slash command argument choices", () => {
-	it("shows no-argument commands after a space and completes back to the runnable command", async () => {
+	it("keeps no-argument commands selectable after a space", async () => {
 		const provider = createProvider(async () => []);
-		const text = "/new ";
+		const text = "/quit ";
 		const suggestions = await automaticSuggestions(provider, text);
-		expect(suggestions?.items).toEqual([{ value: "new", label: "/new", description: "Start a new session" }]);
+		expect(suggestions?.items).toEqual([expect.objectContaining({ value: "quit", label: "/quit" })]);
 		expect(
 			provider.applyCompletion([text], 0, text.length, suggestions!.items[0]!, suggestions!.prefix).lines,
-		).toEqual(["/new"]);
+		).toEqual(["/quit"]);
+	});
+
+	it("offers --sandbox for a new session", async () => {
+		const provider = createProvider(async () => []);
+		for (const text of ["/new ", "/new --"]) {
+			const suggestions = await automaticSuggestions(provider, text);
+			expect(suggestions?.items).toEqual([{ value: "--sandbox", label: "--sandbox" }]);
+			expect(
+				provider.applyCompletion([text], 0, text.length, suggestions!.items[0]!, suggestions!.prefix).lines,
+			).toEqual(["/new --sandbox"]);
+		}
 		expect(await automaticSuggestions(provider, "/new not-an-option")).toBeNull();
 	});
 
@@ -105,6 +116,7 @@ describe("built-in slash command argument choices", () => {
 			["/context-compression o", ["on", "off"]],
 			["/compress-detection ", ["on", "off"]],
 			["/sandbox ", ["status", "clear", "--attach", "start", "list", "stop"]],
+			["/sandbox start ", ["--name", "--template", "--update"]],
 			["/sandbox start --", ["--name", "--template", "--update"]],
 		] as const) {
 			const suggestions = await automaticSuggestions(provider, text);

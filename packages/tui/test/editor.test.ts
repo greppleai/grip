@@ -2130,6 +2130,37 @@ describe("Editor component", () => {
 	});
 
 	describe("Autocomplete", () => {
+		it("opens the next slash-command options immediately after accepting with Tab", async () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const provider = new CombinedAutocompleteProvider(
+				[
+					{
+						name: "sandbox",
+						description: "Manage sandbox",
+						getArgumentCompletions: (prefix) =>
+							prefix === ""
+								? ["start", "stop"].map((value) => ({ value: `${value} `, label: value }))
+								: prefix === "start "
+									? ["--name", "--template"].map((value) => ({ value: `start ${value} `, label: value }))
+									: null,
+					},
+				],
+				process.cwd(),
+			);
+			editor.setAutocompleteProvider(provider);
+			editor.setText("/sandbox");
+			editor.handleInput("\t");
+			await flushAutocomplete();
+			editor.handleInput("\t");
+			await flushAutocomplete();
+			assert.strictEqual(editor.getText(), "/sandbox ");
+			assert.strictEqual(editor.isShowingAutocomplete(), true);
+
+			editor.handleInput("\t");
+			await flushAutocomplete();
+			assert.strictEqual(editor.getText(), "/sandbox start ");
+			assert.strictEqual(editor.isShowingAutocomplete(), true);
+		});
 		it("auto-applies single force-file suggestion without showing menu", async () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 

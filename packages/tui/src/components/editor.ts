@@ -699,6 +699,13 @@ export class Editor implements Component, Focusable {
 		this.setCursorCol(result.cursorCol);
 		return true;
 	}
+	private continueSlashAutocompleteAfterTab(): void {
+		// A completed slash command/option may have another set of choices.
+		const beforeCursor = (this.state.lines[this.state.cursorLine] ?? "").slice(0, this.state.cursorCol);
+		if (beforeCursor.startsWith("/") && beforeCursor.endsWith(" ")) {
+			this.requestAutocomplete({ force: false, explicitTab: true });
+		}
+	}
 
 	private handleAutocompleteInput(data: string, keybindings: KeybindingsManager): boolean {
 		if (!this.autocompleteState || !this.autocompleteList) return false;
@@ -714,6 +721,7 @@ export class Editor implements Component, Focusable {
 			if (this.applySelectedAutocomplete()) {
 				this.cancelAutocomplete();
 				this.onChange?.(this.getText());
+				this.continueSlashAutocompleteAfterTab();
 			}
 			return true;
 		}
