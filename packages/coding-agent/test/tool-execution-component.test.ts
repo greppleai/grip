@@ -259,6 +259,8 @@ describe("ToolExecutionComponent parity", () => {
 		);
 		component.markExecutionStarted();
 		expect(component.render(120).join("\n")).toContain(theme.fg("accent", theme.bold("echo hello")));
+		component.updateArgs({ command: "echo hello", output_mode: "on_fail" });
+		expect(stripAnsi(component.render(120).join("\n"))).toContain("model output: on_fail");
 
 		component.updateResult(
 			{ content: [{ type: "text", text: "working" }], details: undefined, isError: false },

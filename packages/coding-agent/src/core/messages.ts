@@ -22,7 +22,7 @@ export type {
 	CustomMessage,
 } from "@greppleai/grip-agent-core";
 
-import type { ImageContent, Message, TextContent } from "@greppleai/grip-ai";
+import type { AssistantMessage, ImageContent, Message, TextContent, ToolResultMessage } from "@greppleai/grip-ai";
 
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
 
@@ -116,6 +116,32 @@ export function createCustomMessage(
 	};
 }
 
+type SuppressedBashOutputMode = "on_fail" | "never";
+
+function recordBashOutputModes(message: AssistantMessage, modes: Map<string, SuppressedBashOutputMode>): void {
+	for (const part of message.content) {
+		if (part.type !== "toolCall" || part.name !== "bash") continue;
+		const mode = part.arguments?.output_mode;
+		if (mode === "on_fail" || mode === "never") modes.set(part.id, mode);
+	}
+}
+
+function maskBashToolResult(message: ToolResultMessage, mode: SuppressedBashOutputMode | undefined): ToolResultMessage {
+	if (mode === undefined || (mode === "on_fail" && message.isError)) return message;
+	const exitCode = message.isError
+		? message.content
+				.filter((part) => part.type === "text")
+				.map((part) => part.text)
+				.join("\n")
+				.match(/(?:^|\n)Command exited with code (\d+)$/)?.[1]
+		: undefined;
+	const status = message.isError ? (exitCode ? `exited with code ${exitCode}` : "failed") : "succeeded";
+	return {
+		...message,
+		content: [{ type: "text", text: `Bash command ${status}; output omitted (output_mode: ${mode}).` }],
+	};
+}
+
 /**
  * Transform AgentMessages (including custom types) to LLM-compatible Messages.
  *
@@ -125,6 +151,7 @@ export function createCustomMessage(
  * - Custom extensions and tools
  */
 export function convertToLlm(messages: AgentMessage[]): Message[] {
+	const bashOutputModes = new Map<string, SuppressedBashOutputMode>();
 	return messages
 		.map((m): Message | undefined => {
 			switch (m.role) {
@@ -167,9 +194,12 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 						timestamp: m.timestamp,
 					};
 				case "user":
-				case "assistant":
-				case "toolResult":
 					return m;
+				case "assistant":
+					recordBashOutputModes(m, bashOutputModes);
+					return m;
+				case "toolResult":
+					return maskBashToolResult(m, m.toolName === "bash" ? bashOutputModes.get(m.toolCallId) : undefined);
 				default:
 					// biome-ignore lint/correctness/noSwitchDeclarations: fine
 					const _exhaustiveCheck: never = m;

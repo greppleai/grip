@@ -27,6 +27,7 @@ import type {
 	RetryPolicy,
 	SimpleStreamOptions,
 	TextContent,
+	ToolResultMessage,
 	Usage,
 } from "@greppleai/grip-ai";
 import { completeSimple, retryAssistantCall } from "@greppleai/grip-ai";
@@ -128,11 +129,17 @@ function getLastAssistantUsageInfo(messages: AgentMessage[]): AssistantUsageInfo
  */
 export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEstimate {
 	const usageInfo = getLastAssistantUsageInfo(messages);
-
+	// Bash output_mode changes the provider payload without mutating UI or persisted tool results.
+	const visibleResults = new Map<string, ToolResultMessage>();
+	for (const message of convertToLlm(messages)) {
+		if (message.role === "toolResult") visibleResults.set(message.toolCallId, message);
+	}
+	const estimateVisibleTokens = (message: AgentMessage): number =>
+		estimateTokens(message.role === "toolResult" ? (visibleResults.get(message.toolCallId) ?? message) : message);
 	if (!usageInfo) {
 		let estimated = 0;
 		for (const message of messages) {
-			estimated += estimateTokens(message);
+			estimated += estimateVisibleTokens(message);
 		}
 		return {
 			tokens: estimated,
@@ -145,7 +152,7 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
 	const usageTokens = calculateContextTokens(usageInfo.usage);
 	let trailingTokens = 0;
 	for (let i = usageInfo.index + 1; i < messages.length; i++) {
-		trailingTokens += estimateTokens(messages[i]);
+		trailingTokens += estimateVisibleTokens(messages[i]);
 	}
 
 	return {

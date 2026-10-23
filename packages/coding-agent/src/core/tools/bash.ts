@@ -21,6 +21,12 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult
 const bashSchema = Type.Object({
 	command: Type.String({ description: "Bash command to execute" }),
 	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
+	output_mode: Type.Optional(
+		Type.Union([Type.Literal("always"), Type.Literal("on_fail"), Type.Literal("never")], {
+			description:
+				"Output sent to the model: always (default) includes stdout/stderr, on_fail includes it only if the command fails, never omits it even on failure. The UI and session history retain the output.",
+		}),
+	),
 });
 
 export type BashToolInput = Static<typeof bashSchema>;
@@ -132,12 +138,17 @@ function formatBashCall(args: Partial<BashToolInput> | undefined, backendInfo?: 
 	const command = str(args?.command);
 	const timeout = args?.timeout;
 	const timeoutSuffix = timeout ? theme.fg("muted", ` (timeout ${timeout}s)`) : "";
+	const outputModeSuffix =
+		args?.output_mode && args.output_mode !== "always"
+			? theme.fg("muted", ` (model output: ${args.output_mode})`)
+			: "";
 	const commandDisplay = command === null ? invalidArgText(theme) : command ? command : theme.fg("toolOutput", "...");
 	return (
 		formatBackendIcon(backendInfo, theme) +
 		theme.fg("toolTitle", theme.bold("$ ")) +
 		theme.fg("accent", theme.bold(commandDisplay)) +
-		timeoutSuffix
+		timeoutSuffix +
+		outputModeSuffix
 	);
 }
 
@@ -274,8 +285,11 @@ export function createBashToolDefinition(operations: ToolOperations, options?: B
 	return {
 		name: "bash",
 		label: "bash",
-		description: `Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
+		description: `Execute a bash command in the current working directory. By default, the model receives stdout and stderr; output_mode can omit them from model context while retaining the UI and session output. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
 		promptSnippet: "Execute bash commands (ls, grep, find, etc.)",
+		promptGuidelines: [
+			"For bash checks such as tests or builds, use output_mode: on_fail when only success or failure matters. Use always (default) when output contains needed data or warnings; use never only if output is unnecessary even on failure.",
+		],
 		parameters: bashSchema,
 		async execute(_toolCallId, { command, timeout }: BashToolInput, signal?: AbortSignal, onUpdate?, ctx?) {
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;

@@ -101,6 +101,9 @@ describe("AgentSession dynamic tool registration", () => {
 		expect(session.systemPrompt).toContain("- dynamic_tool: Run dynamic test behavior");
 		expect(session.systemPrompt).toContain("- Use dynamic_tool when the user asks for dynamic behavior tests.");
 		expect(session.systemPrompt).not.toContain("Inspect GRIP_* environment variables");
+		expect(session.systemPrompt).toContain("use output_mode: on_fail when only success or failure matters");
+		session.setActiveToolsByName(["read"]);
+		expect(session.systemPrompt).not.toContain("output_mode: on_fail");
 
 		session.dispose();
 	});
