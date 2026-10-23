@@ -18,6 +18,7 @@ function createMode(connected: boolean, cancelled = false) {
 		url: "ws://sandbox",
 		token: "secret",
 		expectedCwd: "/guest",
+		hostWorkspaceRoot: "/project" as string | undefined,
 		containerId: "vm" as string | undefined,
 	};
 	const states = new Map([["/project\0previous", sandbox]]);
@@ -60,6 +61,7 @@ describe("/new sandbox inheritance", () => {
 			url: "ws://sandbox",
 			token: "secret",
 			expectedCwd: "/guest",
+			hostWorkspaceRoot: "/project",
 		});
 	});
 
@@ -68,6 +70,7 @@ describe("/new sandbox inheritance", () => {
 		const attached = states.get("/project\0previous")!;
 		attached.containerId = undefined;
 		attached.url = "ws://attached";
+		attached.hostWorkspaceRoot = undefined;
 		await command("/new")?.run();
 		expect(states.get("/project\0next")).toBe(attached);
 		expect(activateSandboxDaemon).toHaveBeenCalledWith({

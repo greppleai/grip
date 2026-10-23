@@ -13,6 +13,7 @@ import {
 } from "@greppleai/grip-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
+import type { ExtensionUIContext } from "../src/core/extensions/types.ts";
 import { GripAgent } from "../src/core/grip-agent.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { InMemorySessionManager } from "../src/core/session/in-memory-session-manager.ts";
@@ -160,6 +161,8 @@ describe("remote canonical workspace tool routing", () => {
 		const operations = await createRemoteToolOperations(address.url);
 		const harness = await createHarness({ toolOperations: operations });
 		try {
+			expect(harness.session.getToolBackendInfo().type).toBe("remote");
+			expect(harness.session.isSandbox()).toBe(false);
 			harness.setResponses([
 				fauxAssistantMessage(
 					[
@@ -567,6 +570,180 @@ describe("remote canonical workspace tool routing", () => {
 		}
 	});
 
+	it("approves each mapped host command with its exact command and host cwd", async () => {
+		const guestRoot = await createTemporaryDirectory();
+		const hostRoot = await createTemporaryDirectory();
+		const guestSubdirectory = join(guestRoot, "sub");
+		const hostSubdirectory = join(hostRoot, "sub");
+		await mkdir(guestSubdirectory);
+		await mkdir(hostSubdirectory);
+		const { server, address } = await createServer(guestRoot);
+		const deferred = new DeferredRemoteToolOperations(hostRoot);
+		const harness = await createHarness({ toolOperations: deferred });
+		const select = vi.fn<ExtensionUIContext["select"]>().mockResolvedValueOnce("No").mockResolvedValue("Yes");
+		const command = "printf approved > host-marker.txt";
+		try {
+			expect(harness.session.isSandbox()).toBe(false);
+			await harness.session.activateSandboxDaemon({
+				url: address.url,
+				token: "",
+				expectedCwd: guestRoot,
+				hostWorkspaceRoot: hostRoot,
+			});
+			await harness.session.bindExtensions({ uiContext: { select } as ExtensionUIContext });
+			const ctx = harness.session.extensionRunner.createContext();
+			expect(ctx.isSandbox()).toBe(true);
+			expect(await ctx.toolOperations.mapWorkspaceDirectoryToHost?.(guestSubdirectory)).toBe(hostSubdirectory);
+			await expect(
+				ctx.execHostCommand(command, { question: "Publish this repository?", cwd: guestSubdirectory }),
+			).rejects.toThrow("not approved");
+			await expect(readFile(join(hostSubdirectory, "host-marker.txt"))).rejects.toThrow();
+			await harness.session.changeSandboxWorkingDirectory("sub");
+			const result = await ctx.execHostCommand(command, { question: "Publish this repository?" });
+			expect(result.exitCode).toBe(0);
+			expect(await readFile(join(hostSubdirectory, "host-marker.txt"), "utf8")).toBe("approved");
+			await expect(readFile(join(guestSubdirectory, "host-marker.txt"))).rejects.toThrow();
+			expect(select).toHaveBeenCalledTimes(2);
+			expect(select).toHaveBeenCalledWith(
+				`Run on host?\nReason: "Publish this repository?"\nCommand: ${JSON.stringify(command)}\nHost cwd: ${JSON.stringify(hostSubdirectory)}`,
+				["No", "Yes"],
+				{ signal: undefined },
+			);
+		} finally {
+			await harness.session.dispose();
+			await deferred.dispose();
+			await server.close();
+			harness.cleanup();
+		}
+	});
+
+	it("approves direct host executables with argv and no shell, and denies before spawning", async () => {
+		const guestRoot = await createTemporaryDirectory();
+		const hostRoot = await createTemporaryDirectory();
+		const { server, address } = await createServer(guestRoot);
+		const deferred = new DeferredRemoteToolOperations(hostRoot);
+		const harness = await createHarness({ toolOperations: deferred });
+		const select = vi.fn<ExtensionUIContext["select"]>().mockResolvedValueOnce("No").mockResolvedValue("Yes");
+		const args = [
+			"-e",
+			"require('node:fs').writeFileSync('direct.txt', process.argv[1])",
+			"literal;touch injected.txt",
+		];
+		try {
+			await harness.session.activateSandboxDaemon({
+				url: address.url,
+				token: "",
+				expectedCwd: guestRoot,
+				hostWorkspaceRoot: hostRoot,
+			});
+			await harness.session.bindExtensions({ uiContext: { select } as ExtensionUIContext });
+			const ctx = harness.session.extensionRunner.createContext();
+			const options = {
+				question: "Run direct program?",
+				explanation: "Refresh refs without exposing credentials",
+				cwd: guestRoot,
+			};
+			await expect(ctx.execHostProcess(process.execPath, args, options)).rejects.toThrow("not approved");
+			await expect(readFile(join(hostRoot, "direct.txt"))).rejects.toThrow();
+			const result = await ctx.execHostProcess(process.execPath, args, options);
+			expect(result).toMatchObject({ code: 0, killed: false });
+			expect(await readFile(join(hostRoot, "direct.txt"), "utf8")).toBe(args[2]);
+			await expect(readFile(join(hostRoot, "injected.txt"))).rejects.toThrow();
+			await expect(readFile(join(guestRoot, "direct.txt"))).rejects.toThrow();
+			expect(select).toHaveBeenCalledTimes(2);
+			expect(select).toHaveBeenCalledWith(
+				`Run on host (no shell)?\nReason: "Run direct program?"\nExplanation (unverified): "Refresh refs without exposing credentials"\nExecutable: ${JSON.stringify(process.execPath)}\nArguments: ${JSON.stringify(args)}\nHost cwd: ${JSON.stringify(hostRoot)}`,
+				["No", "Yes"],
+				{ signal: undefined },
+			);
+			await ctx.execHostProcess(process.execPath, args, { question: "No explanation", cwd: guestRoot });
+			expect(select.mock.calls[2][0]).not.toContain("Explanation (unverified):");
+			await expect(ctx.execHostProcess(process.execPath, args, { ...options, explanation: "  " })).rejects.toThrow(
+				"valid strings",
+			);
+			expect(select).toHaveBeenCalledTimes(3);
+		} finally {
+			await harness.session.dispose();
+			await deferred.dispose();
+			await server.close();
+			harness.cleanup();
+		}
+	});
+
+	it("fails closed for unattached host mounts, absent UI, escaped paths and cancellations", async () => {
+		const guestRoot = await createTemporaryDirectory();
+		const hostRoot = await createTemporaryDirectory();
+		const outside = await createTemporaryDirectory();
+		await mkdir(join(guestRoot, "link"));
+		await symlink(outside, join(hostRoot, "link"));
+		const { server, address } = await createServer(guestRoot);
+		const deferred = new DeferredRemoteToolOperations(hostRoot);
+		const harness = await createHarness({ toolOperations: deferred });
+		const command = "printf denied > marker.txt";
+		try {
+			await harness.session.activateSandboxDaemon({ url: address.url, token: "", expectedCwd: guestRoot });
+			const ctx = harness.session.extensionRunner.createContext();
+			expect(ctx.isSandbox()).toBe(true); // An attached sandbox need not have a host mapping.
+			await expect(ctx.execHostCommand(command, { question: "test" })).rejects.toThrow("approval UI");
+			await expect(ctx.execHostProcess("git", ["push"], { question: "test" })).rejects.toThrow("approval UI");
+			const select = vi.fn<ExtensionUIContext["select"]>().mockResolvedValue("Yes");
+			await harness.session.bindExtensions({ uiContext: { select } as ExtensionUIContext });
+			await expect(ctx.execHostCommand(command, { question: "test" })).rejects.toThrow("mapping");
+			await expect(ctx.execHostProcess("git", ["push"], { question: "test" })).rejects.toThrow("mapping");
+			await harness.session.clearRemoteSandbox();
+			expect(harness.session.isSandbox()).toBe(false);
+			const localCtx = harness.session.extensionRunner.createContext();
+			await expect(localCtx.execHostProcess("git", ["push"], { question: "test" })).rejects.toThrow(
+				"connected sandbox",
+			);
+			await harness.session.activateSandboxDaemon({
+				url: address.url,
+				token: "",
+				expectedCwd: guestRoot,
+				hostWorkspaceRoot: hostRoot,
+			});
+			const fresh = harness.session.extensionRunner.createContext();
+			await expect(
+				fresh.execHostCommand(command, { question: "test", cwd: join(guestRoot, "link") }),
+			).rejects.toThrow("escapes");
+			await expect(fresh.execHostCommand(command, { question: "test", cwd: outside })).rejects.toThrow();
+			const abort = new AbortController();
+			abort.abort();
+			await expect(fresh.execHostCommand(command, { question: "test", signal: abort.signal })).rejects.toThrow(
+				"cancelled",
+			);
+			await expect(
+				fresh.execHostProcess("git", ["push"], { question: "test", signal: abort.signal }),
+			).rejects.toThrow("cancelled");
+			expect(select).not.toHaveBeenCalled();
+			const abortOnApproval = new AbortController();
+			select.mockImplementationOnce(async () => {
+				abortOnApproval.abort();
+				return "Yes";
+			});
+			await expect(
+				fresh.execHostCommand(command, { question: "test", signal: abortOnApproval.signal }),
+			).rejects.toThrow("not approved");
+			expect(select).toHaveBeenCalledTimes(1);
+			const abortProcessOnApproval = new AbortController();
+			select.mockImplementationOnce(async () => {
+				abortProcessOnApproval.abort();
+				return "Yes";
+			});
+			await expect(
+				fresh.execHostProcess("git", ["push"], { question: "test", signal: abortProcessOnApproval.signal }),
+			).rejects.toThrow("not approved");
+			expect(select).toHaveBeenCalledTimes(2);
+			await expect(readFile(join(hostRoot, "marker.txt"))).rejects.toThrow();
+			await expect(readFile(join(outside, "marker.txt"))).rejects.toThrow();
+		} finally {
+			await harness.session.dispose();
+			await deferred.dispose();
+			await server.close();
+			harness.cleanup();
+		}
+	});
+
 	it("aborts the active LLM loop when the sandbox connection drops without running tools on the host", async () => {
 		const workspaceRoot = await createTemporaryDirectory();
 		const { server, address } = await createServer(workspaceRoot);
@@ -577,8 +754,10 @@ describe("remote canonical workspace tool routing", () => {
 		try {
 			await harness.session.activateSandboxDaemon({ url: address.url, token: "", expectedCwd: workspaceRoot });
 			expect(abort).not.toHaveBeenCalled();
+			expect(harness.session.isSandbox()).toBe(true);
 			await server.close();
 			await vi.waitFor(() => expect(abort).toHaveBeenCalledOnce());
+			expect(harness.session.isSandbox()).toBe(false);
 			expect(harness.session.getToolBackendInfo().type).toBe("remote");
 			await expect(harness.session.prompt("run a local tool instead")).rejects.toThrow("Sandbox connection lost");
 			await expect(harness.session.getToolOperations().writeFile("host-escape.txt", "unsafe")).rejects.toThrow();
@@ -608,10 +787,12 @@ describe("remote canonical workspace tool routing", () => {
 			expect(activations.filter((result) => result.status === "fulfilled")).toHaveLength(1);
 			expect(activations.filter((result) => result.status === "rejected")).toHaveLength(1);
 			expect(first.getToolBackendInfo()).toMatchObject({ type: "remote", configured: true });
+			expect(first.isSandbox()).toBe(true);
 			expect(deferred.getBackendInfo()).toEqual({ type: "remote", cwd: workspaceRoot, configured: false });
 
 			await pi.newSession();
 			expect(pi.session.getToolBackendInfo()).toEqual({ type: "remote", cwd: workspaceRoot, configured: false });
+			expect(pi.session.isSandbox()).toBe(false);
 			expect(deferred.getBackendInfo()).toEqual({ type: "remote", cwd: workspaceRoot, configured: false });
 		} finally {
 			await pi.dispose();

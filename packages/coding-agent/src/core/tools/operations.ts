@@ -6,10 +6,11 @@ import {
 	mkdir as fsMkdir,
 	readdir as fsReaddir,
 	readFile as fsReadFile,
+	realpath as fsRealpath,
 	stat as fsStat,
 	writeFile as fsWriteFile,
 } from "node:fs/promises";
-import { posix, win32 } from "node:path";
+import { isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@greppleai/grip-agent-core";
 import WebSocket, { type RawData } from "ws";
@@ -145,6 +146,8 @@ interface NormalizedRemoteWorkspaceUrl {
 
 export interface DeferredRemoteToolOperationsConnectOptions extends RemoteToolOperationsConnectOptions {
 	expectedCwd?: string;
+	/** Known host mount source; only supplied for a sandbox started by this Grip process. */
+	hostWorkspaceRoot?: string;
 }
 
 type SharedExpectedRevision = { sha256: string } | { absent: true };
@@ -186,6 +189,8 @@ export interface ToolOperations {
 	glob?(pattern: string, cwd: string, options: ToolGlobOptions): Promise<string[]>;
 	grep?(options: ToolGrepOptions): Promise<ToolGrepResult>;
 	detectImageMimeType?(path: string): Promise<string | null | undefined>;
+	/** Map an existing guest workspace directory to its verified host mount counterpart, when known. */
+	mapWorkspaceDirectoryToHost?(guestPath: string): Promise<string>;
 	getBackendInfo?(): ToolBackendInfo;
 	resolveWorkspaceToolExecution?(name: string, parameterSchema: unknown): WorkspaceToolExecutionTarget;
 	executeWorkspaceTool?(name: string, invocation: WorkspaceToolRemoteInvocation): Promise<AgentToolResult<unknown>>;
@@ -408,6 +413,7 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	cwd: string;
 	private readonly expectedCwd: string;
 	private operations: RemoteToolOperations | undefined;
+	private hostWorkspaceRoot: string | undefined;
 	private remoteCatalogUnsubscribe: (() => void) | undefined;
 	private readonly catalogListeners = new Set<() => void | Promise<void>>();
 	private disposePromise: Promise<void> | undefined;
@@ -431,12 +437,14 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 			if (!workspaceRootsEqual(next.cwd, expectedCwd, next.workspacePathFlavor)) {
 				throw new Error(`Remote daemon workspace root mismatch: expected ${expectedCwd}, received ${next.cwd}`);
 			}
+			const hostRoot = options.hostWorkspaceRoot ? await fsRealpath(options.hostWorkspaceRoot) : undefined;
+			await this.replaceOperations(next);
+			this.hostWorkspaceRoot = hostRoot;
+			return this.getBackendInfo();
 		} catch (error) {
 			await next.dispose();
 			throw error;
 		}
-		await this.replaceOperations(next);
-		return this.getBackendInfo();
 	}
 
 	async clear(): Promise<void> {
@@ -444,6 +452,7 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 		this.remoteCatalogUnsubscribe?.();
 		this.remoteCatalogUnsubscribe = undefined;
 		this.operations = undefined;
+		this.hostWorkspaceRoot = undefined;
 		await previous?.dispose?.();
 	}
 
@@ -494,6 +503,26 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 
 	async resolveWorkspaceDirectory(path: string): Promise<string> {
 		return this.requireOperations().resolveWorkspaceDirectory(path);
+	}
+
+	async mapWorkspaceDirectoryToHost(guestPath: string): Promise<string> {
+		const remote = this.requireOperations();
+		const hostRoot = this.hostWorkspaceRoot;
+		if (!hostRoot || remote.workspacePathFlavor !== "posix") {
+			throw new Error("No verified host mount mapping is available for this sandbox");
+		}
+		const canonicalGuest = await remote.resolveWorkspaceDirectory(posix.resolve(this.cwd, guestPath));
+		const suffix = posix.relative(remote.cwd, canonicalGuest);
+		if (suffix === ".." || suffix.startsWith("../") || posix.isAbsolute(suffix)) {
+			throw new Error("Guest directory is outside the mounted workspace");
+		}
+		const hostPath = await fsRealpath(resolve(hostRoot, suffix));
+		const hostRelative = relative(hostRoot, hostPath);
+		if (hostRelative === ".." || hostRelative.startsWith(`..${sep}`) || isAbsolute(hostRelative)) {
+			throw new Error("Host directory escapes the mounted workspace");
+		}
+		if (!(await fsStat(hostPath)).isDirectory()) throw new Error("Host working directory is not a directory");
+		return hostPath;
 	}
 
 	async readdir(path: string): Promise<string[]> {
@@ -548,6 +577,7 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 			this.remoteCatalogUnsubscribe = undefined;
 			const previous = this.operations;
 			this.operations = undefined;
+			this.hostWorkspaceRoot = undefined;
 			await previous?.dispose?.();
 		})();
 		return this.disposePromise;

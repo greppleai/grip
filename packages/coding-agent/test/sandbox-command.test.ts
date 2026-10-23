@@ -579,6 +579,7 @@ describe("hidden sandbox command", () => {
 			url: "ws://127.0.0.1:49153/pi/workspace",
 			token: "secret-token",
 			expectedCwd: "/workspace",
+			hostWorkspaceRoot: "/host/project",
 		});
 		expect(list).toHaveBeenCalledWith({ workspaceRoot: "/host/project" });
 		expect(stop).toHaveBeenCalledWith({

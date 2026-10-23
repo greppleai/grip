@@ -112,6 +112,7 @@ describe("ExtensionRunner", () => {
 		getSystemPrompt: () => "",
 		getToolOperations: () => new LocalToolOperations(tempDir),
 		getToolBackendInfo: () => ({ type: "local", cwd: tempDir }),
+		isSandbox: () => false,
 		getLspStatus: () => ({
 			owner: "standalone",
 			enabled: false,
@@ -120,6 +121,12 @@ describe("ExtensionRunner", () => {
 		}),
 		configureLsp: async () => ({ enabled: false, servers: [] }),
 		execToolBackend: async () => ({ output: "", exitCode: 0, cancelled: false, truncated: false }),
+		execHostCommand: async () => {
+			throw new Error("No host command in test runtime");
+		},
+		execHostProcess: async () => {
+			throw new Error("No host process in test runtime");
+		},
 	};
 
 	describe("shortcut conflicts", () => {
@@ -482,6 +489,20 @@ describe("ExtensionRunner", () => {
 
 			controller.abort();
 			expect(ctx.signal?.aborted).toBe(true);
+		});
+
+		it("reads the current sandbox state rather than caching it when the context is created", async () => {
+			const result = await discoverAndLoadExtensions([], tempDir, tempDir);
+			const runner = new ExtensionRunner(result.extensions, result.runtime, tempDir, sessionManager, modelRegistry);
+			const ctx = runner.createContext();
+			expect(ctx.isSandbox()).toBe(false);
+			let sandbox = false;
+			runner.bindCore(extensionActions, { ...extensionContextActions, isSandbox: () => sandbox });
+			expect(ctx.isSandbox()).toBe(false);
+			sandbox = true;
+			expect(ctx.isSandbox()).toBe(true);
+			sandbox = false;
+			expect(ctx.isSandbox()).toBe(false);
 		});
 	});
 

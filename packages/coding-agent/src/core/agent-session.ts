@@ -95,6 +95,7 @@ import {
 	estimateCompressionEconomics,
 } from "./compaction/compression-economics.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
+import { type ExecResult, execCommand } from "./exec.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -107,6 +108,8 @@ import type {
 	CompactOptions,
 	ContextUsage,
 	ExtensionCommandContextActions,
+	ExtensionHostCommandOptions,
+	ExtensionHostProcessOptions,
 	ExtensionNavigateTreeOptions,
 	ExtensionSendMessageOptions,
 	ExtensionUIContext,
@@ -671,6 +674,7 @@ export interface ActivateSandboxDaemonOptions {
 	url: string;
 	token: string;
 	expectedCwd: string;
+	hostWorkspaceRoot?: string;
 }
 
 export type SessionSkillRegistration = Omit<Skill, "sourceInfo" | "baseDir"> & {
@@ -1071,6 +1075,14 @@ function isWithinSandboxMount(directory: string, root: string, flavor: PortableP
 	return relativePath !== ".." && !relativePath.startsWith(`..${paths.sep}`) && !paths.isAbsolute(relativePath);
 }
 
+function hasValidHostProcessApproval(options: ExtensionHostProcessOptions | undefined): boolean {
+	return (
+		typeof options?.question === "string" &&
+		!!options.question.trim() &&
+		(options.explanation === undefined || (typeof options.explanation === "string" && !!options.explanation.trim()))
+	);
+}
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly session: Session;
@@ -1150,6 +1162,7 @@ export class AgentSession {
 	private readonly _activities = new Set<SessionActivityToken>();
 	private _activityGeneration = 0;
 	private _activeCycle = false;
+	private _hostCommandApprovalQueue: Promise<void> = Promise.resolve();
 	private _settlementScheduled = false;
 	private _settlementRunning = false;
 	private readonly _idleWaiters = new Set<IdleWaiter>();
@@ -1340,6 +1353,12 @@ export class AgentSession {
 		return this.getToolOperations().getBackendInfo?.() ?? { type: "local", cwd: this._cwd };
 	}
 
+	/** Whether the current session is using a live, session-owned sandbox connection. */
+	isSandbox(): boolean {
+		const operations = this._sandboxToolOperations;
+		return !!operations && operations === this._toolOperations && !operations.isDisconnected();
+	}
+
 	supportsDirectoryChange(): boolean {
 		return this._toolOperations === undefined && this.getToolBackendInfo().type === "local";
 	}
@@ -1420,7 +1439,11 @@ export class AgentSession {
 		return this._runActivity("sandbox daemon activation", () =>
 			this._enqueueSandboxTransition(() =>
 				this._activateSessionRemoteOperations(options.expectedCwd, (operations) =>
-					operations.configureRemote(options.url, { token: options.token, expectedCwd: options.expectedCwd }),
+					operations.configureRemote(options.url, {
+						token: options.token,
+						expectedCwd: options.expectedCwd,
+						hostWorkspaceRoot: options.hostWorkspaceRoot,
+					}),
 				),
 			),
 		);
@@ -5331,6 +5354,7 @@ export class AgentSession {
 				getSystemPrompt: () => this.systemPrompt,
 				getToolOperations,
 				getToolBackendInfo: () => this.getToolBackendInfo(),
+				isSandbox: () => this.isSandbox(),
 				getLspStatus: getBoundLspStatus,
 				configureLsp: (configuration) => {
 					if (runner !== this._extensionRunner) throw new Error(STALE_EXTENSION_CONTEXT_MESSAGE);
@@ -5348,6 +5372,32 @@ export class AgentSession {
 							options,
 						);
 					}),
+				execHostCommand: (command, options) => {
+					const execute = () =>
+						this._runActivity("extension host command approval", () =>
+							this._executeApprovedHostCommand(runner, command, options),
+						);
+					const pending = this._hostCommandApprovalQueue.then(execute, execute);
+					this._hostCommandApprovalQueue = pending.then(
+						() => undefined,
+						() => undefined,
+					);
+					return pending;
+				},
+				execHostProcess: (executable, args, options) => {
+					const argv = Array.isArray(args) ? [...args] : args;
+					const request = { ...options };
+					const execute = () =>
+						this._runActivity("extension host process approval", () =>
+							this._executeApprovedHostProcess(runner, executable, argv, request),
+						);
+					const pending = this._hostCommandApprovalQueue.then(execute, execute);
+					this._hostCommandApprovalQueue = pending.then(
+						() => undefined,
+						() => undefined,
+					);
+					return pending;
+				},
 			},
 			{
 				registerProvider: (name, config) => {
@@ -5360,6 +5410,91 @@ export class AgentSession {
 				},
 			},
 		);
+	}
+
+	private async _executeApprovedHostCommand(
+		runner: ExtensionRunner,
+		command: string,
+		options: ExtensionHostCommandOptions,
+	): Promise<BashResult> {
+		if (runner !== this._extensionRunner) throw new Error(STALE_EXTENSION_CONTEXT_MESSAGE);
+		if (
+			typeof command !== "string" ||
+			!command.trim() ||
+			typeof options?.question !== "string" ||
+			!options.question.trim()
+		) {
+			throw new Error("Host command and approval question must be non-empty strings");
+		}
+		const operations = this._sandboxToolOperations;
+		if (!operations || operations !== this._toolOperations || operations.isDisconnected()) {
+			throw new Error("A connected sandbox is required for approved host commands");
+		}
+		if (!runner.hasUI()) throw new Error("Host command requires an interactive approval UI");
+		const signal = options.signal ?? this.agent.signal;
+		if (signal?.aborted) throw new Error("Host command cancelled");
+		const hostCwd = await operations.mapWorkspaceDirectoryToHost(options.cwd ?? operations.cwd);
+		const choice = await runner
+			.getUIContext()
+			.select(
+				`Run on host?\nReason: ${JSON.stringify(options.question)}\nCommand: ${JSON.stringify(command)}\nHost cwd: ${JSON.stringify(hostCwd)}`,
+				["No", "Yes"],
+				{ signal },
+			);
+		if (choice !== "Yes" || signal?.aborted) throw new Error("Host command was not approved");
+		if (
+			runner !== this._extensionRunner ||
+			operations !== this._sandboxToolOperations ||
+			operations.isDisconnected()
+		) {
+			throw new Error("Sandbox changed before the host command could run");
+		}
+		return executeBashWithOperations(command, hostCwd, new LocalToolOperations(hostCwd), { ...options, signal });
+	}
+
+	private async _executeApprovedHostProcess(
+		runner: ExtensionRunner,
+		executable: string,
+		args: string[],
+		options: ExtensionHostProcessOptions,
+	): Promise<ExecResult> {
+		if (runner !== this._extensionRunner) throw new Error(STALE_EXTENSION_CONTEXT_MESSAGE);
+		if (
+			typeof executable !== "string" ||
+			!executable.trim() ||
+			executable.includes("\0") ||
+			!Array.isArray(args) ||
+			args.some((arg) => typeof arg !== "string" || arg.includes("\0")) ||
+			!hasValidHostProcessApproval(options)
+		) {
+			throw new Error("Host executable, argv and approval question must be valid strings");
+		}
+		const operations = this._sandboxToolOperations;
+		if (!operations || operations !== this._toolOperations || operations.isDisconnected()) {
+			throw new Error("A connected sandbox is required for approved host processes");
+		}
+		if (!runner.hasUI()) throw new Error("Host process requires an interactive approval UI");
+		const signal = options.signal ?? this.agent.signal;
+		if (signal?.aborted) throw new Error("Host process cancelled");
+		const hostCwd = await operations.mapWorkspaceDirectoryToHost(options.cwd ?? operations.cwd);
+		const explanation =
+			options.explanation === undefined ? "" : `\nExplanation (unverified): ${JSON.stringify(options.explanation)}`;
+		const choice = await runner
+			.getUIContext()
+			.select(
+				`Run on host (no shell)?\nReason: ${JSON.stringify(options.question)}${explanation}\nExecutable: ${JSON.stringify(executable)}\nArguments: ${JSON.stringify(args)}\nHost cwd: ${JSON.stringify(hostCwd)}`,
+				["No", "Yes"],
+				{ signal },
+			);
+		if (choice !== "Yes" || signal?.aborted) throw new Error("Host process was not approved");
+		if (
+			runner !== this._extensionRunner ||
+			operations !== this._sandboxToolOperations ||
+			operations.isDisconnected()
+		) {
+			throw new Error("Sandbox changed before the host process could run");
+		}
+		return execCommand(executable, args, hostCwd, { signal, timeout: options.timeout });
 	}
 
 	private _createLoadToolDefinition(): ToolDefinition {

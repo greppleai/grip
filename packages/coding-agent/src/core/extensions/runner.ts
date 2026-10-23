@@ -298,9 +298,16 @@ export class ExtensionRunner {
 	private getSystemPromptFn: () => string = () => "";
 	private getToolOperationsFn: ExtensionContextActions["getToolOperations"];
 	private getToolBackendInfoFn: ExtensionContextActions["getToolBackendInfo"];
+	private isSandboxFn: ExtensionContextActions["isSandbox"] = () => false;
 	private getLspStatusFn: ExtensionContextActions["getLspStatus"];
 	private configureLspFn: ExtensionContextActions["configureLsp"];
 	private execToolBackendFn: ExtensionContextActions["execToolBackend"];
+	private execHostCommandFn: ExtensionContextActions["execHostCommand"] = async () => {
+		throw new Error("Host command execution is not available in this extension runtime");
+	};
+	private execHostProcessFn: ExtensionContextActions["execHostProcess"] = async () => {
+		throw new Error("Host process execution is not available in this extension runtime");
+	};
 	private newSessionHandler: NewSessionHandler = async () => ({ cancelled: false });
 	private forkHandler: ForkHandler = async () => ({ cancelled: false });
 	private navigateTreeHandler: NavigateTreeHandler = async () => ({ cancelled: false });
@@ -377,9 +384,12 @@ export class ExtensionRunner {
 		this.getSystemPromptFn = contextActions.getSystemPrompt;
 		this.getToolOperationsFn = contextActions.getToolOperations;
 		this.getToolBackendInfoFn = contextActions.getToolBackendInfo;
+		this.isSandboxFn = contextActions.isSandbox;
 		this.getLspStatusFn = contextActions.getLspStatus;
 		this.configureLspFn = contextActions.configureLsp;
 		this.execToolBackendFn = contextActions.execToolBackend;
+		this.execHostCommandFn = contextActions.execHostCommand;
+		this.execHostProcessFn = contextActions.execHostProcess;
 
 		// Flush provider registrations queued during extension loading
 		for (const { name, config, extensionPath } of this.runtime.pendingProviderRegistrations) {
@@ -717,6 +727,10 @@ export class ExtensionRunner {
 				runner.assertActive();
 				return runner.getToolBackendInfoFn();
 			},
+			isSandbox: () => {
+				runner.assertActive();
+				return runner.isSandboxFn();
+			},
 			getLspStatus: () => {
 				runner.assertActive();
 				return runner.getLspStatusFn();
@@ -728,6 +742,14 @@ export class ExtensionRunner {
 			execToolBackend: (command, options) => {
 				runner.assertActive();
 				return runner.execToolBackendFn(command, options);
+			},
+			execHostCommand: (command, options) => {
+				runner.assertActive();
+				return runner.execHostCommandFn(command, options);
+			},
+			execHostProcess: (executable, args, options) => {
+				runner.assertActive();
+				return runner.execHostProcessFn(executable, args, options);
 			},
 			get session() {
 				runner.assertActive();

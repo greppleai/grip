@@ -105,6 +105,8 @@ export type {
 	ExtensionFactory,
 	ExtensionFlag,
 	ExtensionHandler,
+	ExtensionHostCommandOptions,
+	ExtensionHostProcessOptions,
 	ExtensionNotificationType,
 	ExtensionRuntime,
 	ExtensionShortcut,

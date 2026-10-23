@@ -319,10 +319,22 @@ export interface ExtensionToolBackendExecOptions extends BashExecutorOptions {
 	timeout?: number;
 }
 
+export interface ExtensionHostCommandOptions extends ExtensionToolBackendExecOptions {
+	/** Human-readable reason for this exact host command; Grip supplies the command and host cwd in the approval. */
+	question: string;
+}
+
+/** Arguments are passed directly to the executable, never to a shell. cwd is a guest directory. */
+export interface ExtensionHostProcessOptions extends ExecOptions {
+	/** Extension-supplied approval question; Grip also displays exact executable, argv and mapped host cwd. */
+	question: string;
+	/** Optional unverified explanation to show separately in the approval dialog (may originate from the agent). */
+	explanation?: string;
+}
 export interface ExtensionContext {
 	/** UI methods for user interaction */
 	ui: ExtensionUIContext;
-	/** Whether UI is available (false in print/RPC mode) */
+	/** Whether a UI can answer dialogs (false in print and JSON modes; RPC clients can answer). */
 	hasUI: boolean;
 	/** Current working directory */
 	cwd: string;
@@ -330,12 +342,18 @@ export interface ExtensionContext {
 	toolOperations: BorrowedToolOperations;
 	/** Get active file/tool backend metadata. */
 	getToolBackendInfo(): ToolBackendInfo;
+	/** True while a session-owned sandbox daemon is connected (started or attached). Does not guarantee a host mount mapping. */
+	isSandbox(): boolean;
 	/** Inspect the AgentSession-owned LSP runtime without creating another manager. */
 	getLspStatus(): LspSessionStatus;
 	/** Replace the AgentSession-owned LSP configuration after validation. Relative paths are resolved from the session cwd. */
 	configureLsp(configuration: LspConfigurationLayer): Promise<ResolvedLspConfiguration>;
 	/** Execute a shell command through the active file/tool backend. */
 	execToolBackend(command: string, options?: ExtensionToolBackendExecOptions): Promise<BashResult>;
+	/** Execute on the host only after fresh user approval; available only for verified managed sandbox mounts. */
+	execHostCommand(command: string, options: ExtensionHostCommandOptions): Promise<BashResult>;
+	/** Spawn a host executable with argv (no shell), after per-call approval and guest-to-host cwd translation. */
+	execHostProcess(executable: string, args: string[], options: ExtensionHostProcessOptions): Promise<ExecResult>;
 	/** Current session (read-only) */
 	session: ReadonlySession;
 	/** Model registry for API key resolution */
@@ -1754,9 +1772,12 @@ export interface ExtensionContextActions {
 	getSystemPrompt: () => string;
 	getToolOperations: () => ToolOperations;
 	getToolBackendInfo: () => ToolBackendInfo;
+	isSandbox: () => boolean;
 	getLspStatus: () => LspSessionStatus;
 	configureLsp: (configuration: LspConfigurationLayer) => Promise<ResolvedLspConfiguration>;
 	execToolBackend: (command: string, options?: ExtensionToolBackendExecOptions) => Promise<BashResult>;
+	execHostCommand: (command: string, options: ExtensionHostCommandOptions) => Promise<BashResult>;
+	execHostProcess: (executable: string, args: string[], options: ExtensionHostProcessOptions) => Promise<ExecResult>;
 }
 
 /**

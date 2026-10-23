@@ -262,6 +262,7 @@ interface SessionSandboxState {
 	url: string;
 	token: string;
 	expectedCwd: string;
+	hostWorkspaceRoot?: string;
 	containerId?: string;
 }
 
@@ -2204,12 +2205,16 @@ export class InteractiveMode {
 			cwd: this.activeSession.getCwd(),
 			toolOperations: this.session.getToolOperations(),
 			getToolBackendInfo: () => this.session.getToolBackendInfo(),
+			isSandbox: () => this.session.isSandbox(),
 			getLspStatus: () => this.session.getLspStatus(),
 			configureLsp: (configuration) => this.session.configureLsp(configuration),
 			execToolBackend: (command, options) => {
 				const operations = this.session.getToolOperations();
 				return executeBashWithOperations(command, options?.cwd ?? operations.cwd, operations, options);
 			},
+			execHostCommand: (command, options) => extensionRunner.createContext().execHostCommand(command, options),
+			execHostProcess: (executable, args, options) =>
+				extensionRunner.createContext().execHostProcess(executable, args, options),
 			session: this.activeSession,
 			modelRegistry: this.session.modelRegistry,
 			model: this.session.model,
@@ -6462,6 +6467,7 @@ export class InteractiveMode {
 		try {
 			await this.session.activateSandboxDaemon({
 				url: state.url,
+				hostWorkspaceRoot: state.hostWorkspaceRoot,
 				token: state.token,
 				expectedCwd: state.expectedCwd,
 			});
@@ -6561,6 +6567,7 @@ export class InteractiveMode {
 					url: result.daemonUrl,
 					token: result.token,
 					expectedCwd: result.workspaceMountPath,
+					hostWorkspaceRoot: result.workspaceRoot,
 				});
 				break;
 			} catch (error) {
@@ -6622,6 +6629,7 @@ export class InteractiveMode {
 				url: result.daemonUrl,
 				token: result.token,
 				expectedCwd: result.workspaceMountPath,
+				hostWorkspaceRoot: result.workspaceRoot,
 				containerId: result.containerId,
 			});
 			this.refreshUiAfterBackendChange();
