@@ -2,6 +2,22 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.1.6](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.5...@greppleai/grip-v0.1.6) (2026-10-23)
+
+
+### Features
+
+* preserve sandbox with /new and chain option completion ([71d3c7e](https://github.com/greppleai/grip/commit/71d3c7e967dc9e8e163fbe3243f2b5751706d1ca))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.1.5 to ^0.1.6
+    * @greppleai/grip-ai bumped from ^0.1.5 to ^0.1.6
+    * @greppleai/grip-tui bumped from ^0.1.5 to ^0.1.6
+
 ## [0.1.5](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.4...@greppleai/grip-v0.1.5) (2026-10-22)
 
 

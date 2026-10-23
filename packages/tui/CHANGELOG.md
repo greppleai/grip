@@ -2,6 +2,13 @@
 
 All notable changes to `@greppleai/grip-tui` are documented in this file.
 
+## [0.1.6](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.1.5...@greppleai/grip-tui-v0.1.6) (2026-10-23)
+
+
+### Features
+
+* preserve sandbox with /new and chain option completion ([71d3c7e](https://github.com/greppleai/grip/commit/71d3c7e967dc9e8e163fbe3243f2b5751706d1ca))
+
 ## [0.1.5](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.1.4...@greppleai/grip-tui-v0.1.5) (2026-10-22)
 
 
