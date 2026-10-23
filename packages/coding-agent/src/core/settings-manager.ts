@@ -5,7 +5,7 @@ import type {
 } from "@greppleai/grip-agent-core";
 import type { RetryPolicy, ThinkingBudgets, Transport } from "@greppleai/grip-ai";
 import type { ScrollViewScrollbar, TuiMode } from "@greppleai/grip-tui";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
@@ -148,6 +148,8 @@ export interface Settings {
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
 	sandbox?: SandboxSettings;
+	/** Canonical host directory -> existing named Lima VM; global settings only. */
+	defaultSandboxes?: Record<string, string>;
 	tuiMode?: TuiMode; // default: "regular"
 	fullscreenExitOutput?: FullscreenExitOutput; // default: "transcript"; no effect in regular TUI mode
 	fullscreenScrollbar?: ScrollViewScrollbar; // default: "auto"; no effect in regular TUI mode
@@ -704,6 +706,30 @@ export class SettingsManager {
 
 	getSandboxSettings(): SandboxSettings | undefined {
 		return this.settings.sandbox ? structuredClone(this.settings.sandbox) : undefined;
+	}
+
+	getDefaultSandbox(cwd: string): string | undefined {
+		const defaults = this.globalSettings.defaultSandboxes;
+		if (!isMergeableObject(defaults)) return undefined;
+		const path = realpathSync(cwd);
+		const name = Object.hasOwn(defaults, path) ? defaults[path] : undefined;
+		return typeof name === "string" && /^[a-z0-9][a-z0-9-]*$/.test(name) ? name : undefined;
+	}
+
+	setDefaultSandbox(cwd: string, name: string | undefined): void {
+		if (name !== undefined && !/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+			throw new Error(
+				"Default sandbox must be an existing Lima VM name containing only lowercase letters, digits, or hyphens",
+			);
+		}
+		const path = realpathSync(cwd);
+		const defaults = this.globalSettings.defaultSandboxes;
+		if (defaults !== undefined && !isMergeableObject(defaults)) throw new Error("Invalid defaultSandboxes settings");
+		this.globalSettings.defaultSandboxes = { ...defaults };
+		if (name === undefined) delete this.globalSettings.defaultSandboxes[path];
+		else setOwnValue(this.globalSettings.defaultSandboxes, path, name);
+		this.markModified("defaultSandboxes", path);
+		this.save();
 	}
 
 	getToolsSettings(): ToolSettings | undefined {

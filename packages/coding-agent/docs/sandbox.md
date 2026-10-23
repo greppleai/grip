@@ -16,16 +16,20 @@ Lima-managed sandboxes allow workspace tools (`read`, `write`, `edit`, `ls`, `fi
 /sandbox [status]
 /sandbox clear
 /sandbox --attach <ws://url>
-/sandbox start [--name <lima-instance>] [--template <lima-template>] [--update]
+/sandbox start [--name <lima-instance>] [--template <lima-template>] [--update] [--set-default]
 /sandbox list
-/sandbox stop [vm]
+/sandbox default [status]
+/sandbox default --name <existing-lima-vm>
+/sandbox default set
+/sandbox default clear
 ```
 
 - `/sandbox status` shows the active workspace tool backend. `/sandbox clear` disconnects it without stopping a VM.
 - `/sandbox --attach` connects to an already-running daemon without managing its lifecycle. Set `GRIP_REMOTE_TOKEN` if required. The daemon workspace root must match `--remote-cwd` in deferred mode, or `sandbox.workspaceMountPath` otherwise.
-- `/sandbox start` creates a per-session Lima VM with the current working directory mounted read/write at `/workspace`. `--template` overrides the VM template for a new instance. `--name` creates an absent VM, resumes a stopped per-session VM, or attaches to a running VM after guest-mode inspection. A running VM with a verified shared guest-state marker uses the direct shared-daemon protocol; a VM without it follows the per-session path.
+- `/sandbox start` creates a per-session Lima VM with the current working directory mounted read/write at `/workspace`. `--template` overrides the VM template for a new instance. `--name` creates an absent VM, resumes a stopped per-session VM, or attaches to a running VM after guest-mode inspection. A running VM with a verified shared guest-state marker uses the direct shared-daemon protocol; a VM without it follows the per-session path. `/sandbox start --name my-dev --set-default` records the VM as this host directory's future default **after** it connects successfully; `--set-default` requires `--name`.
 - `/sandbox start --name <running-shared-VM> --update` updates a verified shared guest and reconnects this TUI. It stages and validates the replacement first, stops its supervised daemon (disconnecting every attached client), atomically replaces the executable, and restarts the same service. It cannot be combined with `--template`; legacy, stopped, or unverifiable VMs are refused without disconnecting anyone.
 - `/sandbox list` shows Lima instances mounting the current workspace. A shared VM mounting a parent might not appear from a child workspace; attach by exact name instead.
+- `/sandbox default --name <existing-lima-vm>` assigns an existing named Lima VM to the current host directory for future interactive startups. `/sandbox default set` assigns the currently connected named Lima VM instead, including one created without `--name`; it rejects a raw `--attach` daemon or a VM mounted for a different host directory. `/sandbox default` shows the assignment; `/sandbox default clear` removes it without disconnecting an active sandbox. Assignments live only in the user-home Grip settings file and match the exact canonical directory, not child directories. On startup Grip verifies the named VM exists and uses the usual `/sandbox start --name` mount/guest checks before connecting; it never creates a missing VM automatically. An explicitly configured remote backend takes precedence. A failed connection warns and leaves the session local. This setting does not persist daemon tokens or apply to raw `--attach` URLs.
 - `/sandbox stop` stops only tracked per-session daemons and process-owned VMs. For a shared named VM or an attached daemon it detaches the current session only. A matching name or mount does not establish ownership; named per-session VMs remain running after daemon stop. Grip never stops another client's shared guest or VM.
 
 ```text
@@ -34,6 +38,8 @@ Lima-managed sandboxes allow workspace tools (`read`, `write`, `edit`, `ls`, `fi
 /sandbox list
 /sandbox stop
 /sandbox start --name my-dev
+/sandbox start --name my-dev --set-default
+/sandbox default set
 /sandbox start --name my-dev --update
 /sandbox stop
 ```

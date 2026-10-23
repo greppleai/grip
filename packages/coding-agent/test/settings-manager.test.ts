@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -453,6 +453,32 @@ describe("SettingsManager", () => {
 		});
 	});
 	describe("sandbox settings", () => {
+		it("persists exact directory defaults in global settings without project overrides or lost concurrent updates", async () => {
+			const canonical = realpathSync(projectDir);
+			const other = join(testDir, "other");
+			mkdirSync(other);
+			writeFileSync(
+				join(projectDir, CONFIG_DIR_NAME, "settings.json"),
+				JSON.stringify({ defaultSandboxes: { [canonical]: "untrusted-project-vm" } }),
+			);
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getDefaultSandbox(projectDir)).toBeUndefined();
+			expect(() => manager.setDefaultSandbox(projectDir, "bad name")).toThrow("Default sandbox");
+			manager.setDefaultSandbox(projectDir, "project-vm");
+			await manager.flush();
+			expect(manager.getDefaultSandbox(projectDir)).toBe("project-vm");
+			expect(manager.getDefaultSandbox(other)).toBeUndefined();
+			const second = SettingsManager.create(other, agentDir);
+			expect(second.getDefaultSandbox(projectDir)).toBe("project-vm");
+			second.setDefaultSandbox(other, "other-vm");
+			await second.flush();
+			manager.setDefaultSandbox(projectDir, undefined);
+			await manager.flush();
+			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).defaultSandboxes).toEqual({
+				[realpathSync(other)]: "other-vm",
+			});
+			expect(SettingsManager.create(projectDir, agentDir).getDefaultSandbox(projectDir)).toBeUndefined();
+		});
 		it("merges global and project sandbox settings", () => {
 			writeFileSync(
 				join(agentDir, "settings.json"),

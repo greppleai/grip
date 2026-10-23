@@ -169,11 +169,36 @@ describe("hidden sandbox command", () => {
 		expect(parseSandboxUserCommand("/sandbox")).toEqual({ subcommand: "status" });
 		expect(parseSandboxUserCommand("/sandbox status")).toEqual({ subcommand: "status" });
 		expect(parseSandboxUserCommand("/sandbox clear")).toEqual({ subcommand: "clear" });
+		expect(parseSandboxUserCommand("/sandbox default")).toEqual({ subcommand: "default" });
+		expect(parseSandboxUserCommand("/sandbox default status")).toEqual({ subcommand: "default" });
+		expect(parseSandboxUserCommand("/sandbox default --name my-dev")).toEqual({
+			subcommand: "default",
+			name: "my-dev",
+		});
+		expect(parseSandboxUserCommand("/sandbox default clear")).toEqual({ subcommand: "default", clear: true });
+		expect(parseSandboxUserCommand("/sandbox default set")).toEqual({ subcommand: "default", set: true });
+		expect(() => parseSandboxUserCommand("/sandbox default set --name vm")).toThrow("Usage: /sandbox default");
+		expect(() => parseSandboxUserCommand("/sandbox default --name")).toThrow("Usage: /sandbox default");
+		expect(() => parseSandboxUserCommand("/sandbox default --name one two")).toThrow("Usage: /sandbox default");
 		expect(parseSandboxUserCommand("/sandbox --attach ws://127.0.0.1:8787/pi/workspace")).toEqual({
 			subcommand: "attach",
 			url: "ws://127.0.0.1:8787/pi/workspace",
 		});
 		expect(parseSandboxUserCommand("/sandbox start")).toEqual({ subcommand: "start" });
+		expect(parseSandboxUserCommand("/sandbox start --name my-vm --set-default")).toEqual({
+			subcommand: "start",
+			name: "my-vm",
+			setDefault: true,
+		});
+		expect(parseSandboxUserCommand("/sandbox start --set-default --name my-vm")).toEqual({
+			subcommand: "start",
+			name: "my-vm",
+			setDefault: true,
+		});
+		expect(() => parseSandboxUserCommand("/sandbox start --set-default")).toThrow("requires --name");
+		expect(() => parseSandboxUserCommand("/sandbox start --name my-vm --set-default --set-default")).toThrow(
+			"Duplicate",
+		);
 		expect(parseSandboxUserCommand("/sandbox start --name existing --template template:alpine")).toEqual({
 			subcommand: "start",
 			name: "existing",
@@ -568,6 +593,9 @@ describe("hidden sandbox command", () => {
 		Object.setPrototypeOf(context, InteractiveMode.prototype);
 
 		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start");
+		expect(context.sessionSandboxStates.get("/host/project\0session-a")).toEqual(
+			expect.objectContaining({ containerName: "grip-sandbox-project-hash", hostWorkspaceRoot: "/host/project" }),
+		);
 		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox list");
 		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox stop abc123");
 

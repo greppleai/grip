@@ -60,7 +60,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 
 `/hooks disable` immediately prevents subsequent hook events in the current session; a hook execution already in progress is allowed to finish. `/hooks enable` resumes dispatch. Skipped events are not replayed, and a newly created or resumed session starts with hooks enabled. `/reload` preserves this enabled/disabled state while refreshing file-backed hook configuration.
 
-`/hooks` and `/sandbox` are user-only interactive commands hidden from model-visible command catalogs. `/sandbox` shows or clears the current backend, attaches a sandbox daemon, and manages local Docker sandbox containers; see [Workspace Sandbox](sandbox.md).
+`/hooks` and `/sandbox` are user-only interactive commands hidden from model-visible command catalogs. `/sandbox` shows or clears the current backend, attaches a sandbox daemon, manages Lima sandboxes, and can set a per-directory default with `/sandbox start --name <vm> --set-default` or `/sandbox default set`; see [Workspace Sandbox](sandbox.md).
 
 ## Model Selection
 

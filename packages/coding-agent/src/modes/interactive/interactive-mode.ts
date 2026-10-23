@@ -131,6 +131,7 @@ import {
 	formatSandboxStartResult,
 	formatSandboxStopResult,
 	parseSandboxUserCommand,
+	type SandboxDefaultUserCommand,
 	type SandboxStartUserCommand,
 	type SandboxUserCommand,
 } from "../../core/sandbox/command.ts";
@@ -264,6 +265,7 @@ interface SessionSandboxState {
 	expectedCwd: string;
 	hostWorkspaceRoot?: string;
 	containerId?: string;
+	containerName?: string;
 }
 
 function getSessionSandboxKey(session: Session): string {
@@ -1271,6 +1273,7 @@ export class InteractiveMode {
 		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
 		this.ui.start();
 		this.isInitialized = true;
+		await this.connectDefaultSandbox();
 
 		// Initialize extensions first so resources are shown before messages
 		await this.rebindCurrentSession();
@@ -6463,6 +6466,34 @@ export class InteractiveMode {
 		});
 	}
 
+	private async requireNamedSandbox(service: SandboxService, workspaceRoot: string, name: string): Promise<void> {
+		const instances = await service.list({ workspaceRoot, allWorkspaces: true });
+		if (!instances.some((instance) => instance.name === name)) {
+			throw new Error(`Lima VM ${name} does not exist; create it explicitly with /sandbox start --name ${name}`);
+		}
+	}
+
+	private async connectDefaultSandbox(): Promise<void> {
+		const workspaceRoot = this.activeSession.getCwd();
+		let name: string | undefined;
+		try {
+			name = this.settingsManager.getDefaultSandbox(workspaceRoot);
+			if (!name) return;
+			const sessionKey = getSessionSandboxKey(this.activeSession);
+			if (this.session.getToolBackendInfo().type !== "local" || this.hasSandboxActivationConflict(sessionKey)) {
+				this.showWarning(`Default sandbox ${name} skipped: a workspace backend is already active`);
+				return;
+			}
+			const service = this.createLimaSandboxService();
+			await this.requireNamedSandbox(service, workspaceRoot, name);
+			await this.startSandboxBackend({ subcommand: "start", name }, service, workspaceRoot, sessionKey);
+		} catch (error) {
+			this.showWarning(
+				`Default sandbox${name ? ` ${name}` : ""} not connected: ${redactSecrets(error instanceof Error ? error.message : String(error))}`,
+			);
+		}
+	}
+
 	private async disposeRuntimeResources(): Promise<Error[]> {
 		const limaSandboxService = this.createLimaSandboxService();
 		const errors: Error[] = [];
@@ -6625,7 +6656,7 @@ export class InteractiveMode {
 		workspaceRoot: string,
 		sessionKey: string,
 		updatingAttached = false,
-	): Promise<void> {
+	): Promise<SandboxStartResult> {
 		const loader = this.showSandboxStartupLoader();
 		try {
 			const result = await service.start({
@@ -6652,6 +6683,7 @@ export class InteractiveMode {
 				expectedCwd: result.workspaceMountPath,
 				hostWorkspaceRoot: result.workspaceRoot,
 				containerId: result.containerId,
+				containerName: result.containerName,
 			});
 			this.refreshUiAfterBackendChange();
 			this.updateToolBackendStatus();
@@ -6663,6 +6695,7 @@ export class InteractiveMode {
 					this.formatToolBackendStatus(info),
 				].join("\n"),
 			);
+			return result;
 		} finally {
 			this.hideSandboxStartupLoader(loader);
 		}
@@ -6752,6 +6785,55 @@ export class InteractiveMode {
 		this.showStatus(formatSandboxStopResult(result));
 	}
 
+	private async handleDefaultSandboxCommand(
+		command: SandboxDefaultUserCommand,
+		service: SandboxService,
+		workspaceRoot: string,
+		sessionKey: string,
+	): Promise<void> {
+		const configured = this.settingsManager.getDefaultSandbox(workspaceRoot);
+		if (!command.name && !command.clear && !command.set) {
+			this.showStatus(
+				configured
+					? `Default sandbox for ${workspaceRoot}: ${configured}`
+					: `No default sandbox for ${workspaceRoot}`,
+			);
+			return;
+		}
+		let name = command.name;
+		if (command.set) {
+			const state = this.sessionSandboxStates.get(sessionKey);
+			if (
+				!this.activeSandboxBackendConnected ||
+				!state?.containerId ||
+				!state.containerName ||
+				state.containerId !== this.activeSandboxContainerId ||
+				!state.hostWorkspaceRoot
+			) {
+				throw new Error("No active named Lima VM; use /sandbox default --name <existing-lima-vm>");
+			}
+			if (fs.realpathSync(state.hostWorkspaceRoot) !== fs.realpathSync(workspaceRoot)) {
+				throw new Error(
+					"Active Lima VM is mounted for a different host directory; cannot set this directory's default",
+				);
+			}
+			name = state.containerName;
+		} else if (name) {
+			await this.requireNamedSandbox(service, workspaceRoot, name);
+		}
+		await this.saveDefaultSandbox(workspaceRoot, name);
+	}
+
+	private async saveDefaultSandbox(workspaceRoot: string, name: string | undefined): Promise<void> {
+		if (this.settingsManager.getLoadError("global")) throw new Error("Global settings could not be loaded");
+		this.settingsManager.setDefaultSandbox(workspaceRoot, name);
+		await this.settingsManager.flush();
+		this.showStatus(
+			name
+				? `Default sandbox for ${workspaceRoot} set to ${name} (connects on next startup)`
+				: `Default sandbox for ${workspaceRoot} cleared`,
+		);
+	}
 	private async executeSandboxCommand(
 		command: SandboxUserCommand,
 		service: LimaSandboxService,
@@ -6761,6 +6843,9 @@ export class InteractiveMode {
 		switch (command.subcommand) {
 			case "status":
 				this.showStatus(this.formatToolBackendStatus(this.session.getToolBackendInfo()));
+				return;
+			case "default":
+				await this.handleDefaultSandboxCommand(command, service, workspaceRoot, sessionKey);
 				return;
 			case "clear":
 				await this.clearSandboxBackend(sessionKey);
@@ -6777,7 +6862,14 @@ export class InteractiveMode {
 					attached.containerId === command.name &&
 					this.activeSandboxBackendConnected;
 				if (!updatingAttached && !this.ensureSandboxCanActivate(sessionKey)) return;
-				await this.startSandboxBackend(command, service, workspaceRoot, sessionKey, updatingAttached);
+				const result = await this.startSandboxBackend(
+					command,
+					service,
+					workspaceRoot,
+					sessionKey,
+					updatingAttached,
+				);
+				if (command.setDefault) await this.saveDefaultSandbox(workspaceRoot, result.containerName);
 				return;
 			}
 			case "list":

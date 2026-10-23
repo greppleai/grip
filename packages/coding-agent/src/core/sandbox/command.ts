@@ -5,12 +5,21 @@ export interface SandboxStartUserCommand {
 	name?: string;
 	template?: string;
 	update?: boolean;
+	setDefault?: boolean;
+}
+
+export interface SandboxDefaultUserCommand {
+	subcommand: "default";
+	name?: string;
+	clear?: boolean;
+	set?: boolean;
 }
 
 export type SandboxUserCommand =
 	| { subcommand: "status" }
 	| { subcommand: "clear" }
 	| { subcommand: "attach"; url: string }
+	| SandboxDefaultUserCommand
 	| SandboxStartUserCommand
 	| { subcommand: "list" }
 	| { subcommand: "stop"; target?: string };
@@ -33,31 +42,60 @@ function parseSandboxStartValue(
 		throw new Error(`Unsupported /sandbox start argument: ${option}`);
 	}
 	if (!value || value.startsWith("--")) {
-		throw new Error("Usage: /sandbox start [--name <lima-instance>] [--template <lima-template>] [--update]");
+		throw new Error(
+			"Usage: /sandbox start [--name <lima-instance>] [--template <lima-template>] [--update] [--set-default]",
+		);
 	}
 	return option === "--name" ? { name: value } : { template: value };
 }
 
+interface SandboxStartFlags {
+	update: boolean;
+	setDefault: boolean;
+}
+
+function parseSandboxStartFlag(option: string | undefined, flags: SandboxStartFlags): boolean {
+	if (option === "--set-default") {
+		if (flags.setDefault) throw new Error("Duplicate /sandbox start --set-default");
+		flags.setDefault = true;
+		return true;
+	}
+	if (option === "--update") {
+		if (flags.update) throw new Error("Duplicate /sandbox start --update");
+		flags.update = true;
+		return true;
+	}
+	return false;
+}
+
 function parseSandboxStartCommand(tokens: string[]): SandboxUserCommand {
 	const fields: Pick<SandboxStartUserCommand, "name" | "template"> = {};
-	let update = false;
+	const flags: SandboxStartFlags = { update: false, setDefault: false };
 	for (let index = 2; index < tokens.length; index++) {
 		const option = tokens[index];
-		if (option === "--update") {
-			if (update) throw new Error("Duplicate /sandbox start --update");
-			update = true;
-			continue;
-		}
+		if (parseSandboxStartFlag(option, flags)) continue;
 		Object.assign(fields, parseSandboxStartValue(option, tokens[++index]));
 	}
-	if (update && (!fields.name || fields.template)) {
+	if (flags.update && (!fields.name || fields.template)) {
 		throw new Error("/sandbox start --update requires --name and cannot be combined with --template");
 	}
+	if (flags.setDefault && !fields.name) throw new Error("/sandbox start --set-default requires --name");
 	return {
 		subcommand: "start",
 		...fields,
-		...(update ? { update: true } : {}),
+		...(flags.update ? { update: true } : {}),
+		...(flags.setDefault ? { setDefault: true } : {}),
 	};
+}
+
+function parseSandboxDefaultCommand(tokens: string[]): SandboxUserCommand {
+	if (tokens.length === 2 || (tokens[2] === "status" && tokens.length === 3)) return { subcommand: "default" };
+	if (tokens[2] === "clear" && tokens.length === 3) return { subcommand: "default", clear: true };
+	if (tokens[2] === "set" && tokens.length === 3) return { subcommand: "default", set: true };
+	if (tokens[2] === "--name" && tokens.length === 4 && tokens[3]) {
+		return { subcommand: "default", name: tokens[3] };
+	}
+	throw new Error("Usage: /sandbox default [status|set|--name <existing-lima-vm>|clear]");
 }
 
 export function parseSandboxUserCommand(input: string): SandboxUserCommand {
@@ -73,6 +111,8 @@ export function parseSandboxUserCommand(input: string): SandboxUserCommand {
 		case "clear":
 			if (tokens.length > 2) throw new Error("Usage: /sandbox clear");
 			return { subcommand: "clear" };
+		case "default":
+			return parseSandboxDefaultCommand(tokens);
 		case "--attach":
 			if (tokens.length !== 3) throw new Error("Usage: /sandbox --attach <ws://url>");
 			return { subcommand: "attach", url: tokens[2]! };
@@ -86,7 +126,7 @@ export function parseSandboxUserCommand(input: string): SandboxUserCommand {
 			return tokens[2] ? { subcommand: "stop", target: tokens[2] } : { subcommand: "stop" };
 		default:
 			throw new Error(
-				`Unsupported /sandbox subcommand: ${subcommand}. Use status, clear, --attach, start, list, or stop.`,
+				`Unsupported /sandbox subcommand: ${subcommand}. Use status, clear, default, --attach, start, list, or stop.`,
 			);
 	}
 }

@@ -200,6 +200,7 @@ Global and project `tools` settings merge per tool name, so a project can overri
 | `sandbox.daemonPort` | number | `8787` | Preferred loopback-forwarded daemon port; an available port is selected when occupied for new VMs |
 | `sandbox.daemonHostBind` | string | `"127.0.0.1"` | Host bind for the daemon forward |
 | `sandbox.cleanup` | string | `"stop"` | Stop behavior: `"stop"` or `"remove"` for owned VMs |
+| `defaultSandboxes` | object | `{}` | User-home-only map of exact canonical host directories to existing named Lima VMs, set by `/sandbox start --name <vm> --set-default` or `/sandbox default set` |
 
 ```json
 {
@@ -211,6 +212,8 @@ Global and project `tools` settings merge per tool name, so a project can overri
 ```
 
 Precedence for sandbox starts is `--template`, `GRIP_SANDBOX_*` environment variables, project settings, global settings, then defaults. See [Lima Sandbox](sandbox.md) for command syntax, environment variables, and security notes.
+
+To connect to a named VM automatically when starting Grip in a directory, use `/sandbox start --name my-dev --set-default` to create/connect and assign in one step, `/sandbox default set` to assign an already-connected named VM, or `/sandbox default --name my-dev` to assign an existing VM explicitly. This stores `"defaultSandboxes": { "/absolute/canonical/path": "my-dev" }` in `~/.grip/agent/settings.json` (or the configured agent directory). Project `.grip/settings.json` cannot assign defaults. Matching is exact; starting from a child directory does not inherit the mapping. Only existing named VMs are eligible on startup, so a miss cannot silently create a VM. Startup connection errors are shown as warnings and leave the local backend available.
 
 
 For a running shared Lima VM, `/sandbox start --name` uses `sandbox.workspaceMountPath`, `sandbox.daemonHostBind`, `sandbox.daemonPort` and `sandbox.limaBinary` to verify its fixed writable parent mount and loopback forward before attaching. `sandbox.cleanup` does not authorize stopping or deleting the shared VM. Auth, config and sessions remain on the host; same-user agents share the default host directory unless each selects a distinct `GRIP_CODING_AGENT_DIR`. Shared writes and edits use revision preconditions, but shell writes can still race. Shared transfers are unavailable; guest process execution requires trusted clients. See [sandbox.md](sandbox.md#direct-shared-lima-attachment).
