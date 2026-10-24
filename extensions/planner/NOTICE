@@ -1,0 +1,17 @@
+Planner source provenance
+
+Repository: https://github.com/greppleai/planner
+Grip adaptation base: 7d9348951e2eb17ef7d31cdc4a15c4e5ed763b43
+
+The original extraction is preserved in commit
+ a2d11bd ("Copy plan-builder extension before standalone refactor"),
+credited in Git history to Pi. The package extraction/refactor in
+7d9348951e2eb17ef7d31cdc4a15c4e5ed763b43 is credited to Tiit Hansen.
+The Grip port was imported from local revision
+ce2f1d0d07099a267ccb32e3b4138569b8bfe737 into extensions/planner in
+https://github.com/greppleai/grip. Original history remains in the source
+repository; this import does not claim sole authorship of the implementation.
+
+The Grip adaptation uses Grip's extension APIs and package resource manifest.
+Planner remains a separately installed extension, not part of Grip core.
+See LICENSE for the MIT license. Dependency licenses remain their own.
