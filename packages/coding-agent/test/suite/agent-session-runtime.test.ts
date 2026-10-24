@@ -1,11 +1,10 @@
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, registerFauxProvider, type TextContent } from "@greppleai/grip-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
-import { GripAgent, type GripAgentSessionOptions } from "../../src/core/grip-agent.ts";
-import type { LspConnectionFactory } from "../../src/core/lsp/transport.ts";
+import { GripAgent } from "../../src/core/grip-agent.ts";
 import { InMemorySessionManager } from "../../src/core/session/in-memory-session-manager.ts";
 import { LocalSessionManager } from "../../src/core/session/local-session-manager.ts";
 import type {
@@ -31,30 +30,11 @@ interface DisposableToolOperations {
 	dispose(): Promise<void>;
 }
 
-interface LspShutdownManager {
-	shutdownAll(): Promise<void>;
-}
-
-interface LspRuntimeShutdownState {
-	manager: LspShutdownManager;
-}
-
-interface LspClientManager {
-	getClientForFile(path: string): Promise<unknown>;
-}
-
-interface LspRuntimeClientState {
-	manager: LspClientManager;
-}
-
 interface RuntimeTestOptions {
 	cwd?: string;
 	bootstrapModel?: boolean;
 	bootstrapThinkingLevel?: boolean;
 	failReplacementBuild?: ReplacementBuildFailureControl;
-	lsp?: GripAgentSessionOptions["lsp"];
-	enableLspTools?: boolean;
-	lspConnectionFactories?: GripAgentSessionOptions["lspConnectionFactories"];
 }
 
 describe("GripAgent session replacement characterization", () => {
@@ -89,9 +69,6 @@ describe("GripAgent session replacement characterization", () => {
 			agentDir: tempDir,
 			authStorage,
 			sessionManager: new LocalSessionManager({ cwd: tempDir }),
-			lsp: options?.lsp,
-			enableLspTools: options?.enableLspTools,
-			lspConnectionFactories: options?.lspConnectionFactories,
 			resourceLoaderOptions: {
 				extensionFactories: [
 					(pi: ExtensionAPI) => {
@@ -309,22 +286,16 @@ describe("GripAgent session replacement characterization", () => {
 		expect(runtime.session.messages.at(-1)).toMatchObject({ role: "assistant" });
 	});
 
-	it("awaits tool-operation and LSP shutdown during disposal", async () => {
+	it("awaits tool-operation disposal", async () => {
 		const { runtime } = await createRuntimeForTest(() => {});
 		let resolveTools!: () => void;
-		let resolveLsp!: () => void;
 		const toolsDisposed = new Promise<void>((resolve) => {
 			resolveTools = resolve;
 		});
-		const lspDisposed = new Promise<void>((resolve) => {
-			resolveLsp = resolve;
-		});
 		const sessionInternals = runtime.session as unknown as {
 			_localResourceToolOperations?: DisposableToolOperations;
-			_lspRuntimeState?: LspRuntimeShutdownState;
 		};
 		sessionInternals._localResourceToolOperations = { dispose: () => toolsDisposed };
-		sessionInternals._lspRuntimeState = { manager: { shutdownAll: () => lspDisposed } };
 
 		let settled = false;
 		const disposal = runtime.session.dispose().then(() => {
@@ -334,9 +305,6 @@ describe("GripAgent session replacement characterization", () => {
 		expect(settled).toBe(false);
 
 		resolveTools();
-		await Promise.resolve();
-		expect(settled).toBe(false);
-		resolveLsp();
 		await disposal;
 		expect(settled).toBe(true);
 	});
@@ -366,9 +334,7 @@ describe("GripAgent session replacement characterization", () => {
 		});
 		await Promise.resolve();
 		expect(disposalFinished).toBe(false);
-		await expect(runtime.session.configureLsp({ enabled: false })).rejects.toThrow(
-			"Cannot configure LSP after AgentSession disposal",
-		);
+		await expect(runtime.session.reload()).rejects.toThrow("Cannot reload after AgentSession disposal");
 		releaseReload();
 		await Promise.all([reload, disposal]);
 		expect(disposalFinished).toBe(true);
@@ -597,129 +563,6 @@ describe("GripAgent session replacement characterization", () => {
 	it("throws when forking with an invalid entry id", async () => {
 		const { runtime } = await createRuntimeForTest(() => {});
 		await expect(runtime.fork("missing-entry")).rejects.toThrow("Invalid entry ID for forking");
-	});
-
-	it("keeps configured LSP tools opt-in across reload and session replacement", async () => {
-		const lsp = {
-			type: "configuration" as const,
-			configuration: {
-				servers: [
-					{
-						id: "fixture",
-						selectors: [{ languageId: "typescript", pattern: "**/*.ts" }],
-						transport: { type: "tcp" as const, host: "127.0.0.1", port: 2087 },
-						lifecycle: { type: "attached" as const },
-						workspace: { type: "session" as const },
-					},
-				],
-			},
-		};
-		const { runtime } = await createRuntimeForTest(() => {}, { lsp });
-		const session = runtime.session;
-		expect(session.getLspStatus().enabled).toBe(true);
-		expect(session.getActiveToolNames()).not.toContain("lsp_hover");
-		expect(session.getActiveToolNames()).not.toContain("compress_context");
-		await session.reload();
-		expect(session.getActiveToolNames()).not.toContain("lsp_hover");
-		writeFileSync(join(runtime.agentDir, "settings.json"), JSON.stringify({ enableLspTools: true }));
-		await session.reload();
-		expect(session.getActiveToolNames()).toContain("lsp_hover");
-		await runtime.newSession();
-		expect(runtime.session.getActiveToolNames()).toContain("lsp_hover");
-	});
-
-	it("lets an SDK LSP tool flag override settings for the session", async () => {
-		const { runtime } = await createRuntimeForTest(() => {}, {
-			enableLspTools: true,
-			lsp: {
-				type: "configuration",
-				configuration: {
-					servers: [
-						{
-							id: "fixture",
-							selectors: [{ languageId: "typescript", pattern: "**/*.ts" }],
-							transport: { type: "tcp", host: "127.0.0.1", port: 2087 },
-							lifecycle: { type: "attached" },
-							workspace: { type: "session" },
-						},
-					],
-				},
-			},
-		});
-		expect(runtime.session.getActiveToolNames()).toContain("lsp_hover");
-		await runtime.session.reload();
-		expect(runtime.session.getActiveToolNames()).toContain("lsp_hover");
-	});
-
-	it("preserves the single lazy LSP runtime across same- and cross-cwd session replacement", async () => {
-		const firstDir = join(tmpdir(), `pi-runtime-lsp-a-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-		const secondDir = join(tmpdir(), `pi-runtime-lsp-b-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-		mkdirSync(firstDir, { recursive: true });
-		mkdirSync(secondDir, { recursive: true });
-		cleanups.push(() => rmSync(secondDir, { recursive: true, force: true }));
-		const connectionRoots: string[] = [];
-		const connectionFactory: LspConnectionFactory = async (context) => {
-			connectionRoots.push(context.workspaceRoot);
-			throw new Error("intentional faux LSP connection failure");
-		};
-		const lsp = {
-			type: "configuration" as const,
-			configuration: {
-				servers: [
-					{
-						id: "suite",
-						selectors: [{ languageId: "typescript", pattern: "**/*.ts" }],
-						transport: { type: "connection" as const, id: "suite-factory" },
-						lifecycle: { type: "attached" as const },
-						workspace: { type: "session" as const },
-					},
-				],
-			},
-		};
-		const { runtime } = await createRuntimeForTest(() => {}, {
-			cwd: firstDir,
-			lsp,
-			lspConnectionFactories: { "suite-factory": connectionFactory },
-		});
-		const getManager = () => {
-			const state = (
-				runtime.session as unknown as {
-					_lspRuntimeState?: LspRuntimeClientState;
-				}
-			)._lspRuntimeState;
-			if (!state) throw new Error("expected AgentSession-owned LSP runtime");
-			return state.manager;
-		};
-
-		expect(runtime.session.getLspStatus()).toMatchObject({
-			owner: "agent-session",
-			enabled: true,
-			servers: [{ serverId: "suite", state: "idle" }],
-		});
-		expect(connectionRoots).toEqual([]);
-		await getManager().getClientForFile("fixture.ts");
-		expect(connectionRoots).toEqual([firstDir]);
-
-		const firstSession = runtime.session;
-		await runtime.newSession();
-		expect(runtime.session).not.toBe(firstSession);
-		expect(runtime.session.getLspStatus()).toMatchObject({ enabled: true, servers: [{ serverId: "suite" }] });
-		await getManager().getClientForFile("fixture.ts");
-		expect(connectionRoots).toEqual([firstDir, firstDir]);
-
-		const otherSession = new LocalSessionManager({ cwd: secondDir }).create();
-		otherSession.appendMessage({ role: "user", content: [{ type: "text", text: "other" }], timestamp: Date.now() });
-		const otherReference = otherSession.getSessionReference();
-		if (!otherReference) throw new Error("expected destination session reference");
-		await runtime.switchSession(otherReference, { cwdOverride: secondDir });
-		expect(realpathSync(runtime.cwd)).toBe(realpathSync(secondDir));
-		await getManager().getClientForFile("fixture.ts");
-		expect(connectionRoots).toEqual([firstDir, firstDir, secondDir]);
-
-		await runtime.session.configureLsp({ enabled: false });
-		expect(runtime.session.getLspStatus()).toMatchObject({ enabled: false, servers: [] });
-		expect((runtime.session as unknown as { _lspRuntimeState?: unknown })._lspRuntimeState).toBeUndefined();
-		expect(runtime.session.getToolDefinition("lsp_hover")).toBeUndefined();
 	});
 
 	it("updates the runtime session cwd on cross-cwd session replacement", async () => {

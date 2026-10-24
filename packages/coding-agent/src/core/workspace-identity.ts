@@ -1,4 +1,4 @@
-import type { PortablePathFlavor } from "./lsp/portable-path.ts";
+import type { PortablePathFlavor } from "./portable-path.ts";
 
 export interface WorkspaceIdentity {
 	readonly id: string;

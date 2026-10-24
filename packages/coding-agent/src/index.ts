@@ -9,7 +9,6 @@ export {
 	type AgentSessionConfig,
 	type AgentSessionEvent,
 	type AgentSessionEventListener,
-	type AgentSessionReloadResult,
 	type ConfigureRemoteSandboxOptions,
 	type ExecuteBashOptions,
 	type ForkableUserMessage,
@@ -197,123 +196,6 @@ export {
 	type InstructionResourceLoaderOptions,
 	type InstructionResourceLoaderWithOperationsOptions,
 } from "./core/instruction-resource-loader.ts";
-export {
-	LspClient,
-	type LspClientOptions,
-	type LspClientOwnership,
-	type LspClientStartResult,
-	type LspConnectionState,
-	type LspDocumentSyncCapabilities,
-	type LspShutdownMode,
-} from "./core/lsp/client.ts";
-export {
-	type LspClientInfo,
-	type LspConfigurationDiagnostic,
-	type LspConfigurationLayer,
-	type LspConfigurationMode,
-	type LspConfiguredServer,
-	type LspDisabledServer,
-	type LspDocumentSelector,
-	type LspJsonValue,
-	type LspNamedPipeTransport,
-	type LspPathMapping,
-	type LspProgrammaticTransport,
-	type LspServerEntry,
-	type LspServerFeatures,
-	type LspServerLifecycle,
-	type LspServerTimeouts,
-	type LspSpawnTransport,
-	type LspTcpTransport,
-	type LspTraceValue,
-	type LspTransport,
-	type LspUnixSocketTransport,
-	type LspWorkspaceRoot,
-	type ParseLspConfigurationResult,
-	parseLspConfiguration,
-	type ResolvedLspConfiguration,
-	resolveLspConfiguration,
-} from "./core/lsp/config.ts";
-export {
-	type LoadLspConfigurationOptions,
-	type LoadLspConfigurationResult,
-	type LspConfigurationInput,
-	type LspConfigurationInputScope,
-	type LspConfigurationSourceDiagnostic,
-	type LspConfigurationSourceDiagnosticSeverity,
-	loadLspConfiguration,
-	resolveLspConfigurationLayerPaths,
-} from "./core/lsp/config-loader.ts";
-export {
-	createLspDiagnosticsTool,
-	formatAutoDiagnosticsForChangedFile,
-	type LspDiagnosticsDetails,
-} from "./core/lsp/diagnostics.ts";
-export {
-	LspFileSync,
-	type LspSynchronizationFailure,
-	type LspSynchronizationResult,
-	type LspTrackedDocument,
-} from "./core/lsp/file-sync.ts";
-export {
-	createLspRuntimeState,
-	createLspToolDefinitions,
-	LSP_TOOL_NAMES,
-	type LspLifecycleOptions,
-	type LspRuntimeOwner,
-	type LspRuntimeState,
-	type LspSessionStatus,
-	type LspToolName,
-	registerLspLifecycleHandlers,
-	registerStandaloneLspLifecycleHandlers,
-} from "./core/lsp/integration.ts";
-export {
-	LspPathMapper,
-	type LspPathMappingResult,
-	type LspRouteFailure,
-	type LspRouteResult,
-	LspRouter,
-	type LspRouterOptions,
-	type LspRouteTarget,
-} from "./core/lsp/language-map.ts";
-export {
-	type LspClientRoute,
-	type LspClientRouteCollection,
-	type LspClientRouteFailure,
-	type LspClientStartedListener,
-	type LspClientsWillShutdownListener,
-	type LspConnectionFactoryResolver,
-	LspManager,
-	type LspManagerOptions,
-	type LspServerStatus,
-	type LspToolFeature,
-} from "./core/lsp/manager.ts";
-export {
-	createLspDefinitionTool,
-	createLspHoverTool,
-	createLspReferencesTool,
-	type LspHoverDetails,
-	type LspLocationDetails,
-} from "./core/lsp/navigation.ts";
-export {
-	createLspCodeActionsTool,
-	createLspRenameTool,
-	type LspCodeActionsDetails,
-	type LspRenameDetails,
-} from "./core/lsp/refactor.ts";
-export {
-	createManagedStdioConnectionFactory,
-	createNamedPipeConnectionFactory,
-	createTcpConnectionFactory,
-	createUnixSocketConnectionFactory,
-	type LspConnectionDisposalMode,
-	type LspConnectionEndpoint,
-	type LspConnectionFactory,
-	type LspConnectionFactoryContext,
-	type LspConnectionFactoryRegistry,
-	type LspConnectionHandle,
-	type ManagedStdioConnectionOptions,
-	resolveLspConnectionFactory,
-} from "./core/lsp/transport.ts";
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export type { ScopedModel } from "./core/model-resolver.ts";

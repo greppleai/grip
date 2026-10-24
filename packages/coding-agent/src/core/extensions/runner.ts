@@ -299,8 +299,6 @@ export class ExtensionRunner {
 	private getToolOperationsFn: ExtensionContextActions["getToolOperations"];
 	private getToolBackendInfoFn: ExtensionContextActions["getToolBackendInfo"];
 	private isSandboxFn: ExtensionContextActions["isSandbox"] = () => false;
-	private getLspStatusFn: ExtensionContextActions["getLspStatus"];
-	private configureLspFn: ExtensionContextActions["configureLsp"];
 	private execToolBackendFn: ExtensionContextActions["execToolBackend"];
 	private execHostCommandFn: ExtensionContextActions["execHostCommand"] = async () => {
 		throw new Error("Host command execution is not available in this extension runtime");
@@ -336,15 +334,6 @@ export class ExtensionRunner {
 		};
 		this.getToolBackendInfoFn = () =>
 			this.getToolOperationsFn().getBackendInfo?.() ?? { type: "local", cwd: this.cwd };
-		this.getLspStatusFn = () => ({
-			owner: "standalone",
-			enabled: false,
-			configuration: { enabled: false, servers: [] },
-			servers: [],
-		});
-		this.configureLspFn = async () => {
-			throw new Error("Extension LSP configuration is not bound yet");
-		};
 		this.execToolBackendFn = async (command, options) => {
 			const operations = this.getToolOperationsFn();
 			return executeBashWithOperations(command, options?.cwd ?? operations.cwd, operations, options);
@@ -385,8 +374,6 @@ export class ExtensionRunner {
 		this.getToolOperationsFn = contextActions.getToolOperations;
 		this.getToolBackendInfoFn = contextActions.getToolBackendInfo;
 		this.isSandboxFn = contextActions.isSandbox;
-		this.getLspStatusFn = contextActions.getLspStatus;
-		this.configureLspFn = contextActions.configureLsp;
 		this.execToolBackendFn = contextActions.execToolBackend;
 		this.execHostCommandFn = contextActions.execHostCommand;
 		this.execHostProcessFn = contextActions.execHostProcess;
@@ -730,14 +717,6 @@ export class ExtensionRunner {
 			isSandbox: () => {
 				runner.assertActive();
 				return runner.isSandboxFn();
-			},
-			getLspStatus: () => {
-				runner.assertActive();
-				return runner.getLspStatusFn();
-			},
-			configureLsp: (configuration) => {
-				runner.assertActive();
-				return runner.configureLspFn(configuration);
 			},
 			execToolBackend: (command, options) => {
 				runner.assertActive();

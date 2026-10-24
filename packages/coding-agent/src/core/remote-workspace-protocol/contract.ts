@@ -8,7 +8,6 @@ export const REMOTE_WORKSPACE_CAPABILITIES = [
 	"catalog_refresh",
 	"tool_updates",
 	"primitive_operations",
-	"lsp_status",
 	"file_transfer",
 	"artifacts",
 ] as const;
@@ -28,7 +27,6 @@ export const REMOTE_WORKSPACE_METHODS = [
 	"workspace.grep",
 	"workspace.detect_image_mime",
 	"workspace.exec",
-	"lsp.status",
 	"resource.read",
 	"artifact.read",
 	"transfer.upload",
@@ -125,7 +123,6 @@ const RemoteWorkspaceMethodSchema = Type.Union([
 	Type.Literal("workspace.grep"),
 	Type.Literal("workspace.detect_image_mime"),
 	Type.Literal("workspace.exec"),
-	Type.Literal("lsp.status"),
 	Type.Literal("resource.read"),
 	Type.Literal("artifact.read"),
 	Type.Literal("transfer.upload"),
@@ -546,42 +543,6 @@ const ToolResultSchema = Type.Object(
 	closedObject,
 );
 const EmptyResultSchema = EmptyParamsSchema;
-const LspStatusServerSchema = Type.Object(
-	{
-		serverId: Type.String({ minLength: 1, maxLength: 256 }),
-		languageIds: Type.Array(Type.String({ maxLength: 256 }), { maxItems: 256 }),
-		transport: Type.String({ minLength: 1, maxLength: 128 }),
-		instanceKey: Type.Optional(Type.String({ maxLength: 4096 })),
-		workspaceRoot: Type.Optional(Type.String({ maxLength: 32_768 })),
-		endpoint: Type.Optional(Type.String({ maxLength: 4096 })),
-		rootUri: Type.Optional(Type.String({ maxLength: 32_768 })),
-		ownership: Type.Union([Type.Literal("managed"), Type.Literal("attached")]),
-		shutdownMode: Type.Union([Type.Literal("protocol"), Type.Literal("disconnect")]),
-		state: Type.Union([
-			Type.Literal("idle"),
-			Type.Literal("connecting"),
-			Type.Literal("initializing"),
-			Type.Literal("running"),
-			Type.Literal("closed"),
-			Type.Literal("failed"),
-			Type.Literal("disposed"),
-		]),
-		reconnectEligible: Type.Boolean(),
-		running: Type.Boolean(),
-		starting: Type.Boolean(),
-		diagnosticsCount: Type.Integer(safeIntegerOptions),
-		lastError: Type.Optional(Type.String()),
-		lastRequestError: Type.Optional(Type.String()),
-		stderr: Type.Optional(Type.String()),
-		synchronizationError: Type.Optional(Type.String()),
-	},
-	closedObject,
-);
-const LspStatusResultSchema = Type.Object(
-	{ enabled: Type.Boolean(), servers: Type.Array(LspStatusServerSchema, { maxItems: 1024 }) },
-	closedObject,
-);
-export type RemoteLspStatus = Static<typeof LspStatusResultSchema>;
 const ReadResultSchema = Type.Object(
 	{
 		contentBase64: Type.String(),
@@ -673,7 +634,6 @@ const parameterValidators = {
 	"workspace.grep": Compile(GrepParamsSchema),
 	"workspace.detect_image_mime": Compile(PathParamsSchema),
 	"workspace.exec": Compile(ExecParamsSchema),
-	"lsp.status": Compile(EmptyParamsSchema),
 	"resource.read": Compile(PathParamsSchema),
 	"artifact.read": Compile(PathParamsSchema),
 	"transfer.upload": Compile(TransferUploadParamsSchema),
@@ -693,7 +653,6 @@ const resultValidators = {
 	"workspace.grep": Compile(GrepResultSchema),
 	"workspace.detect_image_mime": Compile(MimeResultSchema),
 	"workspace.exec": Compile(ExecResultSchema),
-	"lsp.status": Compile(LspStatusResultSchema),
 	"resource.read": Compile(ReadResultSchema),
 	"artifact.read": Compile(TransferResultSchema),
 	"transfer.upload": Compile(TransferResultSchema),

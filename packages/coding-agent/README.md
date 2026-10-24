@@ -39,7 +39,6 @@ I regularly publish my own `pi-mono` work sessions here:
   - [Branching](#branching)
   - [Compaction](#compaction)
 - [Settings](#settings)
-- [Language Servers](#language-servers)
 - [Remote Daemon](#remote-daemon)
 - [Lima Sandbox](#lima-sandbox)
 - [Customization](#customization)
@@ -87,7 +86,7 @@ grip
 /login  # Then select provider
 ```
 
-Then just talk to Grip. By default, Grip gives the model file and shell tools. Enable the built-in subagent tool family through `/settings` or `enableSubagents` in `settings.json`. LSP tools require both [an external language server configuration](docs/lsp.md) and `--enable-lsp-tools` (or `enableLspTools` in `settings.json`); they are off by default. The model uses enabled tools to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [packages](#grip-packages).
+Then just talk to Grip. By default, Grip gives the model file and shell tools. Enable the built-in subagent tool family through `/settings` or `enableSubagents` in `settings.json`. The model uses enabled tools to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [packages](#grip-packages).
 
 **Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 
@@ -291,15 +290,11 @@ Grip has two separate startup features:
 
 Use `--offline` or `GRIP_OFFLINE=1` to disable all startup network operations described here, including update checks, package update checks, and install/update telemetry.
 
-## Language Servers
-
-Grip supports explicitly configured managed stdio servers, attached TCP/Unix socket/named-pipe endpoints, and host-provided connections with managed or attached semantics. It does not bundle or automatically select a language server. Untrusted project settings cannot add or positively activate transports; malformed or unreadable LSP sources fail closed without terminating Grip, and `--no-lsp` is the per-invocation recovery path. See [docs/lsp.md](docs/lsp.md) for copyable configurations, remote path mapping, project trust, workspace roots, lifecycle ownership, SDK/extension APIs, migration, and troubleshooting.
-
 ---
 
 ## Remote Daemon
 
-`grip --daemon` starts an integrated remote workspace daemon from the `@greppleai/grip` package. The local Grip process remains the orchestrator for model calls, credentials, sessions, prompts, extensions, subagents, RPC, and UI; the daemon owns one confined workspace for canonical tools, project resources, file transfer, optional process execution, and optional colocated LSP.
+`grip --daemon` starts an integrated remote workspace daemon from the `@greppleai/grip` package. The local Grip process remains the orchestrator for model calls, credentials, sessions, prompts, extensions, subagents, RPC, and UI; the daemon owns one confined workspace for canonical tools, project resources, file transfer, and optional process execution.
 
 Start a daemon:
 
@@ -313,7 +308,7 @@ Connect from a local Grip process:
 GRIP_REMOTE_TOKEN='replace-with-a-random-token-at-least-32-bytes-long' grip --remote ws://127.0.0.1:8787/grip/workspace
 ```
 
-There is no separate Grip daemon package or executable. See [docs/daemon.md](docs/daemon.md) for topology, security, configuration, Docker, LSP/resources/extensions behavior, troubleshooting, and migration.
+There is no separate Grip daemon package or executable. See [docs/daemon.md](docs/daemon.md) for topology, security, configuration, Docker, resources/extensions behavior, troubleshooting, and migration.
 
 ---
 
@@ -503,7 +498,7 @@ await grip.dispose();
 
 For advanced multi-session flows, use `GripAgent` methods such as `newSession()`, `switchSession()`, `fork()`, and `importFromJsonl()`.
 
-See [docs/sdk.md](docs/sdk.md), [docs/lsp.md](docs/lsp.md), and [examples/sdk/](examples/sdk/).
+See [docs/sdk.md](docs/sdk.md) and [examples/sdk/](examples/sdk/).
 
 ### RPC Mode
 
@@ -597,8 +592,6 @@ cat README.md | grip -p "Summarize this text"
 | `--fork <path\|id>` | Fork specific session file or partial UUID into a new session |
 | `--session-dir <dir>` | Custom session storage directory |
 | `--no-session` | Ephemeral mode (don't save) |
-| `--lsp-config <file>` | Load an external LSP layer; the file argument is startup-cwd-relative, while paths declared inside use the file's directory |
-| `--no-lsp` | Disable LSP for this invocation, including recovery from malformed lower-precedence LSP sources |
 ### Tool Options
 
 | Option | Description |
@@ -606,12 +599,11 @@ cat README.md | grip -p "Summarize this text"
 | `--tools <list>`, `-t <list>` | Allowlist specific tool names across built-in, extension, and custom tools |
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools by default but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools by default |
-| `--enable-lsp-tools` | Expose configured `lsp_*` tools by default |
 | `--remote <url>` | Run built-in workspace tools through a `grip --daemon` WebSocket backend |
 | `--remote-deferred` | Start with a deferred daemon backend and connect later with `/sandbox --attach <ws://url>` |
 | `--remote-cwd <path>` | Stable daemon workspace cwd for deferred remote mode |
 | `--daemon` | Start the integrated remote workspace daemon instead of a normal Grip session |
-Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `websearch`, `session_search`, `session_entry_get`, `compress_context`, `subagent`, `subagent_runs`, `create_subagent`, and—when externally configured—`lsp_diagnostics`, `lsp_hover`, `lsp_definition`, `lsp_references`, `lsp_rename`, and `lsp_code_actions`. By default `read`, `bash`, `edit`, `write`, `websearch`, `session_search`, and `session_entry_get` are active. Context compression is opt-in via `/context-compression on`, `GRIP_CONTEXT_COMPRESSION=1`, or an explicit `--tools` allowlist. Background detection is separately opt-in via `/compress-detection on` or `GRIP_CONTEXT_COMPRESSION_DETECTION=1` and requires a configured detector model. Subagent and LSP tools require separate opt-ins (`enableSubagents` and `enableLspTools`/`--enable-lsp-tools` respectively), or an explicit `--tools` allowlist. Explicit allowlists may select any subset, while `--no-tools` and `--no-builtin-tools` remain authoritative.
+Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `websearch`, `session_search`, `session_entry_get`, `compress_context`, `subagent`, `subagent_runs`, and `create_subagent`. By default `read`, `bash`, `edit`, `write`, `websearch`, `session_search`, and `session_entry_get` are active. Context compression is opt-in via `/context-compression on`, `GRIP_CONTEXT_COMPRESSION=1`, or an explicit `--tools` allowlist. Background detection is separately opt-in via `/compress-detection on` or `GRIP_CONTEXT_COMPRESSION_DETECTION=1` and requires a configured detector model. Subagent tools require a separate opt-in (`enableSubagents`) or an explicit `--tools` allowlist. Explicit allowlists may select any subset, while `--no-tools` and `--no-builtin-tools` remain authoritative.
 
 ### Resource Options
 

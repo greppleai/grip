@@ -161,7 +161,6 @@ describe("WorkspaceToolHost", () => {
 			expect(host.getDefinition("load_tool")).toBeUndefined();
 			expect(host.getDefinition("session_search")).toBeUndefined();
 			expect(host.getDefinition("session_entry_get")).toBeUndefined();
-			expect(host.getDefinition("lsp_diagnostics")).toBeUndefined();
 			expect(() => host.prepareArguments("subagent", {})).toThrow("Unknown or non-workspace tool");
 		} finally {
 			await host.dispose();

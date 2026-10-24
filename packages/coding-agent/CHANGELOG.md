@@ -2,6 +2,12 @@
 
 All notable changes to Grip are documented in this file.
 
+## [Unreleased]
+
+### Breaking Changes
+
+- Removed the built-in LSP client and tools, language-server configuration, daemon protocol support, and SDK/extension LSP APIs.
+
 ## [0.1.7](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.6...@greppleai/grip-v0.1.7) (2026-10-23)
 
 

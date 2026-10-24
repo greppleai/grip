@@ -38,7 +38,6 @@ import {
 } from "./core/hooks/trust-store.ts";
 import { configureHttpDispatcher } from "./core/http-dispatcher.ts";
 import { KeybindingsManager } from "./core/keybindings.ts";
-import type { LspConfigurationInput } from "./core/lsp/config-loader.ts";
 import type { ModelRegistry } from "./core/model-registry.ts";
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { InMemorySessionManager } from "./core/session/in-memory-session-manager.ts";
@@ -406,7 +405,6 @@ function applyCliToolSelection(parsed: Args, options: GripAgentSessionOptions): 
 	if (parsed.noTools) options.noTools = "all";
 	else if (parsed.noBuiltinTools) options.noTools = "builtin";
 	if (parsed.tools) options.tools = [...parsed.tools];
-	if (parsed.enableLspTools) options.enableLspTools = true;
 }
 
 function buildSessionOptions(
@@ -797,12 +795,6 @@ async function resolveStartupToolOperations(parsed: Args): Promise<ToolOperation
 	return new DeferredRemoteToolOperations(parsed.remoteCwd);
 }
 
-function createCliLspInputs(parsed: Args, cwd: string): LspConfigurationInput[] {
-	const inputs: LspConfigurationInput[] = [];
-	if (parsed.lspConfig) inputs.push({ type: "file", path: resolvePath(parsed.lspConfig, cwd), scope: "cli" });
-	if (parsed.noLsp) inputs.push({ type: "disabled", source: "--no-lsp", scope: "cli" });
-	return inputs;
-}
 async function handleRuntimeInformationCommands(parsed: Args, gripAgent: GripAgent): Promise<void> {
 	const { modelRegistry, resourceLoader } = gripAgent.services;
 	if (parsed.help) {
@@ -881,7 +873,6 @@ export async function main(args: string[], options?: MainOptions) {
 	const resolvedRulePaths = resolveCliPaths(instructionPathCwd, parsed.rules);
 	const resolvedPromptTemplatePaths = resolveCliPaths(instructionPathCwd, parsed.promptTemplates);
 	const resolvedThemePaths = resolveCliPaths(cwd, parsed.themes);
-	const cliLspInputs = createCliLspInputs(parsed, cwd);
 	const gripAgent = await GripAgent.create({
 		toolOperations,
 		ownsToolOperations: toolOperations !== undefined,
@@ -953,13 +944,11 @@ export async function main(args: string[], options?: MainOptions) {
 				thinkingLevel: sessionOptions.thinkingLevel,
 				scopedModels: sessionOptions.scopedModels,
 				tools: sessionOptions.tools,
-				enableLspTools: sessionOptions.enableLspTools,
 				noTools: sessionOptions.noTools,
 				customTools: sessionOptions.customTools,
 				toolOperations,
 				trustProjectHooks: projectHookTrust.trusted,
 				trustedProjectHooksIdentity: projectHookTrust.identity,
-				lsp: cliLspInputs,
 				diagnostics,
 			};
 		},

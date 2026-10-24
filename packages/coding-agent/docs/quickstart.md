@@ -70,7 +70,6 @@ By default, Grip gives the model tools for:
 
 - reading, writing, and editing files
 - running shell commands
-- language-server diagnostics, navigation, and refactoring when an external LSP server is explicitly configured
 
 Additional built-in read-only tools (`grep`, `find`, `ls`) are available through tool options. Grip runs in your current working directory and can modify files there. Use git or another checkpointing workflow if you want easy rollback.
 

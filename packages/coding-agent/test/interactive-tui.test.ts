@@ -347,7 +347,7 @@ function createRootContext(ui: TUI, fullscreenScrollbar: ScrollViewScrollbar = "
 	const editor = new FocusText("editor", 0, 0);
 	const editorContainer = new Container();
 	editorContainer.addChild(editor);
-	const footer = new Text("footer daemon LSP", 0, 0);
+	const footer = new Text("footer daemon status", 0, 0);
 	const footerContainer = new Container();
 	footerContainer.addChild(footer);
 	return Object.assign(Object.create(InteractiveMode.prototype), {
@@ -900,7 +900,7 @@ describe("createInteractiveTui", () => {
 				.map((line) => stripTerminalSequences(line).trimEnd())
 				.join("\n"),
 		).toBe(
-			"header\nresources\nmessage tool subagent\npending\nstatus sandbox\nwidget above\neditor\nwidget below\nfooter daemon LSP",
+			"header\nresources\nmessage tool subagent\npending\nstatus sandbox\nwidget above\neditor\nwidget below\nfooter daemon status",
 		);
 	});
 
@@ -928,7 +928,7 @@ describe("createInteractiveTui", () => {
 		expect(scrollView?.scrollbar).toBe("always");
 		expect(scrollView?.viewportHeight).toBe(4);
 		expect(scrollView?.isFollowingEnd).toBe(true);
-		expect(terminal.getViewport().at(-1)).toContain("footer daemon LSP");
+		expect(terminal.getViewport().at(-1)).toContain("footer daemon status");
 
 		scrollView?.scrollBy(-2);
 		await terminal.waitForRender();
@@ -941,7 +941,7 @@ describe("createInteractiveTui", () => {
 		expect(scrollView?.isFollowingEnd).toBe(false);
 		expect(terminal.getViewport().some((line) => line.includes("line 14"))).toBe(false);
 		expect(terminal.getViewport().some((line) => line.includes("editor"))).toBe(true);
-		expect(terminal.getViewport().at(-1)).toContain("footer daemon LSP");
+		expect(terminal.getViewport().at(-1)).toContain("footer daemon status");
 
 		const replacement = new Text(Array.from({ length: 15 }, (_, index) => `new ${index + 1}`).join("\n"), 0, 0);
 		interactiveModePrototype.retireAndRenderCurrentTranscript.call({
@@ -958,7 +958,7 @@ describe("createInteractiveTui", () => {
 		await terminal.waitForRender();
 		expect(scrollView?.isFollowingEnd).toBe(true);
 		expect(terminal.getViewport().some((line) => line.includes("new 15"))).toBe(true);
-		expect(terminal.getViewport().at(-1)).toContain("footer daemon LSP");
+		expect(terminal.getViewport().at(-1)).toContain("footer daemon status");
 		ui.stop({ preserveScreen: true });
 	});
 
@@ -1043,7 +1043,7 @@ describe("createInteractiveTui", () => {
 			"",
 			"",
 			"widget below",
-			"footer daemon LSP",
+			"footer daemon status",
 		]);
 		initTheme("dark");
 		const userMessage = new UserMessageComponent("source markdown", undefined, 1, [
@@ -1098,7 +1098,7 @@ describe("createInteractiveTui", () => {
 		await terminal.waitForRender();
 		expect(selector.focused).toBe(true);
 		expect(terminal.getViewport().some((line) => line.includes("selector dialog"))).toBe(true);
-		expect(terminal.getViewport().at(-1)).toContain("footer daemon LSP");
+		expect(terminal.getViewport().at(-1)).toContain("footer daemon status");
 		context.editorContainer.clear();
 		context.editorContainer.addChild(context.editor);
 		ui.setFocus(context.editor);

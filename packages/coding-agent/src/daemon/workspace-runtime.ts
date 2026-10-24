@@ -3,9 +3,6 @@ import { randomUUID } from "node:crypto";
 import { mkdir as fsMkdir, lstat, open, readFile, realpath, rename, rm } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import type { AgentToolResult } from "@greppleai/grip-agent-core";
-import { createLspRuntimeState, createLspToolDefinitions, type LspRuntimeState } from "../core/lsp/integration.ts";
-import type { LspServerStatus } from "../core/lsp/manager.ts";
-import { createManagedStdioConnectionFactory, resolveLspConnectionFactory } from "../core/lsp/transport.ts";
 import {
 	hashRemoteWorkspaceJson,
 	type RemoteWorkspaceCapability,
@@ -38,9 +35,8 @@ import {
 	type WorkspaceToolExecutionOptions,
 } from "../core/tools/operations.ts";
 import { WorkspaceToolHost, type WorkspaceToolName } from "../core/tools/workspace-tool-host.ts";
+import { getToolPath } from "../utils/tools-manager.ts";
 import type { DaemonConfiguration } from "./config.ts";
-import { loadDaemonLspConfiguration } from "./lsp-config.ts";
-import { redactDaemonText } from "./security.ts";
 
 const PRIMITIVE_OPERATIONS: RemoteWorkspaceMethod[] = [
 	"workspace.access",
@@ -80,29 +76,6 @@ function isMissingPath(error: unknown): boolean {
 	return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
-function sanitizeLspStatus(
-	status: LspServerStatus,
-	configuration: DaemonConfiguration,
-): Omit<LspServerStatus, "capabilities"> {
-	const { capabilities: _capabilities, ...safe } = status;
-	const secrets = [configuration.token, configuration.tls?.passphrase];
-	const redact = (value: string | undefined) => (value ? redactDaemonText(value, secrets) : undefined);
-	return {
-		...safe,
-		serverId: redact(safe.serverId)!,
-		languageIds: safe.languageIds.map((value) => redact(value)!),
-		transport: redact(safe.transport)!,
-		...(safe.instanceKey ? { instanceKey: redact(safe.instanceKey) } : {}),
-		...(safe.workspaceRoot ? { workspaceRoot: redact(safe.workspaceRoot) } : {}),
-		...(safe.rootUri ? { rootUri: redact(safe.rootUri) } : {}),
-		...(safe.endpoint ? { endpoint: redact(safe.endpoint) } : {}),
-		...(safe.lastError ? { lastError: redact(safe.lastError) } : {}),
-		...(safe.lastRequestError ? { lastRequestError: redact(safe.lastRequestError) } : {}),
-		...(safe.stderr ? { stderr: redact(safe.stderr) } : {}),
-		...(safe.synchronizationError ? { synchronizationError: redact(safe.synchronizationError) } : {}),
-	};
-}
-
 function portableToolResult(result: AgentToolResult<unknown>): AgentToolResult<unknown> {
 	const clone = JSON.parse(JSON.stringify(result)) as AgentToolResult<unknown>;
 	const details = clone.details;
@@ -119,7 +92,6 @@ function portableToolResult(result: AgentToolResult<unknown>): AgentToolResult<u
 }
 
 function operationKind(name: string): RemoteWorkspaceOperationKind {
-	if (name.startsWith("lsp_")) return "service";
 	switch (name) {
 		case "read":
 		case "grep":
@@ -403,7 +375,9 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 				effectivePattern = `**/${pattern}`;
 		}
 		args.push("--", effectivePattern, searchRoot);
-		const output = await runCommand("fd", args, this.environment, this.maxBufferedOutputBytes);
+		const fd = getToolPath("fd");
+		if (!fd) throw new Error("fd is not available; install fd (or fdfind) and ensure it is on PATH");
+		const output = await runCommand(fd, args, this.environment, this.maxBufferedOutputBytes);
 		const results: string[] = [];
 		for (const entry of output.toString("utf8").split("\n")) {
 			if (!entry) continue;
@@ -424,7 +398,9 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 		if (options.literal) args.push("--fixed-strings");
 		if (options.glob) args.push("--glob", options.glob);
 		args.push("--", options.pattern, searchPath);
-		const output = await runCommand("rg", args, this.environment, this.maxBufferedOutputBytes);
+		const rg = getToolPath("rg");
+		if (!rg) throw new Error("rg is not available; install ripgrep and ensure it is on PATH");
+		const output = await runCommand(rg, args, this.environment, this.maxBufferedOutputBytes);
 		const matches: ToolGrepMatch[] = [];
 		for (const line of output.toString("utf8").split("\n")) {
 			if (matches.length >= options.limit) continue;
@@ -452,7 +428,6 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 export interface DaemonWorkspaceRuntime {
 	readonly operations: ConfinedDaemonToolOperations;
 	readonly host: WorkspaceToolHost;
-	readonly lspRuntime?: LspRuntimeState;
 	readonly catalog: RemoteWorkspaceCatalog;
 	readonly capabilities: readonly RemoteWorkspaceCapability[];
 	createHandler(workspace: RemoteWorkspaceIdentity, sharedMode?: boolean): RemoteWorkspaceServerHandler;
@@ -470,7 +445,6 @@ interface DaemonRequestRuntime {
 	configuration: DaemonConfiguration;
 	operations: ConfinedDaemonToolOperations;
 	host: WorkspaceToolHost;
-	lspRuntime: LspRuntimeState | undefined;
 	workspace: RemoteWorkspaceIdentity;
 	sharedMode: boolean;
 }
@@ -479,43 +453,17 @@ function withDaemonWorkspace<T extends Record<string, unknown>>(result: T, works
 	return { ...result, workspace };
 }
 
-async function synchronizeDaemonToolFile(
-	toolName: string,
-	invocationArguments: unknown,
-	runtime: DaemonRequestRuntime,
-	cwd: string,
-): Promise<void> {
-	if (!runtime.lspRuntime) return;
-	const args = invocationArguments as { path?: unknown };
-	if (typeof args.path !== "string") return;
-	const filePath = resolve(cwd, args.path);
-	try {
-		if (toolName === "read") {
-			await runtime.lspRuntime.fileSync.handleFileRead(filePath, runtime.operations);
-		} else if (toolName === "write" || toolName === "edit") {
-			await runtime.lspRuntime.fileSync.handleFileWrite(filePath, runtime.operations);
-		}
-	} catch {
-		// Synchronization remains best-effort, matching local AgentSession behavior.
-	}
-}
-
 function marksToolSideEffect(kind: RemoteWorkspaceOperationKind, toolName: string, sharedMode: boolean): boolean {
 	return kind !== "read" && !(sharedMode && (toolName === "edit" || toolName === "write"));
 }
 
-interface ResolvedDaemonToolCwd {
-	cwd: string;
-	executionOptions: WorkspaceToolExecutionOptions;
-}
-
-async function resolveDaemonToolCwd(
+async function resolveDaemonToolExecutionOptions(
 	options: WorkspaceToolExecutionOptions,
 	runtime: DaemonRequestRuntime,
-): Promise<ResolvedDaemonToolCwd> {
-	if (!options.cwd) return { cwd: runtime.operations.cwd, executionOptions: options };
+): Promise<WorkspaceToolExecutionOptions> {
+	if (!options.cwd) return options;
 	const cwd = await runtime.operations.resolveWorkingDirectory(options.cwd);
-	return { cwd, executionOptions: { ...options, cwd } };
+	return { ...options, cwd };
 }
 
 async function invokeDaemonTool(
@@ -529,7 +477,7 @@ async function invokeDaemonTool(
 	if (marksToolSideEffect(kind, toolName, runtime.sharedMode)) context.markSideEffectStarted();
 	let updateQueue = Promise.resolve();
 	try {
-		const { cwd, executionOptions } = await resolveDaemonToolCwd(
+		const executionOptions = await resolveDaemonToolExecutionOptions(
 			params.executionOptions as WorkspaceToolExecutionOptions,
 			runtime,
 		);
@@ -543,7 +491,6 @@ async function invokeDaemonTool(
 			},
 		});
 		await updateQueue;
-		await synchronizeDaemonToolFile(toolName, params.arguments, runtime, cwd);
 		if (kind !== "read") context.markCommitted();
 		return portableToolResult(result);
 	} catch (error) {
@@ -630,20 +577,6 @@ async function readDaemonResource(
 	return withDaemonWorkspace({ contentBase64: (await readFile(resourcePath)).toString("base64") }, runtime.workspace);
 }
 
-function getDaemonLspStatus(runtime: DaemonRequestRuntime): Record<string, unknown> {
-	if (!runtime.lspRuntime) {
-		throw new RemoteWorkspaceRequestError({
-			code: "not_available",
-			message: "Daemon LSP is not configured",
-			executionState: "not_started",
-			retryable: false,
-		});
-	}
-	return {
-		enabled: true,
-		servers: runtime.lspRuntime.manager.getStatus().map((status) => sanitizeLspStatus(status, runtime.configuration)),
-	};
-}
 async function statDaemonWorkspace(
 	path: string,
 	runtime: DaemonRequestRuntime,
@@ -735,8 +668,6 @@ async function dispatchDaemonWorkspaceRequest(
 			return executeDaemonWorkspaceProcess(params, context, runtime);
 		case "resource.read":
 			return readDaemonResource(params, runtime);
-		case "lsp.status":
-			return getDaemonLspStatus(runtime);
 		default:
 			throw new RemoteWorkspaceRequestError({
 				code: "method_not_supported",
@@ -751,32 +682,10 @@ export function createDaemonWorkspaceRuntime(configuration: DaemonConfiguration)
 	const operations = new ConfinedDaemonToolOperations(configuration);
 	const toolNames: WorkspaceToolName[] = ["read", "edit", "write", "grep", "find", "ls"];
 	if (configuration.allowProcessExec) toolNames.splice(1, 0, "bash");
-	const lspConfiguration = loadDaemonLspConfiguration(configuration);
-	const lspRuntime = lspConfiguration.enabled
-		? createLspRuntimeState(configuration.workspaceRoot, {
-				configuration: lspConfiguration,
-				getToolBackendInfo: () => operations.getBackendInfo(),
-				getToolOperations: () => operations,
-				resolveConnectionFactory: (transport) =>
-					transport.type === "spawn"
-						? createManagedStdioConnectionFactory({
-								...transport,
-								env: operations.createChildEnvironment(transport.env),
-								inheritEnvironment: false,
-							})
-						: resolveLspConnectionFactory(transport),
-			})
-		: undefined;
 	const host = new WorkspaceToolHost({
 		cwd: configuration.workspaceRoot,
 		operations,
 		toolNames,
-		additionalDefinitions: lspRuntime
-			? createLspToolDefinitions(
-					() => lspRuntime,
-					() => operations,
-				)
-			: undefined,
 		disposeTimeoutMs: Math.min(configuration.shutdownTimeoutMs, 60_000),
 	});
 	const catalog: RemoteWorkspaceCatalog = {
@@ -791,21 +700,14 @@ export function createDaemonWorkspaceRuntime(configuration: DaemonConfiguration)
 		operations: [
 			...PRIMITIVE_OPERATIONS.filter((method) => method !== "workspace.exec" || configuration.allowProcessExec),
 			...(configuration.sandboxInstructionsPath || configuration.userAgentsPath ? (["resource.read"] as const) : []),
-			...(lspRuntime ? (["lsp.status"] as const) : []),
 		],
 	};
-	const capabilities: RemoteWorkspaceCapability[] = [
-		"catalog_refresh",
-		"primitive_operations",
-		"tool_updates",
-		...(lspRuntime ? (["lsp_status"] as const) : []),
-	];
+	const capabilities: RemoteWorkspaceCapability[] = ["catalog_refresh", "primitive_operations", "tool_updates"];
 	let activeRequests = 0;
 
 	return {
 		operations,
 		host,
-		lspRuntime,
 		catalog,
 		capabilities,
 		createHandler(workspace, sharedMode = false) {
@@ -813,7 +715,6 @@ export function createDaemonWorkspaceRuntime(configuration: DaemonConfiguration)
 				configuration,
 				operations,
 				host,
-				lspRuntime,
 				workspace,
 				sharedMode,
 			};
@@ -839,11 +740,10 @@ export function createDaemonWorkspaceRuntime(configuration: DaemonConfiguration)
 		},
 		retire: async () => {
 			await host.waitForIdle(configuration.shutdownTimeoutMs);
-			await lspRuntime?.manager.shutdownAll();
 			await host.dispose();
 		},
 		dispose: async () => {
-			await Promise.all([lspRuntime?.manager.shutdownAll(), host.dispose()]);
+			await host.dispose();
 		},
 	};
 }

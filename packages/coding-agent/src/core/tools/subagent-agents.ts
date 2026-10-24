@@ -7,7 +7,7 @@ import {
 	joinPortablePath,
 	type PortablePathFlavor,
 	pathComparisonValue,
-} from "../lsp/portable-path.ts";
+} from "../portable-path.ts";
 import type { ToolOperations } from "./operations.ts";
 
 export type AgentScope = "user" | "project" | "both";

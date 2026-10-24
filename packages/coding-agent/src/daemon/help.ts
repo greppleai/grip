@@ -18,8 +18,6 @@ Options:
   --daemon-allow-full-filesystem        Allow workspace tools to access the entire daemon filesystem (isolated guests only)
   --daemon-allow-root                   Allow running as root inside an intentional OS sandbox
   --daemon-env <NAME>                   Forward an approved environment name (repeatable)
-  --daemon-lsp-config <file>            Operator-owned daemon LSP configuration
-  --daemon-trust-project-lsp            Trust the confined project LSP layer
   --daemon-max-connections <count>      Maximum authenticated clients
   --daemon-max-pending-connections <n>  Maximum incomplete HTTP/WebSocket handshakes
   --daemon-handshake-timeout-ms <ms>    Protocol handshake deadline
@@ -33,7 +31,7 @@ Environment:
   GRIP_DAEMON_ORIGINS                   Comma-separated exact browser origins
   GRIP_DAEMON_TLS_CERT, GRIP_DAEMON_TLS_KEY, GRIP_DAEMON_TLS_PASSPHRASE
   GRIP_DAEMON_ALLOW_INSECURE_TRANSPORT, GRIP_DAEMON_ALLOW_PROCESS_EXEC, GRIP_DAEMON_ALLOW_ROOT
-  GRIP_DAEMON_ENV, GRIP_DAEMON_LSP_CONFIG, GRIP_DAEMON_TRUST_PROJECT_LSP, GRIP_DAEMON_ALLOW_FULL_FILESYSTEM
+  GRIP_DAEMON_ENV, GRIP_DAEMON_ALLOW_FULL_FILESYSTEM
   GRIP_DAEMON_MAX_CONNECTIONS, GRIP_DAEMON_MAX_PENDING_CONNECTIONS
   GRIP_DAEMON_HANDSHAKE_TIMEOUT_MS, GRIP_DAEMON_SHUTDOWN_TIMEOUT_MS
 

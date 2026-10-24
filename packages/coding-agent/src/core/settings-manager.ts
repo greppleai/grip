@@ -11,7 +11,6 @@ import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
-import type { LspConfigurationLayer } from "./lsp/config.ts";
 import type { SandboxCleanupBehavior } from "./sandbox/config.ts";
 
 // grip-ignore noNearIdenticalDataStructures: Persisted overrides permit omitted fields so settings layering can apply defaults independently of the fully resolved harness runtime contract.
@@ -127,7 +126,6 @@ export interface Settings {
 	themes?: string[]; // Array of local theme file paths or directories
 	enableSkillCommands?: boolean; // default: true - register skills and rules as /skill:name and /rule:name commands
 	enableSubagents?: boolean; // default: false - expose built-in subagent tools
-	enableLspTools?: boolean; // default: false - expose configured LSP tools by default
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
@@ -142,8 +140,6 @@ export interface Settings {
 	markdown?: MarkdownSettings;
 	warnings?: WarningSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
-	/** LSP configuration layer for this settings scope. Global and project layers resolve separately. */
-	lsp?: LspConfigurationLayer;
 	tools?: ToolSettings; // Per-tool configuration keyed by tool name (for example tools.websearch)
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
@@ -218,11 +214,6 @@ function applySettingsOverride(
 	overrideValue: Settings[keyof Settings],
 ): void {
 	const resultRecord = result as Record<string, unknown>;
-	// LSP layers are resolved independently with scope-specific trust policy.
-	if (key === "lsp") {
-		setOwnValue(resultRecord, key, overrideValue);
-		return;
-	}
 	// Tool names merge, but each tool's configuration remains a shallow layer.
 	if (key === "tools" && isMergeableObject(overrideValue)) {
 		result.tools = mergeToolSettings(base.tools, overrideValue as ToolSettings);
@@ -519,14 +510,6 @@ export class SettingsManager {
 
 	getProjectSettings(): Settings {
 		return structuredClone(this.projectSettings);
-	}
-
-	getGlobalLspConfiguration(): unknown {
-		return this.globalSettings.lsp === undefined ? undefined : structuredClone(this.globalSettings.lsp);
-	}
-
-	getProjectLspConfiguration(): unknown {
-		return this.projectSettings.lsp === undefined ? undefined : structuredClone(this.projectSettings.lsp);
 	}
 
 	async reload(): Promise<void> {
@@ -1127,10 +1110,6 @@ export class SettingsManager {
 
 	getEnableSubagents(): boolean {
 		return this.settings.enableSubagents ?? false;
-	}
-
-	getEnableLspTools(): boolean {
-		return this.settings.enableLspTools ?? false;
 	}
 
 	setEnableSubagents(enabled: boolean): void {

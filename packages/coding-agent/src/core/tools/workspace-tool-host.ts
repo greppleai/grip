@@ -68,7 +68,7 @@ export interface WorkspaceToolHostOptions {
 	disposeTimeoutMs?: number;
 	/** Called after a negotiated remote catalog refresh has completed. */
 	onCatalogChanged?: () => void | Promise<void>;
-	/** Additional canonical service definitions, such as daemon-owned LSP tools. */
+	/** Additional canonical service definitions. */
 	additionalDefinitions?: readonly AnyToolDefinition[];
 }
 
@@ -148,7 +148,7 @@ function createRemoteExecutionOptions(toolOptions: WorkspaceToolOptions | undefi
 /**
  * Canonical workspace-scoped tool construction and execution without an AgentSession.
  *
- * This host deliberately excludes subagents, session lifecycle tools, extensions, LSP,
+ * This host deliberately excludes subagents, session lifecycle tools, extensions,
  * models, prompts, conversation state, persistence, and UI. Caller-provided operations
  * are borrowed unless ownsOperations is explicitly enabled.
  */
@@ -460,7 +460,11 @@ export class WorkspaceToolHost {
 			? AbortSignal.any([signal, this.disposeController.signal])
 			: this.disposeController.signal;
 		if (combinedSignal.aborted) throw new Error("Operation aborted");
-		const selection = this.selectWorkspaceExecution(name, params);
+		// Approval and host execution must happen in the orchestrator, never in the daemon.
+		const selection =
+			name === "bash" && (params as { host?: boolean }).host === true
+				? { executeRemotely: false, readOperations: undefined }
+				: this.selectWorkspaceExecution(name, params);
 		const resolvedExecutionOptions = executionOptions ?? this.remoteExecutionOptions;
 		const request: HostedToolExecution<TParams, TDetails> = {
 			name,

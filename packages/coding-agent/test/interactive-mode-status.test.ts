@@ -119,9 +119,9 @@ describe("InteractiveMode.showRuntimeDiagnostics", () => {
 		const fakeThis = {
 			runtimeHost: {
 				diagnostics: [
-					{ type: "error", fatal: false, message: "invalid project LSP" },
+					{ type: "error", fatal: false, message: "invalid project configuration" },
 					{ type: "warning", message: "blocked project transport" },
-					{ type: "info", message: "LSP configured" },
+					{ type: "info", message: "configuration loaded" },
 				],
 			},
 			showError: vi.fn(),
@@ -131,9 +131,9 @@ describe("InteractiveMode.showRuntimeDiagnostics", () => {
 
 		(InteractiveMode as any).prototype.showRuntimeDiagnostics.call(fakeThis);
 
-		expect(fakeThis.showError).toHaveBeenCalledWith("invalid project LSP");
+		expect(fakeThis.showError).toHaveBeenCalledWith("invalid project configuration");
 		expect(fakeThis.showWarning).toHaveBeenCalledWith("blocked project transport");
-		expect(fakeThis.showStatus).toHaveBeenCalledWith("LSP configured");
+		expect(fakeThis.showStatus).toHaveBeenCalledWith("configuration loaded");
 	});
 
 	test("replaces prior transient diagnostics when a backend change reloads runtime resources", async () => {

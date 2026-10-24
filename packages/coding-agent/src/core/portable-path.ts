@@ -18,10 +18,6 @@ export function pathApi(flavor: PortablePathFlavor): PathApi {
 	return flavor === "windows" ? win32 : posix;
 }
 
-export function isPortableAbsolute(value: string): boolean {
-	return absolutePathFlavor(value) !== undefined;
-}
-
 export function normalizePortablePath(value: string, fallback?: PortablePathFlavor): string {
 	return pathApi(pathFlavor(value, fallback)).normalize(value);
 }
@@ -44,28 +40,6 @@ export function dirnamePortablePath(value: string, fallback?: PortablePathFlavor
 export function pathComparisonValue(value: string, flavor = pathFlavor(value)): string {
 	const normalized = pathApi(flavor).normalize(value);
 	return flavor === "windows" ? normalized.toLowerCase() : normalized;
-}
-
-function encodePathSegments(value: string, flavor: PortablePathFlavor): string {
-	return value
-		.split(flavor === "windows" ? /[\\/]/ : "/")
-		.filter(Boolean)
-		.map((segment) => encodeURIComponent(segment))
-		.join("/");
-}
-
-export function portablePathToFileUri(filePath: string): string {
-	const flavor = pathFlavor(filePath);
-	const normalized = normalizePortablePath(filePath, flavor);
-	if (flavor === "posix") return `file:///${encodePathSegments(normalized, flavor)}`;
-	if (normalized.startsWith("\\\\")) {
-		const parts = normalized.slice(2).split("\\");
-		const host = parts.shift();
-		if (!host) throw new Error(`Invalid UNC path: ${filePath}`);
-		return `file://${host}/${encodePathSegments(parts.join("/"), flavor)}`;
-	}
-	const drive = normalized.slice(0, 2);
-	return `file:///${drive}/${encodePathSegments(normalized.slice(2), flavor)}`;
 }
 
 export function relativePortablePath(from: string, to: string): string {

@@ -170,7 +170,6 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `enableSubagents` | boolean | `false` | Enable the built-in `subagent`, `subagent_runs`, and `create_subagent` tools by default. Changes made in `/settings` apply immediately; `/reload` applies file edits. Explicit CLI/SDK tool allowlists can opt in to any subset, while no-tools modes remain authoritative. |
-| `enableLspTools` | boolean | `false` | Expose configured `lsp_*` tools by default. `--enable-lsp-tools` opts in for one CLI invocation; `/reload` applies settings-file edits. The LSP runtime still requires separate configuration; explicit tool allowlists override this default. |
 | `tools` | object | `{}` | Per-tool configuration keyed by tool name |
 | `tools.websearch.provider` | string | `"duckduckgo"` | Web search provider: `"duckduckgo"`, `"brave"`, or `"firecrawl"` |
 | `tools.websearch.apiKey` | string | - | Provider API key. Brave env fallback: `GRIP_WEBSEARCH_BRAVE_API_KEY` or `BRAVE_SEARCH_API_KEY`. Firecrawl env fallback: `GRIP_WEBSEARCH_FIRECRAWL_API_KEY` or `FIRECRAWL_API_KEY` |
@@ -256,32 +255,6 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 
 Built-in Mermaid rendering applies only to ordinary user and assistant messages in the interactive transcript. `"final"` keeps streaming assistant fences as source until the message finishes; `"streaming"` renders best-effort partial diagrams while streaming. The built-in does not render Mermaid in thinking or custom messages, summaries, print/RPC/JSON output, or HTML export, and never changes session storage or model context.
 
-### Language Servers
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `lsp` | object | - | Validated external language-server configuration layer |
-
-Grip does not include a default language server. Configure spawned or attached servers explicitly:
-
-```json
-{
-  "lsp": {
-    "servers": [
-      {
-        "id": "rust",
-        "selectors": [{ "languageId": "rust", "pattern": "**/*.rs" }],
-        "transport": { "type": "tcp", "host": "127.0.0.1", "port": 9257 },
-        "lifecycle": { "type": "attached" },
-        "workspace": { "type": "session" }
-      }
-    ]
-  }
-}
-```
-
-Global and project `lsp` values are separate layers; project definitions override complete servers by ID. Active project-settings transports and positive top-level `enabled: true` activation are blocked unless an SDK host grants `trustProjectLspTransports`; this host-only decision cannot be enabled by project settings. Safe disable/removal entries remain effective. Malformed or unreadable LSP sources produce visible nonfatal diagnostics at the applicable error or warning severity and disable LSP; `--no-lsp` remains available as a per-invocation recovery path. CLI and host layers have higher precedence. See [Language Server Protocol](lsp.md) for spawn examples, merge/replace/disable semantics, trust, roots, transports, remote path mapping, and troubleshooting.
-
 ### Resources
 
 These settings define where to load extensions, skills, rules, prompts, and themes from.
@@ -353,7 +326,7 @@ See [packages.md](packages.md) for package management details. `pi-skills` above
 
 ## Project Overrides
 
-Project settings (`.grip/settings.json`) override global settings. Nested objects are merged, except `lsp`, which uses the server-ID layer semantics documented in [Language Servers](#language-servers):
+Project settings (`.grip/settings.json`) override global settings. Nested objects are merged:
 
 ```json
 // ~/.grip/agent/settings.json (global)

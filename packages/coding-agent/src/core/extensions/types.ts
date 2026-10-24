@@ -50,8 +50,6 @@ import type { EventBus } from "../event-bus.ts";
 import type { ExecOptions, ExecResult } from "../exec.ts";
 import type { ReadonlyFooterDataProvider } from "../footer-data-provider.ts";
 import type { KeybindingsManager } from "../keybindings.ts";
-import type { LspConfigurationLayer, ResolvedLspConfiguration } from "../lsp/config.ts";
-import type { LspSessionStatus } from "../lsp/integration.ts";
 import type { CustomMessage } from "../messages.ts";
 import type { ModelRegistry } from "../model-registry.ts";
 import type { PromptTemplate } from "../prompt-templates.ts";
@@ -322,6 +320,8 @@ export interface ExtensionToolBackendExecOptions extends BashExecutorOptions {
 export interface ExtensionHostCommandOptions extends ExtensionToolBackendExecOptions {
 	/** Human-readable reason for this exact host command; Grip supplies the command and host cwd in the approval. */
 	question: string;
+	/** Optional positive deadline in milliseconds for approval only; expiration denies without executing. */
+	approvalTimeoutMs?: number;
 }
 
 /** Arguments are passed directly to the executable, never to a shell. cwd is a guest directory. */
@@ -344,10 +344,6 @@ export interface ExtensionContext {
 	getToolBackendInfo(): ToolBackendInfo;
 	/** True while a session-owned sandbox daemon is connected (started or attached). Does not guarantee a host mount mapping. */
 	isSandbox(): boolean;
-	/** Inspect the AgentSession-owned LSP runtime without creating another manager. */
-	getLspStatus(): LspSessionStatus;
-	/** Replace the AgentSession-owned LSP configuration after validation. Relative paths are resolved from the session cwd. */
-	configureLsp(configuration: LspConfigurationLayer): Promise<ResolvedLspConfiguration>;
 	/** Execute a shell command through the active file/tool backend. */
 	execToolBackend(command: string, options?: ExtensionToolBackendExecOptions): Promise<BashResult>;
 	/** Execute on the host only after fresh user approval; available only for verified managed sandbox mounts. */
@@ -1773,8 +1769,6 @@ export interface ExtensionContextActions {
 	getToolOperations: () => ToolOperations;
 	getToolBackendInfo: () => ToolBackendInfo;
 	isSandbox: () => boolean;
-	getLspStatus: () => LspSessionStatus;
-	configureLsp: (configuration: LspConfigurationLayer) => Promise<ResolvedLspConfiguration>;
 	execToolBackend: (command: string, options?: ExtensionToolBackendExecOptions) => Promise<BashResult>;
 	execHostCommand: (command: string, options: ExtensionHostCommandOptions) => Promise<BashResult>;
 	execHostProcess: (executable: string, args: string[], options: ExtensionHostProcessOptions) => Promise<ExecResult>;

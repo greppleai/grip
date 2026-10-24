@@ -40,13 +40,6 @@ import type {
 import { freezeLoadedHooks, loadHooks } from "./hooks/config.ts";
 import { canonicalProjectHookCwd, canonicalProjectHookIdentity } from "./hooks/trust-store.ts";
 import type { HookDiagnostic, LoadedHooks } from "./hooks/types.ts";
-import {
-	type LoadLspConfigurationResult,
-	type LspConfigurationInput,
-	type LspConfigurationSourceDiagnostic,
-	loadLspConfiguration,
-} from "./lsp/config-loader.ts";
-import type { LspConnectionFactoryRegistry } from "./lsp/transport.ts";
 import { convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { findInitialModel, type ResolveCliModelResult, resolveCliModel, type ScopedModel } from "./model-resolver.ts";
@@ -127,18 +120,7 @@ interface BuiltAgentSession {
 	services: GripAgentServices;
 	baseDiagnostics: GripAgentDiagnostic[];
 	hookDiagnostics: GripAgentDiagnostic[];
-	lspDiagnostics: GripAgentDiagnostic[];
 	modelFallbackMessage?: string;
-}
-
-function formatLspConfigurationDiagnostics(
-	diagnostics: readonly LspConfigurationSourceDiagnostic[],
-): GripAgentDiagnostic[] {
-	return diagnostics.map((diagnostic) => ({
-		type: diagnostic.severity,
-		...(diagnostic.severity === "error" ? { fatal: false } : {}),
-		message: `LSP configuration (${diagnostic.source}) ${diagnostic.path}: ${diagnostic.message}`,
-	}));
 }
 
 function formatHookDiagnostic(diagnostic: HookDiagnostic): GripAgentDiagnostic {
@@ -168,8 +150,6 @@ export interface GripAgentSessionOptions {
 	thinkingLevel?: ThinkingLevel;
 	scopedModels?: ScopedModel[];
 	tools?: string[];
-	/** Expose configured LSP tools by default; overrides enableLspTools in settings for this session. */
-	enableLspTools?: boolean;
 	excludedTools?: string[];
 	/** Trust project-local subagent presets without an interactive host prompt. */
 	trustProjectAgents?: boolean;
@@ -177,12 +157,6 @@ export interface GripAgentSessionOptions {
 	trustProjectHooks?: boolean;
 	/** Optional canonical repository identity constraining the project-hook trust grant. */
 	trustedProjectHooksIdentity?: string;
-	/** LSP layers or files supplied by a CLI, SDK, or host. Host scope is the default. */
-	lsp?: LspConfigurationInput | LspConfigurationInput[];
-	/** Host-provided factories referenced by LSP transports with type `connection`. */
-	lspConnectionFactories?: LspConnectionFactoryRegistry;
-	/** Trust active LSP transports from project settings after applying a host-controlled approval policy. */
-	trustProjectLspTransports?: boolean;
 	noTools?: GripAgentToolExclusionMode;
 	customTools?: ToolDefinition[];
 	toolOperations?: ToolOperations;
@@ -396,10 +370,6 @@ function blockImagesInMessage(message: Message): Message {
 	return { ...message, content: filteredContent };
 }
 
-function asLspInputs(input: LspConfigurationInput | LspConfigurationInput[] | undefined): LspConfigurationInput[] {
-	return input === undefined ? [] : Array.isArray(input) ? input : [input];
-}
-
 function getAttributionHeaders(
 	model: Model<any>,
 	settingsManager: SettingsManager,
@@ -543,7 +513,6 @@ export class GripAgent {
 	private _baseDiagnostics: GripAgentDiagnostic[] = [];
 	private _hookConfigurationDiagnostics: GripAgentDiagnostic[] = [];
 	private _hookRuntimeDiagnostics: GripAgentDiagnostic[] = [];
-	private _lspDiagnostics: GripAgentDiagnostic[] = [];
 	private _modelFallbackMessage?: string;
 	private rebindSession?: (session: AgentSession) => Promise<void>;
 	private beforeSessionInvalidate?: () => void;
@@ -1062,7 +1031,6 @@ export class GripAgent {
 			thinkingLevel: resolvedOptions.thinkingLevel ?? this.options.thinkingLevel,
 			scopedModels: resolvedOptions.scopedModels ?? this.options.scopedModels,
 			tools: resolvedOptions.tools ?? this.options.tools,
-			enableLspTools: resolvedOptions.enableLspTools ?? this.options.enableLspTools,
 			excludedTools: resolvedOptions.excludedTools ?? this.options.excludedTools,
 			noTools: resolvedOptions.noTools ?? this.options.noTools,
 			customTools: resolvedOptions.customTools ?? this.options.customTools,
@@ -1071,26 +1039,7 @@ export class GripAgent {
 				: this.borrowedToolOperations,
 			trustProjectAgents: resolvedOptions.trustProjectAgents ?? this.options.trustProjectAgents,
 			trustProjectHooks: resolvedOptions.trustProjectHooks ?? this.options.trustProjectHooks,
-			trustProjectLspTransports: resolvedOptions.trustProjectLspTransports ?? this.options.trustProjectLspTransports,
-			lspConnectionFactories: resolvedOptions.lspConnectionFactories ?? this.options.lspConnectionFactories,
 		};
-	}
-
-	private resolveSessionLspConfiguration(
-		services: GripAgentServices,
-		sessionOptions: GripAgentSessionOptions,
-		inputs: LspConfigurationInput[],
-	): Promise<LoadLspConfigurationResult> {
-		if (sessionOptions.toolOperations?.getBackendInfo?.().type === "remote") {
-			return Promise.resolve({ configuration: { enabled: false, servers: [] }, diagnostics: [] });
-		}
-		return loadLspConfiguration({
-			settingsManager: services.settingsManager,
-			cwd: services.cwd,
-			agentDir: services.agentDir,
-			inputs,
-			trustProjectLspTransports: sessionOptions.trustProjectLspTransports,
-		});
 	}
 
 	private async resolveSessionModel(
@@ -1228,11 +1177,6 @@ export class GripAgent {
 		const discoverProjectHooks = this.shouldDiscoverProjectHooks(resolvedOptions);
 		const hookResolution = await this.loadSessionHooks(services, resolvedOptions, discoverProjectHooks);
 		const sessionOptions = this.mergeSessionOptions(resolvedOptions);
-		const lspInputs = [...asLspInputs(this.options.lsp), ...asLspInputs(resolvedOptions.lsp)];
-		const resolveSessionLspConfiguration = () =>
-			this.resolveSessionLspConfiguration(services, sessionOptions, lspInputs);
-		const lspResult = await resolveSessionLspConfiguration();
-		const lspDiagnostics = formatLspConfigurationDiagnostics(lspResult.diagnostics);
 		const baseDiagnostics = [...diagnostics];
 
 		const existingSession = activeSession.buildSessionContext();
@@ -1248,10 +1192,7 @@ export class GripAgent {
 			model,
 		);
 
-		const defaultActiveToolNames = getDefaultActiveToolNames(
-			services.settingsManager.getEnableSubagents(),
-			sessionOptions.enableLspTools ?? services.settingsManager.getEnableLspTools(),
-		);
+		const defaultActiveToolNames = getDefaultActiveToolNames(services.settingsManager.getEnableSubagents());
 		const allowedToolNames = sessionOptions.tools ?? (sessionOptions.noTools === "all" ? [] : undefined);
 		const initialActiveToolNames = [
 			...(sessionOptions.tools ?? (sessionOptions.noTools ? [] : defaultActiveToolNames)),
@@ -1282,7 +1223,6 @@ export class GripAgent {
 				toolOperations: sessionOptions.toolOperations,
 				modelRegistry: services.modelRegistry,
 				initialActiveToolNames,
-				enableLspTools: sessionOptions.enableLspTools,
 				excludedToolNames: sessionOptions.excludedTools,
 				allowedToolNames,
 				subagentRunner: this.createEmbeddedSubagentRunner(
@@ -1293,12 +1233,6 @@ export class GripAgent {
 				subagentRunRegistry,
 				subagentConfigRegistry,
 				trustProjectAgents: sessionOptions.trustProjectAgents,
-				lspConfiguration: lspResult.configuration,
-				lspConnectionFactories: sessionOptions.lspConnectionFactories,
-				resolveLspConfiguration: resolveSessionLspConfiguration,
-				onLspConfigurationDiagnostics: (nextDiagnostics) => {
-					this.setLspConfigurationDiagnostics(nextDiagnostics);
-				},
 				extensionRunnerRef,
 				sessionStartEvent,
 				loadedHooks: hookResolution.loadedHooks,
@@ -1318,7 +1252,6 @@ export class GripAgent {
 			services,
 			baseDiagnostics,
 			hookDiagnostics: hookResolution.diagnostics,
-			lspDiagnostics,
 			modelFallbackMessage: modelResolution.fallbackMessage,
 		};
 	}
@@ -1329,7 +1262,6 @@ export class GripAgent {
 		this._baseDiagnostics = result.baseDiagnostics;
 		this._hookConfigurationDiagnostics = result.hookDiagnostics;
 		this._hookRuntimeDiagnostics = [];
-		this._lspDiagnostics = result.lspDiagnostics;
 		this.refreshDiagnostics();
 		this._modelFallbackMessage = result.modelFallbackMessage;
 	}
@@ -1339,13 +1271,7 @@ export class GripAgent {
 			...this._baseDiagnostics,
 			...this._hookConfigurationDiagnostics,
 			...this._hookRuntimeDiagnostics,
-			...this._lspDiagnostics,
 		];
-	}
-
-	private setLspConfigurationDiagnostics(diagnostics: readonly LspConfigurationSourceDiagnostic[]): void {
-		this._lspDiagnostics = formatLspConfigurationDiagnostics(diagnostics);
-		this.refreshDiagnostics();
 	}
 
 	private setHookConfigurationDiagnostics(diagnostics: readonly GripAgentDiagnostic[]): void {

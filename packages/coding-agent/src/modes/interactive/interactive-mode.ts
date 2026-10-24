@@ -2207,8 +2207,6 @@ export class InteractiveMode {
 			toolOperations: this.session.getToolOperations(),
 			getToolBackendInfo: () => this.session.getToolBackendInfo(),
 			isSandbox: () => this.session.isSandbox(),
-			getLspStatus: () => this.session.getLspStatus(),
-			configureLsp: (configuration) => this.session.configureLsp(configuration),
 			execToolBackend: (command, options) => {
 				const operations = this.session.getToolOperations();
 				return executeBashWithOperations(command, options?.cwd ?? operations.cwd, operations, options);

@@ -247,7 +247,7 @@ const pi = await GripAgent.create({
 await pi.createAgentSession();
 ```
 
-Built-in tool names include `read`, `bash`, `edit`, `write`, `websearch`, `session_search`, `session_entry_get`, `compress_context`, `grep`, `find`, `ls`, `subagent`, `subagent_runs`, `create_subagent`, and the `lsp_*` navigation/refactoring tools. The subagent and LSP tool families are inactive by default. Set `enableSubagents: true` in settings to activate subagents or `enableLspTools: true` in settings or `GripAgent.create()` to expose configured LSP tools. An explicit `tools` option selects any subset regardless of these defaults; `noTools: "all"` and `noTools: "builtin"` remain authoritative.
+Built-in tool names include `read`, `bash`, `edit`, `write`, `websearch`, `session_search`, `session_entry_get`, `compress_context`, `grep`, `find`, `ls`, `subagent`, `subagent_runs`, and `create_subagent`. Subagent tools are inactive by default; set `enableSubagents: true` in settings to activate them. An explicit `tools` option selects any subset regardless of these defaults; `noTools: "all"` and `noTools: "builtin"` remain authoritative.
 
 ### Settings
 
@@ -263,41 +263,6 @@ await pi.createAgentSession();
 ```
 
 For a live session, `session.setSubagentsEnabled(enabled)` persists the setting and immediately refreshes active tools and orchestration guidance. `session.reload()` applies settings-file changes.
-
-## Language servers
-
-Each active `AgentSession` owns exactly one LSP runtime; `GripAgent` resolves its configuration and replaces it with the session lifecycle. Supply the same validated configuration used by settings or the CLI through `lsp`:
-
-```typescript
-import { InMemorySessionManager, GripAgent } from "@greppleai/grip";
-
-const pi = await GripAgent.create({
-  cwd: process.cwd(),
-  sessionManager: new InMemorySessionManager(process.cwd()),
-  enableLspTools: true,
-  lsp: {
-    type: "configuration",
-    configuration: {
-      servers: [
-        {
-          id: "typescript",
-          selectors: [{ languageId: "typescript", pattern: "**/*.ts" }],
-          transport: { type: "tcp", host: "127.0.0.1", port: 2087 },
-          lifecycle: { type: "attached" },
-          workspace: { type: "session" },
-        },
-      ],
-    },
-  },
-});
-
-const session = await pi.createAgentSession();
-console.log(session.getLspStatus());
-```
-
-Hosts can also provide `lspConnectionFactories`, grant `trustProjectLspTransports` after applying their own trust policy, and return destination-specific LSP options from `resolveSessionOptions`. The grant covers every active project-origin transport and positive project `enabled: true` activation because both commands and attached endpoints can expose document content; project settings cannot grant it to themselves. `GripAgent.create()` and `resolveSessionOptions` inputs propagate through new, resumed, forked, and cross-cwd replacement sessions; source-relative paths are re-resolved for the destination cwd. Use `session.configureLsp(layer)` for a validated session-runtime-only replacement; normal reload or session replacement re-applies the configured sources. `session.reload()` returns current raw, source- and JSON-path-attributed LSP configuration diagnostics. `pi.diagnostics` exposes formatted diagnostics from initial session creation and refreshes them after reload or session replacement. Invalid or unreadable LSP configuration yields nonfatal diagnostics at the applicable error or warning severity and an empty disabled LSP state rather than retaining stale runtime state; unrelated application diagnostics remain fatal.
-
-See [Language Server Protocol](lsp.md) for complete configuration, a host-provided connection-factory example, lifecycle ownership, status fields, reload behavior, and migration guidance.
 
 ## Run Modes
 
@@ -350,11 +315,7 @@ createCodingTools
 createReadOnlyTools
 createReadTool, createBashTool, createEditTool, createWriteTool
 createGrepTool, createFindTool, createLsTool, createSubagentTool
-LspClient, LspManager, LspFileSync, LspRouter, LspPathMapper
-loadLspConfiguration, parseLspConfiguration, resolveLspConfiguration
-createManagedStdioConnectionFactory, createTcpConnectionFactory
-registerStandaloneLspLifecycleHandlers
 ```
 
-The package root curates the public LSP API directly from the modules under `core/lsp/`. `createSubagentTool` requires a `SubagentRunner` in its options. `GripAgent` configures the embedded runner automatically; standalone tool construction must provide its own in-process runner.
-For extension types, see [extensions.md](extensions.md). For LSP configuration, lifecycle, transport, routing, status, and public type exports, see [Language Server Protocol](lsp.md).
+`createSubagentTool` requires a `SubagentRunner` in its options. `GripAgent` configures the embedded runner automatically; standalone tool construction must provide its own in-process runner.
+For extension types, see [extensions.md](extensions.md).

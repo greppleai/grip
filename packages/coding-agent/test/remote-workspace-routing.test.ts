@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { AgentToolResult } from "@greppleai/grip-agent-core";
 import {
 	fauxAssistantMessage,
@@ -55,7 +54,6 @@ async function createServer(
 	workspaceRoot: string,
 	allowProcessExec = true,
 	token?: string,
-	lspConfigPath?: string,
 	temporaryRoot?: string,
 	allowFullFilesystem = false,
 ) {
@@ -68,7 +66,6 @@ async function createServer(
 			"--daemon-port",
 			String(port),
 			"--daemon-allow-root",
-			...(lspConfigPath ? ["--daemon-lsp-config", lspConfigPath] : []),
 			...(allowProcessExec ? ["--daemon-allow-process-exec"] : []),
 			...(allowFullFilesystem ? ["--daemon-allow-full-filesystem"] : []),
 		],
@@ -257,113 +254,6 @@ describe("remote canonical workspace tool routing", () => {
 		}
 	});
 
-	it("hosts configured LSP beside the daemon workspace without a local AgentSession manager", async () => {
-		const workspaceRoot = await createTemporaryDirectory();
-		const configPath = join(workspaceRoot, "daemon-lsp.json");
-		const exitMarker = join(workspaceRoot, "lsp-exited.txt");
-		const fixture = fileURLToPath(new URL("./fixtures/lsp-stdio-server.mjs", import.meta.url));
-		await writeFile(
-			configPath,
-			JSON.stringify({
-				servers: [
-					{
-						id: "fixture",
-						selectors: [{ languageId: "typescript", pattern: "**/*.ts" }],
-						transport: { type: "spawn", command: "node", args: [fixture, `--exit-marker=${exitMarker}`] },
-						lifecycle: { type: "managed" },
-						workspace: { type: "session" },
-					},
-				],
-			}),
-		);
-		await writeFile(join(workspaceRoot, "sample.ts"), "const value = 1;\n");
-		const { server, address } = await createServer(workspaceRoot, true, undefined, configPath);
-		const operations = await createRemoteToolOperations(address.url);
-		const harness = await createHarness({ toolOperations: operations, settings: { enableLspTools: true } });
-		expect(harness.session.getLspStatus()).toMatchObject({
-			owner: "daemon",
-			enabled: true,
-			servers: [expect.objectContaining({ serverId: "fixture", state: "idle", running: false })],
-		});
-		expect(harness.session.getAllTools().some((tool) => tool.name === "lsp_hover")).toBe(true);
-		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("lsp_hover", { path: "sample.ts", line: 1, character: 1 })], {
-				stopReason: "toolUse",
-			}),
-			fauxAssistantMessage("done"),
-		]);
-		await harness.session.prompt("inspect hover");
-		const result = harness.session.messages.find(
-			(message) => message.role === "toolResult" && message.toolName === "lsp_hover",
-		);
-		expect(result?.role === "toolResult" ? result.content[0] : undefined).toMatchObject({
-			type: "text",
-			text: "fixture hover: const value = 1;",
-		});
-		expect(harness.session.getLspStatus()).toMatchObject({
-			owner: "daemon",
-			servers: [expect.objectContaining({ serverId: "fixture", state: "running", ownership: "managed" })],
-		});
-		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("write", { path: "sample.ts", content: "const changed = 2;\n" })], {
-				stopReason: "toolUse",
-			}),
-			fauxAssistantMessage([fauxToolCall("lsp_hover", { path: "sample.ts", line: 1, character: 1 })], {
-				stopReason: "toolUse",
-			}),
-			fauxAssistantMessage("done"),
-		]);
-		await harness.session.prompt("change and inspect hover");
-		const hoverResults = harness.session.messages.filter(
-			(message) => message.role === "toolResult" && message.toolName === "lsp_hover",
-		);
-		const synchronizedHover = hoverResults.at(-1);
-		expect(synchronizedHover?.role === "toolResult" ? synchronizedHover.content[0] : undefined).toMatchObject({
-			type: "text",
-			text: "fixture hover: const changed = 2;",
-		});
-		await harness.session.dispose();
-		await operations.dispose();
-		await server.close();
-		await vi.waitFor(async () => expect(await readFile(exitMarker, "utf8")).toBe("exited"));
-	});
-
-	it("propagates cancellation to daemon-owned LSP requests", async () => {
-		const workspaceRoot = await createTemporaryDirectory();
-		const configPath = join(workspaceRoot, "daemon-lsp-cancel.json");
-		const fixture = fileURLToPath(new URL("./fixtures/lsp-stdio-server.mjs", import.meta.url));
-		await writeFile(
-			configPath,
-			JSON.stringify({
-				servers: [
-					{
-						id: "fixture",
-						selectors: [{ languageId: "typescript", pattern: "**/*.ts" }],
-						transport: { type: "spawn", command: "node", args: [fixture, "--hang-hover"] },
-						lifecycle: { type: "managed" },
-						workspace: { type: "session" },
-					},
-				],
-			}),
-		);
-		await writeFile(join(workspaceRoot, "sample.ts"), "const value = 1;\n");
-		const { server, address } = await createServer(workspaceRoot, true, undefined, configPath);
-		const operations = await createRemoteToolOperations(address.url);
-		const harness = await createHarness({ toolOperations: operations });
-		const controller = new AbortController();
-		const invocation = operations.executeWorkspaceTool("lsp_hover", {
-			toolCallId: "cancel-lsp",
-			arguments: { path: "sample.ts", line: 1, character: 1 },
-			signal: controller.signal,
-			executionOptions: {},
-		});
-		setTimeout(() => controller.abort(), 50);
-		await expect(invocation).rejects.toThrow(/cancel|abort/iu);
-		await harness.session.dispose();
-		await operations.dispose();
-		await server.close();
-	});
-
 	it("keeps AgentSession as the sole lifecycle and extension-policy owner", async () => {
 		const workspaceRoot = await createTemporaryDirectory();
 		const { server, address } = await createServer(workspaceRoot, false);
@@ -428,7 +318,7 @@ describe("remote canonical workspace tool routing", () => {
 		const externalFile = join(guestDirectory, "guest.txt");
 		await writeFile(externalFile, "outside mount\n");
 		await symlink(guestDirectory, join(workspaceRoot, "guest-link"));
-		const { server, address } = await createServer(workspaceRoot, false, undefined, undefined, undefined, true);
+		const { server, address } = await createServer(workspaceRoot, false, undefined, undefined, true);
 		const operations = await createRemoteToolOperations(address.url);
 		const host = new WorkspaceToolHost({ cwd: operations.cwd, operations });
 		try {
@@ -466,7 +356,7 @@ describe("remote canonical workspace tool routing", () => {
 		const workspaceRoot = await createTemporaryDirectory();
 		const outside = await createTemporaryDirectory();
 		const temporaryRoot = await createTemporaryDirectory();
-		const { server, address } = await createServer(workspaceRoot, true, undefined, undefined, temporaryRoot);
+		const { server, address } = await createServer(workspaceRoot, true, undefined, temporaryRoot);
 		const operations = await createRemoteToolOperations(address.url);
 		const host = new WorkspaceToolHost({ cwd: operations.cwd, operations });
 		const temporaryFile = join(temporaryRoot, "scratch.txt");
@@ -568,7 +458,7 @@ describe("remote canonical workspace tool routing", () => {
 		const hostRoot = await createTemporaryDirectory();
 		const temporaryRoot = await createTemporaryDirectory();
 		await symlink(temporaryRoot, join(workspaceRoot, "outside-link"));
-		const { server, address } = await createServer(workspaceRoot, true, undefined, undefined, temporaryRoot);
+		const { server, address } = await createServer(workspaceRoot, true, undefined, temporaryRoot);
 		const deferred = new DeferredRemoteToolOperations(hostRoot);
 		const harness = await createHarness({ toolOperations: deferred });
 		try {
@@ -673,6 +563,97 @@ describe("remote canonical workspace tool routing", () => {
 		}
 	});
 
+	it("rejects expired host-command approvals before spawning, without timing out an approved command", async () => {
+		const guestRoot = await createTemporaryDirectory();
+		const hostRoot = await createTemporaryDirectory();
+		const { server, address } = await createServer(guestRoot);
+		const deferred = new DeferredRemoteToolOperations(hostRoot);
+		const harness = await createHarness({ toolOperations: deferred });
+		const select = vi
+			.fn<ExtensionUIContext["select"]>()
+			.mockImplementation(
+				(_title, _choices, opts) => new Promise((resolve) => setTimeout(() => resolve(undefined), opts?.timeout)),
+			);
+		const command = "printf approved > marker.txt";
+		try {
+			await harness.session.activateSandboxDaemon({
+				url: address.url,
+				token: "",
+				expectedCwd: guestRoot,
+				hostWorkspaceRoot: hostRoot,
+			});
+			await harness.session.bindExtensions({ uiContext: { select } as unknown as ExtensionUIContext });
+			const ctx = harness.session.extensionRunner.createContext();
+			await expect(ctx.execHostCommand(command, { question: "Test expiry", approvalTimeoutMs: 10 })).rejects.toThrow(
+				"not approved",
+			);
+			expect(select).toHaveBeenCalledWith(expect.any(String), ["No", "Yes"], {
+				signal: undefined,
+				timeout: 10,
+			});
+			await expect(readFile(join(hostRoot, "marker.txt"))).rejects.toThrow();
+			for (const invalid of [0, -1, Number.NaN, 1.5]) {
+				await expect(
+					ctx.execHostCommand(command, { question: "Test expiry", approvalTimeoutMs: invalid }),
+				).rejects.toThrow("positive integer");
+			}
+			expect(select).toHaveBeenCalledTimes(1);
+			select.mockResolvedValue("Yes");
+			const result = await ctx.execHostCommand("sleep 0.05; printf approved > marker.txt", {
+				question: "Test approval",
+				approvalTimeoutMs: 10,
+			});
+			expect(result.exitCode).toBe(0);
+			expect(await readFile(join(hostRoot, "marker.txt"), "utf8")).toBe("approved");
+		} finally {
+			await harness.session.dispose();
+			await deferred.dispose();
+			await server.close();
+			harness.cleanup();
+		}
+	});
+
+	it("runs bash host: true only after approval in the mapped host cwd, never through the daemon", async () => {
+		const guestRoot = await createTemporaryDirectory();
+		const hostRoot = await createTemporaryDirectory();
+		const { server, address } = await createServer(guestRoot);
+		const deferred = new DeferredRemoteToolOperations(hostRoot);
+		const harness = await createHarness({ toolOperations: deferred });
+		const select = vi.fn<ExtensionUIContext["select"]>().mockResolvedValue("Yes");
+		const command = "printf host-secret > host-marker.txt; printf host-secret";
+		try {
+			await harness.session.activateSandboxDaemon({
+				url: address.url,
+				token: "",
+				expectedCwd: guestRoot,
+				hostWorkspaceRoot: hostRoot,
+			});
+			await harness.session.bindExtensions({ uiContext: { select } as unknown as ExtensionUIContext });
+			expect(harness.session.getAllTools().map((tool) => tool.name)).toContain("bash");
+			const definition = harness.session.getToolDefinition("bash");
+			expect(definition).toBeDefined();
+			const result = await definition!.execute(
+				"host",
+				{ command, host: true, description: "User requested host inspection" },
+				undefined,
+				undefined,
+				harness.session.extensionRunner.createContext(),
+			);
+			expect(text(result)).toBe("Host command succeeded; output withheld");
+			expect(await readFile(join(hostRoot, "host-marker.txt"), "utf8")).toBe("host-secret");
+			await expect(readFile(join(guestRoot, "host-marker.txt"))).rejects.toThrow();
+			expect(select).toHaveBeenCalledWith(
+				expect.stringContaining(`Command: ${JSON.stringify(command)}\nHost cwd: ${JSON.stringify(hostRoot)}`),
+				["No", "Yes"],
+				expect.objectContaining({ timeout: 60_000 }),
+			);
+		} finally {
+			await harness.session.dispose();
+			await deferred.dispose();
+			await server.close();
+			harness.cleanup();
+		}
+	});
 	it("approves direct host executables with argv and no shell, and denies before spawning", async () => {
 		const guestRoot = await createTemporaryDirectory();
 		const hostRoot = await createTemporaryDirectory();

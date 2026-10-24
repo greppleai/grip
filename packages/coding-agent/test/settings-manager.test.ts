@@ -593,28 +593,4 @@ describe("SettingsManager", () => {
 			expect(manager.getToolSettings("custom")).toEqual({ enabled: true });
 		});
 	});
-	describe("enableLspTools", () => {
-		it("defaults off and respects settings precedence and runtime overrides", () => {
-			const manager = SettingsManager.create(projectDir, agentDir);
-			expect(manager.getEnableLspTools()).toBe(false);
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enableLspTools: true }));
-			writeFileSync(join(projectDir, CONFIG_DIR_NAME, "settings.json"), JSON.stringify({ enableLspTools: false }));
-			const layered = SettingsManager.create(projectDir, agentDir);
-			expect(layered.getEnableLspTools()).toBe(false);
-			layered.applyOverrides({ enableLspTools: true });
-			expect(layered.getEnableLspTools()).toBe(true);
-		});
-	});
-	describe("LSP settings", () => {
-		it("keeps global and project layers separate instead of shallow-merging them", () => {
-			const globalLsp = { servers: [{ id: "global", enabled: false }] };
-			const projectLsp = { enabled: false };
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ lsp: globalLsp }));
-			writeFileSync(join(projectDir, CONFIG_DIR_NAME, "settings.json"), JSON.stringify({ lsp: projectLsp }));
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			expect(manager.getGlobalLspConfiguration()).toEqual(globalLsp);
-			expect(manager.getProjectLspConfiguration()).toEqual(projectLsp);
-		});
-	});
 });

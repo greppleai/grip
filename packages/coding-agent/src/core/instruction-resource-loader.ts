@@ -14,7 +14,7 @@ import {
 	relativePortablePath,
 	relativeWithin,
 	resolvePortablePath,
-} from "./lsp/portable-path.ts";
+} from "./portable-path.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import type { ToolFileStat, ToolOperations } from "./tools/operations.ts";
 

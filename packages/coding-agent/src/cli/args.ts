@@ -41,9 +41,6 @@ export interface Args {
 	session?: string;
 	fork?: string;
 	sessionDir?: string;
-	lspConfig?: string;
-	noLsp?: boolean;
-	enableLspTools?: boolean;
 	remoteSessionBaseUrl?: string;
 	remoteSessionToken?: string;
 	remoteProjectId?: string;
@@ -114,8 +111,6 @@ const BOOLEAN_FLAG_HANDLERS = new Map<string, CliBooleanFlagHandler>([
 	["--resume", (result) => (result.resume = true)],
 	["-r", (result) => (result.resume = true)],
 	["--no-session", (result) => (result.noSession = true)],
-	["--no-lsp", (result) => (result.noLsp = true)],
-	["--enable-lsp-tools", (result) => (result.enableLspTools = true)],
 	["--no-tools", (result) => (result.noTools = true)],
 	["-nt", (result) => (result.noTools = true)],
 	["--no-builtin-tools", (result) => (result.noBuiltinTools = true)],
@@ -202,16 +197,6 @@ const VALUE_FLAG_HANDLERS = new Map<string, CliValueFlagHandler>([
 	["--remote-cwd", (result, value) => (result.remoteCwd = value)],
 ]);
 
-function handleLspConfigFlag(context: CliArgumentParseContext): number {
-	const next = context.args[context.index + 1];
-	if (next === undefined || next.startsWith("-")) {
-		context.result.diagnostics.push({ type: "error", message: "--lsp-config requires a file path" });
-		return context.index;
-	}
-	context.result.lspConfig = next;
-	return context.index + 1;
-}
-
 function handlePrintFlag(context: CliArgumentParseContext): number {
 	context.result.print = true;
 	const next = context.args[context.index + 1];
@@ -265,7 +250,6 @@ function handleRemovedSshFlag(context: CliArgumentParseContext): number {
 }
 
 const SPECIAL_FLAG_HANDLERS = new Map<string, CliSpecialFlagHandler>([
-	["--lsp-config", handleLspConfigFlag],
 	["--print", handlePrintFlag],
 	["-p", handlePrintFlag],
 	["--list-models", handleListModelsFlag],
@@ -381,9 +365,6 @@ ${chalk.bold("Options:")}
   --session <path|id>            Use specific session file or partial UUID
   --fork <path|id>               Fork specific session file or partial UUID into a new session
   --session-dir <dir>            Directory for session storage and lookup
-  --lsp-config <file>            Load an explicit LSP configuration file
-  --no-lsp                      Disable the LSP runtime regardless of tool selection
-  --enable-lsp-tools            Expose configured LSP tools by default
   --remote-session-base-url <url> Use remote session service for persistence
   --remote-session-token <token> Bearer token for remote session service
   --remote-project-id <id>       Project id sent to remote session service
@@ -533,13 +514,5 @@ ${chalk.bold("Built-in Tool Names:")}
   session_entry_get - Fetch an exact session entry by ID
   compress_context    - Replace an active session range or tail with a summary
 
-${chalk.bold("Conditional LSP Tool Names:")}
-  Requires LSP configuration; opt in with --enable-lsp-tools, enableLspTools in settings, or --tools.
-  lsp_diagnostics   - Get diagnostics for a file
-  lsp_hover         - Get hover information for a symbol
-  lsp_definition    - Find a symbol definition
-  lsp_references    - Find symbol references
-  lsp_rename        - Preview a symbol rename
-  lsp_code_actions  - List code actions and refactorings
 `);
 }

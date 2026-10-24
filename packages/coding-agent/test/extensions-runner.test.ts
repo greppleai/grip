@@ -113,13 +113,6 @@ describe("ExtensionRunner", () => {
 		getToolOperations: () => new LocalToolOperations(tempDir),
 		getToolBackendInfo: () => ({ type: "local", cwd: tempDir }),
 		isSandbox: () => false,
-		getLspStatus: () => ({
-			owner: "standalone",
-			enabled: false,
-			configuration: { enabled: false, servers: [] },
-			servers: [],
-		}),
-		configureLsp: async () => ({ enabled: false, servers: [] }),
 		execToolBackend: async () => ({ output: "", exitCode: 0, cancelled: false, truncated: false }),
 		execHostCommand: async () => {
 			throw new Error("No host command in test runtime");

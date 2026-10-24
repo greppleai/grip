@@ -33,10 +33,8 @@ describe("regression #7572: nested provider retry settings merge", () => {
 		});
 	});
 
-	it("retains field-specific merge policies for sandbox, tools, arrays, and LSP", () => {
+	it("retains field-specific merge policies for sandbox, tools, and arrays", () => {
 		const storage = new InMemorySettingsStorage();
-		const globalLsp = { servers: [{ id: "global", enabled: false }] };
-		const projectLsp = { enabled: false };
 		storage.withLock("global", () =>
 			JSON.stringify({
 				sandbox: {
@@ -56,7 +54,6 @@ describe("regression #7572: nested provider retry settings merge", () => {
 					malformedArray: ["global", "retained"],
 				},
 				packages: ["npm:global-package"],
-				lsp: globalLsp,
 			}),
 		);
 		storage.withLock("project", () =>
@@ -70,7 +67,6 @@ describe("regression #7572: nested provider retry settings merge", () => {
 					malformedArray: ["project"],
 				},
 				packages: ["npm:project-package"],
-				lsp: projectLsp,
 			}),
 		);
 
@@ -92,8 +88,6 @@ describe("regression #7572: nested provider retry settings merge", () => {
 		expect(settingsManager.getToolSettings("custom")).toEqual({ enabled: true });
 		expect(settingsManager.getToolsSettings()).toMatchObject({ malformedArray: ["project"] });
 		expect(settingsManager.getPackages()).toEqual(["npm:project-package"]);
-		expect(settingsManager.getGlobalLspConfiguration()).toEqual(globalLsp);
-		expect(settingsManager.getProjectLspConfiguration()).toEqual(projectLsp);
 	});
 
 	it("recursively merges runtime retry overrides without mutating stored layers", () => {
