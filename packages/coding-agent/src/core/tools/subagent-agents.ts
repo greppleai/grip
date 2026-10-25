@@ -18,8 +18,6 @@ export interface AgentConfig {
 	name: string;
 	description: string;
 	tools?: string[];
-	model?: string;
-	modelHint?: string;
 	skills?: string[];
 	cwd?: string;
 	systemPrompt: string;
@@ -35,7 +33,7 @@ export interface AgentDiscoveryResult {
 const BUNDLED_AGENTS: AgentConfig[] = [
 	{
 		name: "explore",
-		description: "Fast codebase exploration that returns compressed context for handoff to other agents",
+		description: "Explore when you need bounded source discovery or a concise map of relevant files and evidence",
 		tools: ["read", "grep", "find", "ls", "bash"],
 		systemPrompt: `You are an explorer. Quickly investigate a codebase and return structured findings that another agent can use without re-reading everything.
 
@@ -58,16 +56,19 @@ Return files and exact line ranges, key code, architecture, and the best file to
 	},
 	{
 		name: "worker",
-		description: "General-purpose subagent with full capabilities and isolated context",
-		systemPrompt: `You are a worker agent with full capabilities. Work autonomously to complete the delegated task.
+		description:
+			"Implement a bounded coding slice, add or update tests, run focused checks, and report changes and remaining issues",
+		systemPrompt: `You are a worker agent responsible for one bounded slice of implementation or change work. You may also run focused tests or resolve an isolated issue. Follow the delegated scope and use only your available tools; do not expand the task into unrelated work.
 
-When finished, report what was completed, files changed, and anything the parent agent should know.`,
+For implementation tasks, make the requested code changes, add or update relevant tests, and run focused checks when available. For test-only tasks, do not change code unless the parent explicitly asks you to fix a failure. Stop and report blockers or ambiguous requirements rather than guessing or making broad changes. Do not commit or push unless explicitly requested.
+
+Return a concise handoff: work completed, files changed, tests or checks run with results, unresolved issues, and the state the parent needs to continue. The parent owns final verification and the user-facing answer.`,
 		source: "bundled",
 		filePath: "<builtin:subagent/worker>",
 	},
 	{
 		name: "reviewer",
-		description: "Code review specialist for quality and security analysis",
+		description: "Reviewer for a bounded, independent review of specific code or changes",
 		tools: ["read", "grep", "find", "ls", "bash"],
 		systemPrompt: `You are a senior code reviewer. Analyze code for correctness, security, quality, and maintainability.
 
@@ -94,8 +95,6 @@ function parseAgentConfig(content: string, filePath: string, source: AgentConfig
 		name: frontmatter.name,
 		description: frontmatter.description,
 		tools: tools && tools.length > 0 ? tools : undefined,
-		model: frontmatter.model,
-		modelHint: frontmatter.modelHint,
 		skills: skills && skills.length > 0 ? skills : undefined,
 		cwd: frontmatter.cwd,
 		systemPrompt: body,
@@ -236,6 +235,38 @@ export async function discoverAgentsWithOperations(
 	for (const agent of userAgents) agentMap.set(agent.name, agent);
 	for (const agent of projectAgents) agentMap.set(agent.name, agent);
 	return { agents: Array.from(agentMap.values()), projectAgentsDir };
+}
+
+/** A model-facing snapshot of the effective presets for one invocation scope. */
+export interface AvailableSubagent {
+	name: string;
+	description: string;
+	source: AgentSource;
+	agentScope: AgentScope;
+}
+
+export async function discoverAvailableSubagents(
+	cwd: string,
+	operations?: ToolOperations,
+): Promise<AvailableSubagent[]> {
+	const backend = operations?.getBackendInfo?.();
+	if (backend?.type === "remote" && !backend.configured) return [];
+	const defaults = await discoverAgentsWithOperations(cwd, "user", operations);
+	const project = await discoverAgentsWithOperations(cwd, "project", operations);
+	return [
+		...defaults.agents.map(({ name, description, source }) => ({
+			name,
+			description,
+			source,
+			agentScope: "user" as const,
+		})),
+		...project.agents.map(({ name, description, source }) => ({
+			name,
+			description,
+			source,
+			agentScope: "project" as const,
+		})),
+	];
 }
 
 export interface AgentListFormatResult {

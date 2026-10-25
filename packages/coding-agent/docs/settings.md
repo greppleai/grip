@@ -169,7 +169,8 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `enableSubagents` | boolean | `false` | Enable the built-in `subagent`, `subagent_runs`, and `create_subagent` tools by default. Changes made in `/settings` apply immediately; `/reload` applies file edits. Explicit CLI/SDK tool allowlists can opt in to any subset, while no-tools modes remain authoritative. |
+| `enableSubagents` | boolean | `true` | Enable the built-in `subagent` tool for bounded delegated jobs. Changes made in `/settings` apply immediately; `/reload` applies file edits. Set to `false` to opt out. An explicit CLI/SDK tool allowlist can still select the tool, while no-tools modes remain authoritative. |
+| `subagentModels` | object | `{}` | Global-only map of preset names to exact available `provider/model-id` references. Set with `/subagent model set --name <name> --model <provider/model-id>`; overrides `GRIP_DEFAULT_SUBAGENT_MODEL`, then the parent model. Applies on the next run, not to a running subagent. |
 | `tools` | object | `{}` | Per-tool configuration keyed by tool name |
 | `tools.websearch.provider` | string | `"duckduckgo"` | Web search provider: `"duckduckgo"`, `"brave"`, or `"firecrawl"` |
 | `tools.websearch.apiKey` | string | - | Provider API key. Brave env fallback: `GRIP_WEBSEARCH_BRAVE_API_KEY` or `BRAVE_SEARCH_API_KEY`. Firecrawl env fallback: `GRIP_WEBSEARCH_FIRECRAWL_API_KEY` or `FIRECRAWL_API_KEY` |

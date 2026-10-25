@@ -15,7 +15,12 @@ export interface BuiltinSlashCommand {
 	description: string;
 }
 
-export const HIDDEN_BUILTIN_SLASH_COMMAND_NAMES: ReadonlySet<string> = new Set(["hooks", "sandbox"]);
+export const HIDDEN_BUILTIN_SLASH_COMMAND_NAMES: ReadonlySet<string> = new Set([
+	"hooks",
+	"sandbox",
+	"subagent",
+	"system-prompt",
+]);
 
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "hooks", description: "Enable or disable hooks for this session" },
@@ -23,6 +28,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "cd", description: "Change the working directory" },
 	{ name: "settings", description: "Open settings menu" },
 	{ name: "model", description: "Switch models" },
+	{ name: "subagent", description: "List subagents or configure a preset model" },
+	{ name: "system-prompt", description: "View the effective system prompt without sending it to a model" },
 	{
 		name: "context-compression",
 		description: "Enable or disable agent-initiated context compression for this session",

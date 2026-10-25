@@ -23,6 +23,8 @@ export interface BuildSystemPromptOptions {
 	promptGuidelines?: string[];
 	/** Text to append to system prompt. */
 	appendSystemPrompt?: string;
+	/** Built-in subagent catalog and guidance, when the built-in tool is active. */
+	subagentPrompt?: SubagentPromptParts;
 	/** Working directory. */
 	cwd: string;
 	/** Pre-loaded context files. */
@@ -33,8 +35,14 @@ export interface BuildSystemPromptOptions {
 	rules?: Rule[];
 }
 
+export interface SubagentPromptParts {
+	catalog: string;
+	guidance: string;
+}
 interface SystemPromptFinalizationOptions {
 	appendSystemPrompt?: string;
+	subagentPrompt?: SubagentPromptParts;
+	includeGripDocumentation: boolean;
 	promptCwd: string;
 	date: string;
 	contextFiles: SystemPromptContextFile[];
@@ -66,12 +74,16 @@ function formatPromptGuidelines(tools: string[], additionalGuidelines: string[] 
 	const hasFind = tools.includes("find");
 	const hasLs = tools.includes("ls");
 	if (hasBash && !hasGrep && !hasFind && !hasLs) {
-		appendUniqueGuideline(guidelines, seen, "Use bash for file operations like ls, rg, find");
+		appendUniqueGuideline(
+			guidelines,
+			seen,
+			"Use bash for shell commands; follow project-specific instructions for repository file operations",
+		);
 	} else if (hasBash && (hasGrep || hasFind || hasLs)) {
 		appendUniqueGuideline(
 			guidelines,
 			seen,
-			"Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)",
+			"Prefer grep/find/ls tools over bash for file exploration unless project instructions specify another workflow (faster, respects .gitignore)",
 		);
 	}
 	for (const guideline of additionalGuidelines ?? []) {
@@ -90,25 +102,11 @@ function formatAvailableTools(tools: string[], toolSnippets: Record<string, stri
 		: "(none)";
 }
 
-function buildOrchestrationSection(hasSubagent: boolean): string {
-	if (!hasSubagent) return "";
-	return `
-			## Orchestration
-
-You are the primary agent and final decision-maker. Use subagents as isolated workers for focused investigation, implementation alternatives, and independent review when delegation improves speed or confidence.
-
-Give each subagent a precise task and expected response format. Treat its output as evidence, not authority: reconcile conflicting findings, verify important claims against source or tests, and integrate the final result yourself.
-
-Work directly when delegation would cost more than completing the task. Do not delegate responsibility for the final answer.
-		  `.trim();
-}
-
 function buildDefaultSystemPrompt(options: BuildSystemPromptOptions, tools: string[]): string {
 	const toolsList = formatAvailableTools(tools, options.toolSnippets);
 	const guidelines = formatPromptGuidelines(tools, options.promptGuidelines);
-	const orchestrationSection = buildOrchestrationSection(tools.includes("subagent"));
 	const stateCompressionSection = tools.includes("compress_context")
-		? `## State compression
+		? `### State compression
 Consider compress_context at concrete checkpoints: when the user switches tasks, an investigation has yielded stable findings, an implementation slice is complete, or validation has finished and its raw logs are no longer needed. If older tool output or intermediate reasoning can be replaced by a concise account of decisions and current state, compress before starting the next slice; do not wait for a context percentage or an explicit request. Keep the active work and details needed for the next step intact. Do not compress a trivial exchange or interrupt an ongoing investigation, edit, or test.
 
 The primary agent does not receive a context-utilization percentage. A background detector may send an advisory with an urgency score; treat it as a cue to evaluate the next safe checkpoint, not an instruction to compress immediately.
@@ -119,22 +117,22 @@ Turn batches of reads, searches, builds, and tests into concise state: findings 
 
 Choose a cut point from the entry IDs already visible in context metadata. Pass startEntryId and a summary to replace through the current tail, or add inclusive endEntryId to replace an older bounded range while retaining later messages. Never split a tool call from its results. Detector-suggested IDs are advisory; verify the range yourself before acting. Do not send a list of IDs. Call compress_context alone, not alongside other tools. session_search defaults to current model context; scope: branch/all retrieves historical entries for reference, not necessarily valid compression cut points.`
 		: "";
-	const readmePath = getReadmePath();
-	const docsPath = getDocsPath();
-	const examplesPath = getExamplesPath();
 	return `You are an expert coding assistant operating inside grip, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
 Available tools:
 ${toolsList}
 
 In addition to the tools above, you may have access to other custom tools depending on the project.
-${orchestrationSection ? `\n${orchestrationSection}\n` : ""}${stateCompressionSection ? `\n${stateCompressionSection}\n` : ""}
-Guidelines:
-${guidelines}
 
-Grip documentation (read only when the user asks about grip itself, its SDK, extensions, themes, skills, or TUI):
-- Main documentation: ${readmePath}
-- Additional docs: ${docsPath}
-- Examples: ${examplesPath} (extensions, custom tools, SDK)
+## Guidelines
+${guidelines}${stateCompressionSection ? `\n\n${stateCompressionSection}` : ""}`;
+}
+
+function formatGripDocumentation(): string {
+	return `## Grip documentation
+Read these docs only when the user asks about grip itself, its SDK, extensions, themes, skills, or TUI:
+- Main documentation: ${getReadmePath()}
+- Additional docs: ${getDocsPath()}
+- Examples: ${getExamplesPath()} (extensions, custom tools, SDK)
 - When reading grip docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory
 - When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), type TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), grip packages (docs/packages.md)
 - When working on grip topics, read the docs and examples, and follow .md cross-references before implementing
@@ -151,8 +149,14 @@ function finalizeSystemPrompt(prompt: string, options: SystemPromptFinalizationO
 		}
 		prompt += "</project_context>\n";
 	}
-	if (options.hasLoadSkill && options.skills.length > 0) prompt += formatSkillsForPrompt(options.skills);
 	if (options.hasRead && options.rules.length > 0) prompt += formatRulesForPrompt(options.rules);
+	if (options.hasLoadSkill) {
+		const skillCatalog = formatSkillsForPrompt(options.skills);
+		if (skillCatalog) prompt += `\n\n## Skills${skillCatalog}`;
+	}
+	if (options.subagentPrompt?.catalog) prompt += `\n\n${options.subagentPrompt.catalog}`;
+	if (options.subagentPrompt?.guidance) prompt += `\n\n## Subagents\n${options.subagentPrompt.guidance}`;
+	if (options.includeGripDocumentation) prompt += `\n\n${formatGripDocumentation()}`;
 	prompt += `\nCurrent date: ${options.date}`;
 	prompt += `\nCurrent working directory: ${options.promptCwd}`;
 	return prompt;
@@ -163,6 +167,8 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const tools = options.selectedTools || ["read", "bash", "edit", "write", "load_skill"];
 	const basePrompt = options.customPrompt || buildDefaultSystemPrompt(options, tools);
 	return finalizeSystemPrompt(basePrompt, {
+		includeGripDocumentation: !options.customPrompt,
+		subagentPrompt: options.subagentPrompt,
 		appendSystemPrompt: options.appendSystemPrompt,
 		promptCwd: options.cwd.replace(/\\/g, "/"),
 		date: getCurrentPromptDate(),

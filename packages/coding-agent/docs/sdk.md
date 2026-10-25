@@ -247,13 +247,13 @@ const pi = await GripAgent.create({
 await pi.createAgentSession();
 ```
 
-Built-in tool names include `read`, `bash`, `edit`, `write`, `websearch`, `session_search`, `session_entry_get`, `compress_context`, `grep`, `find`, `ls`, `subagent`, `subagent_runs`, and `create_subagent`. Subagent tools are inactive by default; set `enableSubagents: true` in settings to activate them. An explicit `tools` option selects any subset regardless of these defaults; `noTools: "all"` and `noTools: "builtin"` remain authoritative.
+Built-in tool names include `read`, `bash`, `edit`, `write`, `websearch`, `session_search`, `session_entry_get`, `compress_context`, `grep`, `find`, `ls`, and `subagent`. Subagent delegation is enabled by default for bounded jobs; set `enableSubagents: false` in settings to disable it. It inherits the parent model unless the host sets `GRIP_DEFAULT_SUBAGENT_MODEL=provider/model-id` or configures a named preset; the child cannot widen a parent tool allowlist. An explicit `tools` option selects any subset regardless of these defaults; `noTools: "all"` and `noTools: "builtin"` remain authoritative.
 
 ### Settings
 
 ```typescript
 const settingsManager = SettingsManager.inMemory({
-  enableSubagents: true,
+  enableSubagents: false, // Opt out of built-in delegation
   compaction: { enabled: false },
   retry: { enabled: true, maxRetries: 2 },
 });

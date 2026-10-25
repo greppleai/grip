@@ -361,9 +361,9 @@ describe("SettingsManager", () => {
 	});
 
 	describe("enableSubagents", () => {
-		it("defaults to false when omitted", () => {
+		it("defaults to true when omitted", () => {
 			const manager = SettingsManager.create(projectDir, agentDir);
-			expect(manager.getEnableSubagents()).toBe(false);
+			expect(manager.getEnableSubagents()).toBe(true);
 		});
 
 		it("reads explicit values from global and project settings", () => {

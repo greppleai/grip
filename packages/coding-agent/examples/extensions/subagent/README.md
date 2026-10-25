@@ -1,6 +1,8 @@
 # Subagent Example
 
-Delegate tasks to specialized subagents with isolated context windows.
+This is an **optional subprocess-based extension**, separate from Grip's built-in in-process `subagent` tool. Do not install both under the same tool name unless you intend to override the built-in tool. The extension's agent files, per-agent model settings, and workflow prompts do not configure the built-in tool; built-in subagents inherit the parent model or use `GRIP_DEFAULT_SUBAGENT_MODEL`.
+
+Delegate bounded tasks with a concrete deliverable to specialized subagents with isolated context windows.
 
 ## Features
 

@@ -154,8 +154,11 @@ import {
 import type { LoadSkillsResult } from "../../core/skills.ts";
 import { BUILTIN_SLASH_COMMANDS, HIDDEN_BUILTIN_SLASH_COMMAND_NAMES } from "../../core/slash-commands.ts";
 import { getSourceBackendIcon, type SourceInfo } from "../../core/source-info.ts";
+import { completeSubagentCommand, parseSubagentCommand, SUBAGENT_COMMAND_USAGE } from "../../core/subagent-command.ts";
+import { parseSystemPromptCommand, SYSTEM_PROMPT_COMMAND_USAGE } from "../../core/system-prompt-command.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 import type { ToolBackendInfo } from "../../core/tools/operations.ts";
+import { discoverAgentsWithOperations, discoverAvailableSubagents } from "../../core/tools/subagent-agents.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { parseWebsearchToolOptions, WEBSEARCH_AUTH_PROVIDER_IDS } from "../../core/tools/websearch.ts";
 import { getNewEntries, parseChangelog } from "../../utils/changelog.ts";
@@ -940,7 +943,36 @@ export class InteractiveMode {
 				}));
 			};
 		}
-
+		const subagentCommand = slashCommands.find((command) => command.name === "subagent")!;
+		subagentCommand.argumentHint = "list | model <get|set> --name <name> [--model <provider/model-id>]";
+		subagentCommand.getArgumentCompletions = async (prefix) => {
+			const operations = this.session.getToolOperations();
+			const names = prefix.includes("--name")
+				? (
+						await discoverAgentsWithOperations(operations.cwd ?? this.activeSession.getCwd(), "both", operations)
+					).agents.map((agent) => agent.name)
+				: [];
+			const models = this.session.modelRegistry.getAvailable().map((model) => `${model.provider}/${model.id}`);
+			return completeSubagentCommand(prefix, names, models);
+		};
+		const systemPromptCommand = slashCommands.find((command) => command.name === "system-prompt")!;
+		systemPromptCommand.argumentHint = "[--subagent <name> [--agent-scope user|project|both]]";
+		systemPromptCommand.getArgumentCompletions = async (prefix) => {
+			if (!prefix.includes(" ")) {
+				return "--subagent".startsWith(prefix) ? [{ value: "--subagent ", label: "--subagent" }] : [];
+			}
+			if (!prefix.startsWith("--subagent ")) return [];
+			const query = prefix.slice("--subagent ".length).replace(/^"/, "").toLowerCase();
+			const operations = this.session.getToolOperations();
+			const agents = await discoverAvailableSubagents(operations.cwd ?? this.activeSession.getCwd(), operations);
+			return agents
+				.filter((agent) => agent.name.toLowerCase().includes(query) && !agent.name.includes('"'))
+				.map((agent) => ({
+					value: `--subagent ${/\s/.test(agent.name) ? `"${agent.name}"` : agent.name}${agent.agentScope === "project" ? " --agent-scope project" : ""}`,
+					label: agent.name,
+					description: agent.source,
+				}));
+		};
 		const profileCommand = slashCommands.find((command) => command.name === "profile");
 		if (profileCommand) {
 			profileCommand.argumentHint = "use <name> | create <name>";
@@ -3378,6 +3410,60 @@ export class InteractiveMode {
 		};
 		return commands[text];
 	}
+	private async handleSubagentCommand(text: string): Promise<void> {
+		const parsed = parseSubagentCommand(text.slice("/subagent".length));
+		if (parsed.action === "invalid") {
+			this.showWarning(SUBAGENT_COMMAND_USAGE);
+			return;
+		}
+		const operations = this.session.getToolOperations();
+		const agents = (
+			await discoverAgentsWithOperations(operations.cwd ?? this.activeSession.getCwd(), "both", operations)
+		).agents;
+		const configured = this.settingsManager.getSubagentModels();
+		const defaultModel =
+			process.env.GRIP_DEFAULT_SUBAGENT_MODEL?.trim() ||
+			(this.session.model ? `${this.session.model.provider}/${this.session.model.id}` : "(no parent model)");
+		if (parsed.action === "list") {
+			this.showStatus(
+				`Subagents (project presets require approval when run):\n${
+					agents
+						.map((agent) => `${agent.name} (${agent.source}) — ${configured[agent.name] ?? defaultModel}`)
+						.join("\n") || "none"
+				}`,
+			);
+			return;
+		}
+		const agent = agents.find((entry) => entry.name === parsed.name);
+		if (!agent) {
+			this.showWarning(`Unknown subagent: ${parsed.name}. Use /subagent list to see available presets.`);
+			return;
+		}
+		if (parsed.action === "get") {
+			const model = configured[agent.name];
+			this.showStatus(
+				`${agent.name} (${agent.source}): ${model ?? defaultModel} (${model ? "configured" : "default"})`,
+			);
+			return;
+		}
+		const selected = this.session.modelRegistry
+			.getAvailable()
+			.find((model) => `${model.provider}/${model.id}`.toLowerCase() === parsed.model.toLowerCase());
+		if (!selected) {
+			this.showWarning(`Unavailable subagent model: ${parsed.model}. Choose an available provider/model-id.`);
+			return;
+		}
+		const loadError = this.settingsManager.getLoadError("global");
+		if (loadError) {
+			this.showError(`Cannot save subagent model: ${loadError.message}`);
+			return;
+		}
+		const reference = `${selected.provider}/${selected.id}`;
+		this.settingsManager.setSubagentModel(agent.name, reference);
+		await this.settingsManager.flush();
+		this.showStatus(`${agent.name} (${agent.source}) model set to ${reference}`);
+	}
+
 	private resolveWebsearchEditorCommand(text: string): EditorCommandAction | undefined {
 		if (!this.matchesEditorCommand(text, "/websearch")) return undefined;
 		return {
@@ -3391,9 +3477,52 @@ export class InteractiveMode {
 			},
 		};
 	}
+	private async handleSystemPromptCommand(text: string): Promise<void> {
+		const command = parseSystemPromptCommand(text.slice("/system-prompt".length));
+		if (command.action === "invalid") {
+			this.showWarning(SYSTEM_PROMPT_COMMAND_USAGE);
+			return;
+		}
+		let prompt: string;
+		let label = "System Prompt (current session)";
+		if (command.action === "main") {
+			prompt = this.session.systemPrompt;
+		} else {
+			try {
+				prompt = await this.runtimeHost.previewSubagentSystemPrompt(command.name, command.agentScope);
+			} catch (error) {
+				this.showError(error instanceof Error ? error.message : String(error));
+				return;
+			}
+			label = `System Prompt (subagent: ${command.name}; scope: ${command.agentScope}; preview only)`;
+		}
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new DynamicBorder());
+		this.chatContainer.addChild(new Text(theme.fg("accent", label), 1, 0));
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(prompt, 1, 0));
+		this.chatContainer.addChild(new DynamicBorder());
+		this.ui.requestRender();
+	}
 
 	private async handleBuiltInEditorCommand(text: string): Promise<boolean> {
 		const action =
+			(this.matchesEditorCommand(text, "/system-prompt")
+				? {
+						run: async () => {
+							this.editor.setText("");
+							await this.handleSystemPromptCommand(text);
+						},
+					}
+				: undefined) ??
+			(this.matchesEditorCommand(text, "/subagent")
+				? {
+						run: async () => {
+							this.editor.setText("");
+							await this.handleSubagentCommand(text);
+						},
+					}
+				: undefined) ??
 			this.resolveWebsearchEditorCommand(text) ??
 			this.resolveParameterizedEditorCommand(text) ??
 			this.resolveExactEditorCommand(text);

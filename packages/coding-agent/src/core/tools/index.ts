@@ -7,32 +7,13 @@ import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import type { ToolOperations } from "./operations.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
-import {
-	createCreateSubagentTool,
-	createCreateSubagentToolDefinition,
-	createSubagentRunsTool,
-	createSubagentRunsToolDefinition,
-	createSubagentTool,
-	createSubagentToolDefinition,
-	type SubagentToolOptions,
-} from "./subagent.ts";
+import { createSubagentTool, createSubagentToolDefinition, type SubagentToolOptions } from "./subagent.ts";
 import { createWebsearchTool, createWebsearchToolDefinition, type WebsearchToolOptions } from "./websearch.ts";
 import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } from "./write.ts";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName =
-	| "read"
-	| "bash"
-	| "edit"
-	| "write"
-	| "grep"
-	| "find"
-	| "ls"
-	| "subagent"
-	| "subagent_runs"
-	| "create_subagent"
-	| "websearch";
+export type ToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls" | "subagent" | "websearch";
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -42,8 +23,6 @@ export const allToolNames: Set<ToolName> = new Set([
 	"find",
 	"ls",
 	"subagent",
-	"subagent_runs",
-	"create_subagent",
 	"websearch",
 ]);
 
@@ -77,10 +56,6 @@ export function createToolDefinition(toolName: ToolName, operations: ToolOperati
 			return createLsToolDefinition(operations, options?.ls);
 		case "subagent":
 			return createSubagentToolDefinition(options?.subagent);
-		case "subagent_runs":
-			return createSubagentRunsToolDefinition(options?.subagent?.runRegistry);
-		case "create_subagent":
-			return createCreateSubagentToolDefinition(options?.subagent?.configRegistry);
 		case "websearch":
 			return createWebsearchToolDefinition(options?.websearch);
 		default:
@@ -106,10 +81,6 @@ export function createTool(toolName: ToolName, operations: ToolOperations, optio
 			return createLsTool(operations, options?.ls);
 		case "subagent":
 			return createSubagentTool(options?.subagent);
-		case "subagent_runs":
-			return createSubagentRunsTool(options?.subagent?.runRegistry);
-		case "create_subagent":
-			return createCreateSubagentTool(options?.subagent?.configRegistry);
 		case "websearch":
 			return createWebsearchTool(options?.websearch);
 		default:
@@ -148,8 +119,6 @@ export function createAllToolDefinitions(
 		find: createFindToolDefinition(operations, options?.find),
 		ls: createLsToolDefinition(operations, options?.ls),
 		subagent: createSubagentToolDefinition(options?.subagent),
-		subagent_runs: createSubagentRunsToolDefinition(options?.subagent?.runRegistry),
-		create_subagent: createCreateSubagentToolDefinition(options?.subagent?.configRegistry),
 		websearch: createWebsearchToolDefinition(options?.websearch),
 	};
 }
@@ -182,8 +151,6 @@ export function createAllTools(operations: ToolOperations, options?: ToolsOption
 		find: createFindTool(operations, options?.find),
 		ls: createLsTool(operations, options?.ls),
 		subagent: createSubagentTool(options?.subagent),
-		subagent_runs: createSubagentRunsTool(options?.subagent?.runRegistry),
-		create_subagent: createCreateSubagentTool(options?.subagent?.configRegistry),
 		websearch: createWebsearchTool(options?.websearch),
 	};
 }

@@ -11,7 +11,7 @@
 
 import * as os from "node:os";
 import type { AgentTool, AgentToolResult } from "@greppleai/grip-agent-core";
-import type { Api, AssistantMessage, Message, Model, TextContent } from "@greppleai/grip-ai";
+import type { Api, AssistantMessage, Message, Model } from "@greppleai/grip-ai";
 import { StringEnum } from "@greppleai/grip-ai";
 import { Container, Markdown, Spacer, Text } from "@greppleai/grip-tui";
 import { type Static, Type } from "typebox";
@@ -61,33 +61,6 @@ function formatUsageStats(usage: SubagentUsageDisplayMetrics, model?: string): s
 	}
 	if (model) parts.push(model);
 	return parts.join(" ");
-}
-
-export function formatSubagentModelCatalog(
-	currentModel: Model<Api> | undefined,
-	availableModels: Model<Api>[],
-): string | undefined {
-	if (!currentModel) return undefined;
-	const providerModels = availableModels.filter((model) => model.provider === currentModel.provider);
-	if (providerModels.length === 0) return undefined;
-
-	const lines = [
-		`Authenticated subagent models for the current ${currentModel.provider} provider:`,
-		"Omit model to inherit the current model.",
-	];
-	for (const model of providerModels) {
-		const capabilities = [
-			model.reasoning ? "reasoning" : "non-reasoning",
-			`context ${formatTokens(model.contextWindow)}`,
-			`max output ${formatTokens(model.maxTokens)}`,
-			`input $${model.cost.input}/M`,
-			`output $${model.cost.output}/M`,
-		];
-		if (model.cost.cacheRead > 0) capabilities.push(`cache read $${model.cost.cacheRead}/M`);
-		if (model.cost.cacheWrite > 0) capabilities.push(`cache write $${model.cost.cacheWrite}/M`);
-		lines.push(`- ${model.provider}/${model.id}: ${capabilities.join(", ")}`);
-	}
-	return lines.join("\n");
 }
 
 type SubagentToolThemeForeground = (color: ThemeColor, text: string) => string;
@@ -180,14 +153,11 @@ export interface SubagentUsageStats {
 }
 
 export type SubagentStatus = "queued" | "running" | "completed" | "failed";
-export type SubagentRunStatus = Exclude<SubagentStatus, "queued">;
 export type SubagentMode = "single" | "parallel" | "chain";
 export type SubagentAgentSource = AgentSource | "ad-hoc" | "unknown";
 
 export interface SubagentResult {
 	status: SubagentStatus;
-	runId?: string;
-	sessionReference?: string;
 	agent: string;
 	agentSource: SubagentAgentSource;
 	task: string;
@@ -206,51 +176,6 @@ export interface SubagentDetails {
 	agentScope: AgentScope;
 	projectAgentsDir: string | null;
 	results: SubagentResult[];
-}
-
-export interface SubagentRunInfo {
-	runId: string;
-	sessionReference?: string;
-	status: SubagentRunStatus;
-	agent: string;
-	task: string;
-	cwd: string;
-	model?: string;
-	createdAt: string;
-	updatedAt: string;
-	lastOutput?: string;
-}
-
-export type SubagentModelHint =
-	| "cheapest"
-	| "fastest"
-	| "strongest"
-	| "best-reasoning"
-	| "large-context"
-	| "same-as-parent"
-	| "balanced";
-
-export interface SessionSubagentConfig {
-	name: string;
-	description: string;
-	systemPrompt: string;
-	tools?: string[];
-	model?: string;
-	modelHint?: SubagentModelHint;
-	skills?: string[];
-	cwd?: string;
-	createdAt: string;
-	updatedAt: string;
-}
-
-export interface SubagentRunRegistry {
-	list(): SubagentRunInfo[];
-}
-
-export interface SubagentConfigRegistry {
-	list(): SessionSubagentConfig[];
-	upsert(config: SessionSubagentConfig): void;
-	get(name: string): SessionSubagentConfig | undefined;
 }
 
 interface PresentationSegment {
@@ -448,7 +373,8 @@ export interface SubagentRunRequest {
 	model?: string;
 	tools?: string[];
 	skills?: string[];
-	continueSession?: string;
+	/** Include load_skill with preset/default tools; explicit per-task tool lists remain authoritative. */
+	includeDefaultSkillTool?: boolean;
 	signal?: AbortSignal;
 	onMessage: (message: Message) => void;
 }
@@ -456,8 +382,6 @@ export interface SubagentRunRequest {
 export interface SubagentRunOutcome {
 	exitCode: number;
 	stderr: string;
-	runId?: string;
-	sessionReference?: string;
 }
 
 export type SubagentRunner = (request: SubagentRunRequest) => Promise<SubagentRunOutcome>;
@@ -467,46 +391,13 @@ interface SubagentTaskSpec {
 	task: string;
 	responseFormat?: string;
 	systemPrompt?: string;
-	model?: string;
-	modelHint?: SubagentModelHint;
 	tools?: string[];
 	skills?: string[];
 	cwd?: string;
 	toolOperations?: ToolOperations;
-	continueSession?: string;
-}
-interface SubagentModelSelection {
-	spec: SubagentTaskSpec;
-	preset: AgentConfig | undefined;
-	inheritedModel: string | undefined;
-	agentName: string;
-	result: SubagentResult;
-	resolveModelHintOption: ((hint: SubagentModelHint) => string | undefined) | undefined;
-}
-
-function selectSubagentModel(selection: SubagentModelSelection): string | undefined {
-	const { spec, preset, inheritedModel, agentName, result, resolveModelHintOption } = selection;
-	return (
-		spec.model ??
-		(spec.modelHint
-			? resolveModelHint(spec.modelHint, resolveModelHintOption, `task "${agentName}"`, result)
-			: undefined) ??
-		preset?.model ??
-		(preset?.modelHint
-			? resolveModelHint(
-					preset.modelHint as SubagentModelHint,
-					resolveModelHintOption,
-					`agent "${agentName}"`,
-					result,
-				)
-			: undefined) ??
-		inheritedModel
-	);
 }
 
 function finalizeSubagentRun(result: SubagentResult, outcome: SubagentRunOutcome, aborted: boolean): SubagentResult {
-	result.runId = outcome.runId;
-	result.sessionReference = outcome.sessionReference;
 	result.exitCode = outcome.exitCode;
 	result.stderr = outcome.stderr;
 	if (aborted) {
@@ -543,12 +434,12 @@ async function runSingleAgent(
 	agents: AgentConfig[],
 	spec: SubagentTaskSpec,
 	inheritedModel: string | undefined,
+	getConfiguredModel: ((name: string) => string | undefined) | undefined,
 	runner: SubagentRunner,
 	step: number | undefined,
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SubagentResult[]) => SubagentDetails,
-	resolveModelHintOption: ((hint: SubagentModelHint) => string | undefined) | undefined,
 ): Promise<SubagentResult> {
 	const preset = spec.agent ? agents.find((agent) => agent.name === spec.agent) : undefined;
 	const agentName = spec.agent ?? "ad-hoc";
@@ -580,20 +471,12 @@ async function runSingleAgent(
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
 		step,
 	};
-	const effectiveModel = selectSubagentModel({
-		spec,
-		preset,
-		inheritedModel,
-		agentName,
-		result: currentResult,
-		resolveModelHintOption,
-	});
 	const effectiveTools = spec.tools ?? preset?.tools;
 	const effectiveSkills = spec.skills ?? preset?.skills;
 	const effectiveCwd = spec.cwd ?? preset?.cwd ?? defaultCwd;
 	const effectiveSystemPrompt = spec.systemPrompt ?? preset?.systemPrompt ?? GENERIC_SYSTEM_PROMPT;
-	currentResult.model = effectiveModel;
-	if (currentResult.status === "failed") return currentResult;
+	const selectedModel = (preset ? getConfiguredModel?.(agentName) : undefined) ?? inheritedModel;
+	currentResult.model = selectedModel;
 	if (signal?.aborted) {
 		currentResult.status = "failed";
 		currentResult.exitCode = 1;
@@ -628,302 +511,54 @@ async function runSingleAgent(
 		agent: agentName,
 		agentSource: preset?.source ?? "ad-hoc",
 		systemPrompt: effectiveSystemPrompt,
-		model: effectiveModel,
+		model: selectedModel,
 		tools: effectiveTools,
 		skills: effectiveSkills,
-		continueSession: spec.continueSession,
+		includeDefaultSkillTool: spec.tools === undefined,
 		signal,
 		onMessage,
 	});
 	return finalizeSubagentRun(currentResult, outcome, signal?.aborted === true);
 }
 
-const MODEL_DESCRIPTION = "Model for this task. Omit to inherit the parent model";
-const STEP_MODEL_DESCRIPTION = "Model for this step. Omit to inherit the parent model";
-const MODEL_HINT_VALUES = [
-	"cheapest",
-	"fastest",
-	"strongest",
-	"best-reasoning",
-	"large-context",
-	"same-as-parent",
-	"balanced",
-] as const;
-const MODEL_HINT_DESCRIPTION =
-	"Advisory model selection hint. Exact model overrides this. Supported: cheapest, fastest, strongest, best-reasoning, large-context, same-as-parent, balanced.";
-
-function appendModelCatalog(description: string, modelCatalog?: string): string {
-	return modelCatalog ? `${description}.\n\n${modelCatalog}` : description;
-}
-
-function createModelHintSchema() {
-	return StringEnum(MODEL_HINT_VALUES, { description: MODEL_HINT_DESCRIPTION });
-}
-
-function mergeSessionAgents(agents: AgentConfig[], configs: SessionSubagentConfig[]): AgentConfig[] {
-	const agentMap = new Map<string, AgentConfig>();
-	for (const agent of agents) agentMap.set(agent.name, agent);
-	for (const config of configs) {
-		agentMap.set(config.name, {
-			name: config.name,
-			description: config.description,
-			systemPrompt: config.systemPrompt,
-			tools: config.tools,
-			model: config.model,
-			modelHint: config.modelHint,
-			skills: config.skills,
-			cwd: config.cwd,
-			source: "session",
-			filePath: `<session-subagent:${config.name}>`,
-		});
-	}
-	return Array.from(agentMap.values());
-}
-
-function resolveModelHint(
-	hint: SubagentModelHint | undefined,
-	resolveModelHintOption: ((hint: SubagentModelHint) => string | undefined) | undefined,
-	context: string,
-	result: SubagentResult,
-): string | undefined {
-	if (!hint) return undefined;
-	const resolved = resolveModelHintOption?.(hint);
-	if (!resolved) {
-		result.status = "failed";
-		result.exitCode = 1;
-		result.stderr = `Could not resolve modelHint "${hint}" for ${context}.`;
-		result.errorMessage = result.stderr;
-		result.stopReason = "error";
-		return undefined;
-	}
-	return resolved;
-}
-
-function createSubagentParamsSchema(modelCatalog?: string) {
-	const TaskItem = Type.Object({
-		agent: Type.Optional(Type.String({ description: "Optional named agent preset" })),
-		task: Type.String({ description: "Task to delegate" }),
-		responseFormat: Type.Optional(Type.String({ description: "Requested response content and structure" })),
-		systemPrompt: Type.Optional(
-			Type.String({ description: "Persona/instructions overriding the preset system prompt" }),
-		),
-		model: Type.Optional(Type.String({ description: appendModelCatalog(MODEL_DESCRIPTION, modelCatalog) })),
-		modelHint: Type.Optional(createModelHintSchema()),
-		tools: Type.Optional(Type.Array(Type.String(), { description: "Tool allowlist overriding preset defaults" })),
-		skills: Type.Optional(
-			Type.Array(Type.String(), { description: "Skills to preload before the first subagent turn" }),
-		),
-		cwd: Type.Optional(Type.String({ description: "Working directory for the agent session" })),
-	});
-
-	const ChainItem = Type.Object({
-		agent: Type.Optional(Type.String({ description: "Optional named agent preset" })),
-		task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
-		responseFormat: Type.Optional(Type.String({ description: "Requested response content and structure" })),
-		systemPrompt: Type.Optional(
-			Type.String({ description: "Persona/instructions overriding the preset system prompt" }),
-		),
-		model: Type.Optional(Type.String({ description: appendModelCatalog(STEP_MODEL_DESCRIPTION, modelCatalog) })),
-		modelHint: Type.Optional(createModelHintSchema()),
-		tools: Type.Optional(Type.Array(Type.String(), { description: "Tool allowlist overriding preset defaults" })),
-		skills: Type.Optional(
-			Type.Array(Type.String(), { description: "Skills to preload before the first subagent turn" }),
-		),
-		cwd: Type.Optional(Type.String({ description: "Working directory for the agent session" })),
-	});
-
-	const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
-		description: 'Which agent directories to use. Default: "user". Use "both" to include project-local agents.',
-		default: "user",
-	});
-
-	return Type.Object({
-		agent: Type.Optional(Type.String({ description: "Optional named agent preset (single mode)" })),
-		task: Type.Optional(
-			Type.String({ description: "Task to delegate (single mode) or follow-up prompt when continuing a subagent" }),
-		),
-		responseFormat: Type.Optional(Type.String({ description: "Requested response content and structure" })),
-		systemPrompt: Type.Optional(
-			Type.String({ description: "Persona/instructions overriding the preset system prompt" }),
-		),
-		model: Type.Optional(Type.String({ description: appendModelCatalog(MODEL_DESCRIPTION, modelCatalog) })),
-		modelHint: Type.Optional(createModelHintSchema()),
-		tools: Type.Optional(Type.Array(Type.String(), { description: "Tool allowlist overriding preset defaults" })),
-		skills: Type.Optional(
-			Type.Array(Type.String(), { description: "Skills to preload before the first subagent turn" }),
-		),
-		tasks: Type.Optional(Type.Array(TaskItem, { description: "Tasks for parallel execution" })),
-		chain: Type.Optional(
-			Type.Array(ChainItem, { description: "Tasks for sequential execution", maxItems: MAX_CHAIN_STEPS }),
-		),
-		agentScope: Type.Optional(AgentScopeSchema),
-		continueSession: Type.Optional(Type.String({ description: "Run id of a previous subagent run to continue" })),
-		cwd: Type.Optional(Type.String({ description: "Working directory for the subagent session (single mode)" })),
-	});
-}
-
-export const subagentParamsSchema = createSubagentParamsSchema();
+const TaskItem = Type.Object({
+	agent: Type.Optional(Type.String({ description: "Optional named agent preset" })),
+	task: Type.String({ description: "A bounded job with a concrete deliverable" }),
+	responseFormat: Type.Optional(Type.String({ description: "Requested response content and structure" })),
+	systemPrompt: Type.Optional(Type.String({ description: "Instructions overriding the preset system prompt" })),
+	tools: Type.Optional(Type.Array(Type.String(), { description: "Tool allowlist overriding preset defaults" })),
+	skills: Type.Optional(
+		Type.Array(Type.String(), {
+			description:
+				"Skills to force-preload from the parent catalog before the first subagent turn; unknown names fail the job",
+		}),
+	),
+	cwd: Type.Optional(Type.String({ description: "Working directory for the agent session" })),
+});
+const ChainItem = Type.Object({
+	...TaskItem.properties,
+	task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
+});
+export const subagentParamsSchema = Type.Object({
+	...TaskItem.properties,
+	task: Type.Optional(Type.String({ description: "A bounded job to delegate (single mode)" })),
+	tasks: Type.Optional(Type.Array(TaskItem, { description: "Independent jobs for parallel execution" })),
+	chain: Type.Optional(Type.Array(ChainItem, { description: "Sequential jobs", maxItems: MAX_CHAIN_STEPS })),
+	agentScope: Type.Optional(
+		StringEnum(["user", "project", "both"] as const, {
+			description: 'Agent definitions to use. Default: "user". Project presets require approval.',
+		}),
+	),
+});
 
 export type SubagentToolInput = Static<typeof subagentParamsSchema>;
 
 export interface SubagentToolOptions {
 	runner?: SubagentRunner;
-	modelCatalog?: string;
-	resolveModelHint?: (hint: SubagentModelHint) => string | undefined;
 	/** Host-controlled trust grant for project-local agent presets. */
 	trustProjectAgents?: boolean;
-	runRegistry?: SubagentRunRegistry;
-	configRegistry?: SubagentConfigRegistry;
-}
-const subagentRunsParamsSchema = Type.Object({
-	status: Type.Optional(
-		StringEnum(["running", "completed", "failed"] as const, { description: "Filter runs by status" }),
-	),
-});
-
-export type SubagentRunsToolInput = Static<typeof subagentRunsParamsSchema>;
-
-function truncateRunPreview(text: string | undefined): string {
-	if (!text) return "";
-	const trimmed = text.trim();
-	return trimmed.length > 240 ? `${trimmed.slice(0, 240)}...` : trimmed;
-}
-
-export interface SubagentRunsDetails {
-	runs: SubagentRunInfo[];
-}
-
-export function createSubagentRunsToolDefinition(
-	registry?: SubagentRunRegistry,
-): ToolDefinition<typeof subagentRunsParamsSchema, SubagentRunsDetails> {
-	return {
-		name: "subagent_runs",
-		label: "Subagent Runs",
-		description: "List subagent runs in the current session so one can be selected and continued by run id.",
-		promptSnippet: "List subagent runs from the current session for continuation",
-		parameters: subagentRunsParamsSchema,
-		async execute(_toolCallId, params) {
-			if (!registry) {
-				return {
-					content: [{ type: "text", text: "Subagent run registry is not configured for this session." }],
-					details: { runs: [] },
-					isError: true,
-				};
-			}
-			const runs = registry.list().filter((run) => !params.status || run.status === params.status);
-			if (runs.length === 0) {
-				return { content: [{ type: "text", text: "No subagent runs found." }], details: { runs } };
-			}
-			const text = runs
-				.map((run, index) => {
-					const lines = [
-						`${index + 1}. ${run.runId} [${run.status}] ${run.agent}${run.model ? ` (${run.model})` : ""}`,
-						`   Task: ${run.task.replace(/\s+/g, " ")}`,
-						`   CWD: ${run.cwd}`,
-					];
-					if (run.sessionReference) lines.push(`   Session: ${run.sessionReference}`);
-					const preview = truncateRunPreview(run.lastOutput);
-					if (preview) lines.push(`   Output: ${preview}`);
-					return lines.join("\n");
-				})
-				.join("\n\n");
-			return { content: [{ type: "text", text }], details: { runs } };
-		},
-		renderCall(_args, theme) {
-			return new Text(theme.fg("toolTitle", theme.bold("subagent_runs")), 0, 0);
-		},
-		renderResult(result, _options, theme) {
-			const text = result.content
-				.filter((part): part is TextContent => part.type === "text")
-				.map((part) => part.text)
-				.join("\n")
-				.trim();
-			return new Text(theme.fg("toolOutput", text), 0, 0);
-		},
-	};
-}
-const createSubagentConfigParamsSchema = Type.Object({
-	name: Type.String({ description: "Session-scoped subagent preset name" }),
-	description: Type.String({ description: "Short description shown when this preset is available" }),
-	systemPrompt: Type.String({ description: "System prompt/persona for this subagent preset" }),
-	model: Type.Optional(Type.String({ description: "Exact model for this preset. Overrides modelHint." })),
-	modelHint: Type.Optional(createModelHintSchema()),
-	tools: Type.Optional(Type.Array(Type.String(), { description: "Default tool allowlist for this preset" })),
-	skills: Type.Optional(
-		Type.Array(Type.String(), { description: "Skill names to preload before the first subagent turn" }),
-	),
-	cwd: Type.Optional(Type.String({ description: "Default working directory for this preset" })),
-});
-
-export type CreateSubagentToolInput = Static<typeof createSubagentConfigParamsSchema>;
-
-export interface CreateSubagentDetails {
-	config?: SessionSubagentConfig;
-	configs: SessionSubagentConfig[];
-}
-
-export function createCreateSubagentToolDefinition(
-	registry?: SubagentConfigRegistry,
-): ToolDefinition<typeof createSubagentConfigParamsSchema, CreateSubagentDetails> {
-	return {
-		name: "create_subagent",
-		label: "Create Subagent",
-		description: "Create or replace a session-scoped named subagent preset for later subagent calls.",
-		promptSnippet: "Create session-scoped subagent presets with tools, skills, cwd, and model hints",
-		promptGuidelines: [
-			"Use create_subagent when a reusable temporary role would reduce repeated subagent configuration.",
-			"Prefer modelHint for cost/performance intent unless an exact model is required.",
-		],
-		parameters: createSubagentConfigParamsSchema,
-		async execute(_toolCallId, params) {
-			if (!registry) {
-				return {
-					content: [{ type: "text", text: "Subagent config registry is not configured for this session." }],
-					details: { configs: [] },
-					isError: true,
-				};
-			}
-			const trimmedName = params.name.trim();
-			if (!/^[A-Za-z0-9_-]{1,64}$/.test(trimmedName)) {
-				return {
-					content: [
-						{ type: "text", text: "Invalid subagent name. Use 1-64 letters, numbers, underscores, or hyphens." },
-					],
-					details: { configs: registry.list() },
-					isError: true,
-				};
-			}
-			const now = new Date().toISOString();
-			const existing = registry.get(trimmedName);
-			const config: SessionSubagentConfig = {
-				name: trimmedName,
-				description: params.description.trim(),
-				systemPrompt: params.systemPrompt,
-				model: params.model?.trim() || undefined,
-				modelHint: params.modelHint,
-				tools: params.tools?.map((tool) => tool.trim()).filter(Boolean),
-				skills: params.skills?.map((skill) => skill.trim()).filter(Boolean),
-				cwd: params.cwd?.trim() || undefined,
-				createdAt: existing?.createdAt ?? now,
-				updatedAt: now,
-			};
-			registry.upsert(config);
-			return {
-				content: [{ type: "text", text: `Created subagent preset "${config.name}".` }],
-				details: { config, configs: registry.list() },
-			};
-		},
-		renderCall(args, theme) {
-			return new Text(theme.fg("toolTitle", theme.bold("create_subagent ")) + theme.fg("accent", args.name), 0, 0);
-		},
-		renderResult(result, _options, theme) {
-			const text = result.content
-				.filter((part): part is TextContent => part.type === "text")
-				.map((part) => part.text)
-				.join("\n");
-			return new Text(theme.fg("toolOutput", text), 0, 0);
-		},
-	};
+	/** Host-controlled model override for a named preset; not exposed to the delegated model. */
+	getConfiguredModel?: (name: string) => string | undefined;
 }
 
 interface SubagentModeSelection {
@@ -942,11 +577,11 @@ interface SubagentExecutionEnvironment {
 	workspaceCwd: string;
 	workspaceOperations: ToolOperations;
 	inheritedModel: string | undefined;
+	getConfiguredModel: ((name: string) => string | undefined) | undefined;
 	runner: SubagentRunner;
 	signal: AbortSignal | undefined;
 	onUpdate: OnUpdateCallback | undefined;
 	makeDetails: SubagentDetailsFactory;
-	resolveModelHintOption: ((hint: SubagentModelHint) => string | undefined) | undefined;
 }
 
 interface SubagentToolExecutionResult extends AgentToolResult<SubagentDetails> {
@@ -974,21 +609,7 @@ function createSubagentDetailsFactory(agentScope: AgentScope, projectAgentsDir: 
 	return (mode) => (results) => ({ mode, agentScope, projectAgentsDir, results });
 }
 
-function hasContinuedSessionOverrides(params: SubagentToolInput): boolean {
-	return (
-		params.agent !== undefined ||
-		params.systemPrompt !== undefined ||
-		params.model !== undefined ||
-		params.modelHint !== undefined ||
-		params.tools !== undefined ||
-		params.skills !== undefined ||
-		params.cwd !== undefined ||
-		params.agentScope !== undefined
-	);
-}
-
 function validateSubagentRequest(
-	params: SubagentToolInput,
 	selection: SubagentModeSelection,
 	agents: AgentConfig[],
 	makeDetails: SubagentDetailsFactory,
@@ -998,24 +619,6 @@ function validateSubagentRequest(
 		return {
 			content: [
 				{ type: "text", text: `Invalid parameters. Provide exactly one mode.\nAvailable agents: ${available}` },
-			],
-			details: makeDetails("single")([]),
-		};
-	}
-	if (params.continueSession && !selection.hasSingle) {
-		return {
-			content: [{ type: "text", text: "Invalid parameters. continueSession requires a single follow-up task." }],
-			details: makeDetails(selection.mode)([]),
-			isError: true,
-		};
-	}
-	if (params.continueSession && hasContinuedSessionOverrides(params)) {
-		return {
-			content: [
-				{
-					type: "text",
-					text: "Invalid parameters. A continued subagent may only specify task and responseFormat.",
-				},
 			],
 			details: makeDetails("single")([]),
 			isError: true,
@@ -1119,12 +722,12 @@ async function executeSubagentChain(
 				toolOperations: environment.workspaceOperations,
 			},
 			environment.inheritedModel,
+			environment.getConfiguredModel,
 			environment.runner,
 			index + 1,
 			environment.signal,
 			createChainUpdate(environment.onUpdate, results, environment.makeDetails),
 			environment.makeDetails("chain"),
-			environment.resolveModelHintOption,
 		);
 		results.push(result);
 		if (isFailedResult(result)) {
@@ -1147,11 +750,7 @@ async function executeSubagentChain(
 	};
 }
 
-function createQueuedSubagentResult(
-	task: SubagentTaskSpec,
-	agents: AgentConfig[],
-	inheritedModel: string | undefined,
-): SubagentResult {
+function createQueuedSubagentResult(task: SubagentTaskSpec, inheritedModel: string | undefined): SubagentResult {
 	return {
 		status: "queued",
 		agent: task.agent ?? "ad-hoc",
@@ -1162,11 +761,7 @@ function createQueuedSubagentResult(
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-		model:
-			task.model ??
-			(task.modelHint ? `hint:${task.modelHint}` : undefined) ??
-			agents.find((agent) => agent.name === task.agent)?.model ??
-			inheritedModel,
+		model: inheritedModel,
 	};
 }
 
@@ -1204,7 +799,12 @@ async function executeParallelSubagents(
 		};
 	}
 	const currentResults = tasks.map((task) =>
-		createQueuedSubagentResult(task, environment.agents, environment.inheritedModel),
+		createQueuedSubagentResult(
+			task,
+			task.agent
+				? (environment.getConfiguredModel?.(task.agent) ?? environment.inheritedModel)
+				: environment.inheritedModel,
+		),
 	);
 	const results = await mapWithConcurrencyLimit(tasks, MAX_CONCURRENCY, async (task, index) => {
 		const result = await runSingleAgent(
@@ -1212,6 +812,7 @@ async function executeParallelSubagents(
 			environment.agents,
 			{ ...task, toolOperations: environment.workspaceOperations },
 			environment.inheritedModel,
+			environment.getConfiguredModel,
 			environment.runner,
 			undefined,
 			environment.signal,
@@ -1222,7 +823,6 @@ async function executeParallelSubagents(
 				emitParallelSubagentUpdate(environment.onUpdate, currentResults, environment.makeDetails);
 			},
 			environment.makeDetails("parallel"),
-			environment.resolveModelHintOption,
 		);
 		currentResults[index] = result;
 		emitParallelSubagentUpdate(environment.onUpdate, currentResults, environment.makeDetails);
@@ -1253,21 +853,18 @@ async function executeSingleSubagent(
 			task: params.task ?? "",
 			responseFormat: params.responseFormat,
 			systemPrompt: params.systemPrompt,
-			model: params.model,
-			modelHint: params.modelHint,
 			tools: params.tools,
 			skills: params.skills,
 			cwd: params.cwd,
 			toolOperations: environment.workspaceOperations,
-			continueSession: params.continueSession,
 		},
 		environment.inheritedModel,
+		environment.getConfiguredModel,
 		environment.runner,
 		undefined,
 		environment.signal,
 		environment.onUpdate,
 		environment.makeDetails("single"),
-		environment.resolveModelHintOption,
 	);
 	if (isFailedResult(result)) {
 		return {
@@ -1311,7 +908,6 @@ function renderSubagentChainCall(args: SubagentToolInput, scope: AgentScope, the
 			theme.fg("muted", `${index + 1}.`) +
 			" " +
 			theme.fg("accent", step.agent ?? "ad-hoc") +
-			theme.fg("muted", ` [${step.model ?? "parent model"}]`) +
 			theme.fg("dim", ` ${preview}`);
 	}
 	if (chain.length > 3) text += `\n  ${theme.fg("muted", `... +${chain.length - 3} more`)}`;
@@ -1326,7 +922,7 @@ function renderParallelSubagentCall(args: SubagentToolInput, scope: AgentScope, 
 		theme.fg("muted", ` [${scope}]`);
 	for (const task of tasks.slice(0, 3)) {
 		const preview = truncateSubagentCallTask(task.task, 40);
-		text += `\n  ${theme.fg("accent", task.agent ?? "ad-hoc")}${theme.fg("muted", ` [${task.model ?? "parent model"}]`)}${theme.fg("dim", ` ${preview}`)}`;
+		text += `\n  ${theme.fg("accent", task.agent ?? "ad-hoc")}${theme.fg("dim", ` ${preview}`)}`;
 	}
 	if (tasks.length > 3) text += `\n  ${theme.fg("muted", `... +${tasks.length - 3} more`)}`;
 	return new Text(text, 0, 0);
@@ -1336,9 +932,7 @@ function renderSingleSubagentCall(args: SubagentToolInput, scope: AgentScope, th
 	const agentName = args.agent || "ad-hoc";
 	const preview = args.task ? truncateSubagentCallTask(args.task, 60) : "...";
 	let text =
-		theme.fg("toolTitle", theme.bold("subagent ")) +
-		theme.fg("accent", agentName) +
-		theme.fg("muted", ` [${scope}] [${args.model ?? "parent model"}]`);
+		theme.fg("toolTitle", theme.bold("subagent ")) + theme.fg("accent", agentName) + theme.fg("muted", ` [${scope}]`);
 	text += `\n  ${theme.fg("dim", preview)}`;
 	return new Text(text, 0, 0);
 }
@@ -1647,23 +1241,17 @@ export function createSubagentToolDefinition(
 	options: SubagentToolOptions = {},
 ): ToolDefinition<typeof subagentParamsSchema, SubagentDetails> {
 	const runner = options.runner;
-	const parameters = options.modelCatalog ? createSubagentParamsSchema(options.modelCatalog) : subagentParamsSchema;
 	return {
 		name: "subagent",
 		label: "Subagent",
 		description: [
-			"Delegate tasks to isolated subagent sessions with optional named presets.",
-			"Modes: single (task), parallel (tasks array), chain (sequential with {previous} placeholder).",
-			"Each task can specify responseFormat, systemPrompt, model, tools, cwd, and an optional agent preset.",
-			"Omitted models inherit the parent model. Bundled presets: explore, worker, reviewer.",
-			'Default agent scope is "user"; project-local presets require host approval or trustProjectAgents in the host configuration.',
+			"Delegate a bounded, clearly specified job to an isolated subagent; you remain responsible for the final answer.",
+			"Select a discovered preset by name or provide ad-hoc instructions with systemPrompt.",
+			"Use a task for one job, tasks for independent parallel jobs, or chain for sequential jobs with {previous} handoff. Use skills to force-preload instructions; the child may load other visible skills on demand when load_skill is permitted.",
+			"Subagents inherit the parent model unless GRIP_DEFAULT_SUBAGENT_MODEL is set by the host.",
 		].join(" "),
-		promptSnippet: "Delegate tasks to specialized agents in isolated sessions",
-		promptGuidelines: [
-			"Use subagent for focused parallel investigation or when a task benefits from an isolated context window.",
-			"Do not delegate trivial work that is faster to perform directly.",
-		],
-		parameters,
+		promptSnippet: "Offload a bounded job to an isolated subagent",
+		parameters: subagentParamsSchema,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const selection = selectSubagentMode(params);
@@ -1686,9 +1274,9 @@ export function createSubagentToolDefinition(
 			}
 			const workspaceCwd = workspaceOperations.cwd ?? ctx.cwd;
 			const discovery = await discoverAgentsWithOperations(workspaceCwd, agentScope, workspaceOperations);
-			const agents = mergeSessionAgents(discovery.agents, options.configRegistry?.list() ?? []);
+			const agents = discovery.agents;
 			const makeDetails = createSubagentDetailsFactory(agentScope, discovery.projectAgentsDir);
-			const validationError = validateSubagentRequest(params, selection, agents, makeDetails);
+			const validationError = validateSubagentRequest(selection, agents, makeDetails);
 			if (validationError) return validationError;
 			if (!runner) {
 				return {
@@ -1712,12 +1300,12 @@ export function createSubagentToolDefinition(
 				agents,
 				workspaceCwd,
 				workspaceOperations,
-				inheritedModel: inheritedSubagentModelName(ctx.model),
+				inheritedModel: process.env.GRIP_DEFAULT_SUBAGENT_MODEL?.trim() || inheritedSubagentModelName(ctx.model),
+				getConfiguredModel: options.getConfiguredModel,
 				runner,
 				signal,
 				onUpdate,
 				makeDetails,
-				resolveModelHintOption: options.resolveModelHint,
 			});
 		},
 
@@ -1733,18 +1321,6 @@ export function createSubagentToolDefinition(
 		},
 	};
 }
-export function createSubagentRunsTool(
-	registry?: SubagentRunRegistry,
-): AgentTool<typeof subagentRunsParamsSchema, SubagentRunsDetails> {
-	return wrapToolDefinition(createSubagentRunsToolDefinition(registry));
-}
-
-export function createCreateSubagentTool(
-	registry?: SubagentConfigRegistry,
-): AgentTool<typeof createSubagentConfigParamsSchema, CreateSubagentDetails> {
-	return wrapToolDefinition(createCreateSubagentToolDefinition(registry));
-}
-
 export function createSubagentTool(
 	options?: SubagentToolOptions,
 ): AgentTool<typeof subagentParamsSchema, SubagentDetails> {

@@ -63,14 +63,13 @@ import {
 	type ToolBackendInfo,
 	type ToolOperations,
 } from "./tools/operations.ts";
-import type {
-	SubagentConfigRegistry,
-	SubagentRunInfo,
-	SubagentRunner,
-	SubagentRunOutcome,
-	SubagentRunRegistry,
-	SubagentRunRequest,
-} from "./tools/subagent.ts";
+import type { SubagentRunner, SubagentRunOutcome, SubagentRunRequest } from "./tools/subagent.ts";
+import {
+	type AgentScope,
+	type AvailableSubagent,
+	discoverAgentsWithOperations,
+	discoverAvailableSubagents,
+} from "./tools/subagent-agents.ts";
 
 export type GripAgentDiagnosticType = "info" | "warning" | "error";
 export type GripAgentToolExclusionMode = "all" | "builtin";
@@ -225,67 +224,34 @@ interface ForkPreparationOptions {
 	position: SessionForkPosition;
 }
 
-interface MutableSubagentRunRegistry extends SubagentRunRegistry {
-	upsert(run: SubagentRunInfo): void;
-	get(runId: string): SubagentRunInfo | undefined;
-}
-
-interface EmbeddedSubagentChildState {
-	child: GripAgent;
-	session: AgentSession;
-	run: SubagentRunInfo;
-	toolOperations: ToolOperations;
-	backendIdentity: string;
-}
-
-interface EmbeddedSubagentRuntimeState {
-	nextRunNumber: number;
-	children: Map<string, EmbeddedSubagentChildState>;
-}
-
 interface EmbeddedSubagentRunnerContext {
 	services: GripAgentServices;
 	excludedTools: string[];
-	registry: MutableSubagentRunRegistry;
-	runtime: EmbeddedSubagentRuntimeState;
+	allowedToolNames: string[] | undefined;
+	children: Set<GripAgent>;
 }
 
 interface EmbeddedSubagentRequestContext {
 	resolvedModel: ResolveCliModelResult | undefined;
 	toolOperations: ToolOperations;
 	backendInfo: ToolBackendInfo | undefined;
-	backendIdentity: string;
 }
 
 type EmbeddedSubagentRequestResolution =
 	| { context: EmbeddedSubagentRequestContext; failure?: never }
 	| { context?: never; failure: SubagentRunOutcome };
 
-interface PreparedEmbeddedSubagentChild {
-	childState: EmbeddedSubagentChildState;
-	runId: string;
-	failure?: never;
-}
-
-type EmbeddedSubagentChildPreparation =
-	| PreparedEmbeddedSubagentChild
-	| { childState?: never; runId?: never; failure: SubagentRunOutcome };
-
-type EmbeddedSubagentChildCreation =
-	| { childState: EmbeddedSubagentChildState; failure?: never }
-	| { childState?: never; failure: SubagentRunOutcome };
-
 type EmbeddedSubagentSkillSelection =
 	| { skills: Skill[]; failure?: never }
 	| { skills?: never; failure: SubagentRunOutcome };
 
+type EmbeddedSubagentPreparation =
+	| { child: GripAgent; skillCatalog: Skill[]; failure?: never }
+	| { child?: never; failure: SubagentRunOutcome };
+
 type EmbeddedSubagentSkillPreload =
 	| { blocks: string[]; failure?: never }
 	| { blocks?: never; failure: SubagentRunOutcome };
-
-interface EmbeddedSubagentOutputState {
-	lastOutput: string | undefined;
-}
 
 export type GripAgentAppMode = "embedded" | "interactive" | "print" | "json" | "rpc";
 
@@ -306,6 +272,7 @@ export interface GripAgentRuntimeHost {
 	readonly session: AgentSession;
 	readonly diagnostics: readonly GripAgentDiagnostic[];
 	readonly modelFallbackMessage: string | undefined;
+	previewSubagentSystemPrompt(name: string, agentScope: AgentScope): Promise<string>;
 	setRebindSession(rebindSession?: (session: AgentSession) => Promise<void>): void;
 	setBeforeSessionInvalidate(beforeSessionInvalidate?: () => void): void;
 	changeDirectory(cwd: string): Promise<ExtensionSessionActionResult>;
@@ -519,8 +486,8 @@ export class GripAgent {
 	private readonly borrowedToolOperations: BorrowedToolOperations | undefined;
 	private toolOperationsDisposed = false;
 	private disposePromise: Promise<void> | undefined;
-	private readonly subagentCleanupCallbacks = new Set<() => Promise<void>>();
-
+	private readonly activeSubagents = new Set<GripAgent>();
+	private _embeddedSubagentRunnerContext?: EmbeddedSubagentRunnerContext;
 	private constructor(options: CreateGripAgentOptions, resolved: GripAgentResolvedDependencies) {
 		this.options = options;
 		this.borrowedToolOperations = options.toolOperations ? borrowToolOperations(options.toolOperations) : undefined;
@@ -623,32 +590,45 @@ export class GripAgent {
 			diagnostics,
 		};
 	}
-	private createSubagentRunRegistry(): MutableSubagentRunRegistry {
-		const runs = new Map<string, SubagentRunInfo>();
-		return {
-			list: () => Array.from(runs.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-			upsert: (run) => runs.set(run.runId, structuredClone(run)),
-			get: (runId) => runs.get(runId),
-		};
-	}
-
-	private createSubagentConfigRegistry(): SubagentConfigRegistry {
-		const configs = new Map<string, Parameters<SubagentConfigRegistry["upsert"]>[0]>();
-		return {
-			list: () => Array.from(configs.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-			upsert: (config) => configs.set(config.name, structuredClone(config)),
-			get: (name) => configs.get(name),
-		};
-	}
-
 	private resolveEmbeddedSubagentRequest(
 		request: SubagentRunRequest,
 		services: GripAgentServices,
 	): EmbeddedSubagentRequestResolution {
+		const namedModel =
+			request.agentSource === "ad-hoc" ? undefined : services.settingsManager.getSubagentModel(request.agent);
+		const fromNamedPreset = namedModel?.toLowerCase() === request.model?.toLowerCase();
+		const configuredModel = fromNamedPreset ? namedModel : process.env.GRIP_DEFAULT_SUBAGENT_MODEL?.trim();
+		const configurationSource = fromNamedPreset
+			? `subagentModels["${request.agent}"]`
+			: "GRIP_DEFAULT_SUBAGENT_MODEL";
+		if (
+			configuredModel &&
+			request.model?.toLowerCase() === configuredModel.toLowerCase() &&
+			!services.modelRegistry
+				.getAvailable()
+				.some((model) => `${model.provider}/${model.id}`.toLowerCase() === configuredModel.toLowerCase())
+		) {
+			return {
+				failure: {
+					exitCode: 1,
+					stderr: `${configurationSource} "${configuredModel}" is not an available provider/model-id.`,
+				},
+			};
+		}
 		const resolvedModel = request.model
 			? resolveCliModel({ cliModel: request.model, modelRegistry: services.modelRegistry })
 			: undefined;
-		if (resolvedModel?.error) return { failure: { exitCode: 1, stderr: resolvedModel.error } };
+		if (resolvedModel?.error) {
+			return {
+				failure: {
+					exitCode: 1,
+					stderr:
+						configuredModel && request.model?.toLowerCase() === configuredModel.toLowerCase()
+							? `${configurationSource}: ${resolvedModel.error}`
+							: resolvedModel.error,
+				},
+			};
+		}
 		const toolOperations = request.toolOperations;
 		if (!toolOperations) {
 			return { failure: { exitCode: 1, stderr: "Subagents require explicit workspace tool operations" } };
@@ -665,16 +645,14 @@ export class GripAgent {
 				},
 			};
 		}
-		const backendIdentity = JSON.stringify(backendInfo ?? { type: "unknown", cwd: toolOperations.cwd });
-		return { context: { resolvedModel, toolOperations, backendInfo, backendIdentity } };
+		return { context: { resolvedModel, toolOperations, backendInfo } };
 	}
 
 	private selectEmbeddedSubagentSkills(
 		request: SubagentRunRequest,
-		services: GripAgentServices,
+		loadedSkills: Skill[],
 	): EmbeddedSubagentSkillSelection {
 		const requestedSkills = request.skills ?? [];
-		const loadedSkills = services.resourceLoader.getSkills().skills;
 		const skillsByName = new Map<string, Skill>();
 		for (const skill of loadedSkills) {
 			if (!skillsByName.has(skill.name)) skillsByName.set(skill.name, skill);
@@ -692,19 +670,14 @@ export class GripAgent {
 		return { skills };
 	}
 
-	private async loadEmbeddedSubagentSkillContent(
-		skill: Skill,
-		toolOperations: ToolOperations,
-		backendInfo: ToolBackendInfo | undefined,
-	): Promise<string> {
+	private getEmbeddedSubagentSkillCatalog(skills: Skill[]): Skill[] {
+		return skills.filter((skill) => !skill.disableModelInvocation);
+	}
+	private async loadEmbeddedSubagentSkillContent(skill: Skill, toolOperations: ToolOperations): Promise<string> {
 		if (skill.content !== undefined) return skill.content;
-		if (backendInfo?.type === "local") return readFileSync(skill.filePath, "utf-8");
-		if (getSourceBackend(skill.sourceInfo) === "local") {
-			throw new Error("local skill files are unavailable to a sandboxed subagent");
-		}
+		if (getSourceBackend(skill.sourceInfo) === "local") return readFileSync(skill.filePath, "utf-8");
 		return (await toolOperations.readFile(skill.filePath)).toString("utf-8");
 	}
-
 	private async preloadEmbeddedSubagentSkills(
 		skills: Skill[],
 		context: EmbeddedSubagentRequestContext,
@@ -712,11 +685,7 @@ export class GripAgent {
 		const blocks: string[] = [];
 		for (const skill of skills) {
 			try {
-				const content = await this.loadEmbeddedSubagentSkillContent(
-					skill,
-					context.toolOperations,
-					context.backendInfo,
-				);
+				const content = await this.loadEmbeddedSubagentSkillContent(skill, context.toolOperations);
 				blocks.push(
 					`<preloaded-skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${stripFrontmatter(content).trim()}\n</preloaded-skill>`,
 				);
@@ -732,12 +701,21 @@ export class GripAgent {
 		return { blocks };
 	}
 
-	private async createEmbeddedSubagentChild(
+	private async createEmbeddedSubagent(
 		request: SubagentRunRequest,
-		requestContext: EmbeddedSubagentRequestContext,
 		runnerContext: EmbeddedSubagentRunnerContext,
-		runId: string,
-	): Promise<EmbeddedSubagentChildCreation> {
+		preview = false,
+	): Promise<EmbeddedSubagentPreparation> {
+		const resolution = this.resolveEmbeddedSubagentRequest(request, runnerContext.services);
+		if (resolution.failure) return { failure: resolution.failure };
+		const requestContext = resolution.context;
+		const parentSkills = this.session.getRegisteredSkills();
+		const selection = this.selectEmbeddedSubagentSkills(request, parentSkills);
+		if (selection.failure) return { failure: selection.failure };
+		const skillCatalog = this.getEmbeddedSubagentSkillCatalog(parentSkills);
+		const preload = await this.preloadEmbeddedSubagentSkills(selection.skills, requestContext);
+		if (preload.failure) return { failure: preload.failure };
+
 		const settingsStorage = new InMemorySettingsStorage();
 		settingsStorage.withLock("global", () =>
 			JSON.stringify(runnerContext.services.settingsManager.getGlobalSettings()),
@@ -746,22 +724,13 @@ export class GripAgent {
 			JSON.stringify(runnerContext.services.settingsManager.getProjectSettings()),
 		);
 		const settingsManager = SettingsManager.fromStorage(settingsStorage);
-		const selection = this.selectEmbeddedSubagentSkills(request, runnerContext.services);
-		if (selection.failure) return selection;
-		const preload = await this.preloadEmbeddedSubagentSkills(selection.skills, requestContext);
-		if (preload.failure) return preload;
-
-		const childExcludedTools = new Set([
-			"subagent",
-			"subagent_runs",
-			"create_subagent",
-			...runnerContext.excludedTools,
-		]);
+		const childExcludedTools = new Set(["subagent", ...runnerContext.excludedTools]);
+		const permittedTools = runnerContext.allowedToolNames ? new Set(runnerContext.allowedToolNames) : undefined;
 		const requestedTools = request.tools ?? getDefaultActiveToolNames();
-		const skillTools = selection.skills.flatMap((skill) => skill.tools ?? []);
-		const tools = Array.from(new Set([...requestedTools, ...skillTools])).filter(
-			(name) => !childExcludedTools.has(name),
-		);
+		const skillTools = request.tools === undefined ? selection.skills.flatMap((skill) => skill.tools ?? []) : [];
+		const tools = Array.from(
+			new Set([...requestedTools, ...(request.includeDefaultSkillTool ? ["load_skill"] : []), ...skillTools]),
+		).filter((name) => !childExcludedTools.has(name) && (!permittedTools || permittedTools.has(name)));
 		const child = await GripAgent.create({
 			mode: "embedded",
 			cwd: request.cwd,
@@ -770,6 +739,7 @@ export class GripAgent {
 			authStorage: runnerContext.services.authStorage,
 			modelRegistry: runnerContext.services.modelRegistry,
 			settingsManager,
+			hooks: preview ? false : undefined,
 			model: requestContext.resolvedModel?.model,
 			thinkingLevel: requestContext.resolvedModel?.thinkingLevel,
 			tools,
@@ -777,6 +747,10 @@ export class GripAgent {
 			toolOperations: requestContext.toolOperations,
 			resourceLoaderOptions: {
 				toolOperations: requestContext.toolOperations,
+				// Only extensions that explicitly supplied a child-specific factory run in isolated sessions.
+				extensionFactories: runnerContext.services.resourceLoader
+					.getExtensions()
+					.extensions.flatMap((extension) => (extension.subagentFactory ? [extension.subagentFactory] : [])),
 				noExtensions: true,
 				noSkills: true,
 				noRules: true,
@@ -789,179 +763,64 @@ export class GripAgent {
 				appendSystemPromptOverride: () => [request.systemPrompt, ...preload.blocks],
 			},
 		});
-		const session = await child.createAgentSession();
-		const now = new Date().toISOString();
-		const run: SubagentRunInfo = {
-			runId,
-			sessionReference: session.sessionReference,
-			status: "running",
-			agent: request.agent,
-			task: request.task,
-			cwd: request.cwd,
-			model: request.model,
-			createdAt: now,
-			updatedAt: now,
-		};
-		const childState: EmbeddedSubagentChildState = {
-			child,
-			session,
-			run,
-			toolOperations: requestContext.toolOperations,
-			backendIdentity: requestContext.backendIdentity,
-		};
-		runnerContext.runtime.children.set(runId, childState);
-		runnerContext.registry.upsert(run);
-		return { childState };
+		return { child, skillCatalog };
 	}
 
-	private async prepareEmbeddedSubagentChild(
-		request: SubagentRunRequest,
-		requestContext: EmbeddedSubagentRequestContext,
-		runnerContext: EmbeddedSubagentRunnerContext,
-	): Promise<EmbeddedSubagentChildPreparation> {
-		const continuedRunId = request.continueSession;
-		const childState = continuedRunId ? runnerContext.runtime.children.get(continuedRunId) : undefined;
-		if (request.continueSession && !childState) {
-			return { failure: { exitCode: 1, stderr: `Unknown subagent run id: ${request.continueSession}` } };
-		}
-		if (
-			childState &&
-			(childState.toolOperations !== requestContext.toolOperations ||
-				childState.backendIdentity !== requestContext.backendIdentity)
-		) {
-			await childState.child.dispose();
-			runnerContext.runtime.children.delete(childState.run.runId);
-			childState.run = { ...childState.run, status: "failed", updatedAt: new Date().toISOString() };
-			runnerContext.registry.upsert(childState.run);
-			return {
-				failure: {
-					exitCode: 1,
-					stderr: "The parent workspace backend changed; start a new subagent instead of continuing this run",
-				},
-			};
-		}
-		if (!childState) {
-			const runId = `subagent:${runnerContext.runtime.nextRunNumber++}`;
-			const creation = await this.createEmbeddedSubagentChild(request, requestContext, runnerContext, runId);
-			if (creation.failure) return creation;
-			return { childState: creation.childState, runId };
-		}
-		childState.run = {
-			...childState.run,
-			status: "running",
-			task: request.task,
-			updatedAt: new Date().toISOString(),
-		};
-		runnerContext.registry.upsert(childState.run);
-		return { childState, runId: childState.run.runId };
-	}
-
-	private subscribeToEmbeddedSubagentRun(
-		childState: EmbeddedSubagentChildState,
-		request: SubagentRunRequest,
-		output: EmbeddedSubagentOutputState,
-		registry: MutableSubagentRunRegistry,
-	): () => void {
-		return childState.session.subscribe((event) => {
-			if (event.type !== "message_end") return;
-			if (event.message.role === "assistant" || event.message.role === "toolResult") {
-				request.onMessage(event.message as Message);
-			}
-			if (event.message.role !== "assistant") return;
-			output.lastOutput =
-				event.message.content
-					.filter((part) => part.type === "text")
-					.map((part) => part.text)
-					.join("\n") || output.lastOutput;
-			childState.run = {
-				...childState.run,
-				lastOutput: output.lastOutput,
-				updatedAt: new Date().toISOString(),
-			};
-			registry.upsert(childState.run);
-		});
-	}
-
-	private async executeEmbeddedSubagentRun(
-		request: SubagentRunRequest,
-		preparation: PreparedEmbeddedSubagentChild,
-		registry: MutableSubagentRunRegistry,
-	): Promise<SubagentRunOutcome> {
-		const { childState, runId } = preparation;
-		const session = childState.session;
-		const output: EmbeddedSubagentOutputState = { lastOutput: childState.run.lastOutput };
-		let unsubscribe: (() => void) | undefined;
-		const abort = (): void => {
-			void session.abort();
-		};
-		try {
-			unsubscribe = this.subscribeToEmbeddedSubagentRun(childState, request, output, registry);
-			if (request.signal?.aborted) {
-				return {
-					exitCode: 1,
-					stderr: "Subagent was aborted",
-					runId,
-					sessionReference: session.sessionReference,
-				};
-			}
-			request.signal?.addEventListener("abort", abort, { once: true });
-			await session.prompt(request.prompt);
-			const status = request.signal?.aborted ? "failed" : "completed";
-			childState.run = {
-				...childState.run,
-				status,
-				lastOutput: output.lastOutput,
-				updatedAt: new Date().toISOString(),
-			};
-			registry.upsert(childState.run);
-			return {
-				exitCode: request.signal?.aborted ? 1 : 0,
-				stderr: "",
-				runId,
-				sessionReference: session.sessionReference,
-			};
-		} catch (error) {
-			childState.run = {
-				...childState.run,
-				status: "failed",
-				updatedAt: new Date().toISOString(),
-			};
-			registry.upsert(childState.run);
-			return {
-				exitCode: 1,
-				stderr: error instanceof Error ? error.message : String(error),
-				runId,
-				sessionReference: session.sessionReference,
-			};
-		} finally {
-			request.signal?.removeEventListener("abort", abort);
-			unsubscribe?.();
-		}
+	private async createEmbeddedSubagentSession(prepared: EmbeddedSubagentPreparation): Promise<AgentSession> {
+		if (prepared.failure) throw new Error(prepared.failure.stderr);
+		const session = await prepared.child.createAgentSession();
+		for (const skill of prepared.skillCatalog) session.registerSessionSkill(skill);
+		await session.bindExtensions({});
+		return session;
 	}
 
 	private async runEmbeddedSubagent(
 		request: SubagentRunRequest,
 		runnerContext: EmbeddedSubagentRunnerContext,
 	): Promise<SubagentRunOutcome> {
-		const resolution = this.resolveEmbeddedSubagentRequest(request, runnerContext.services);
-		if (resolution.failure) return resolution.failure;
-		const preparation = await this.prepareEmbeddedSubagentChild(request, resolution.context, runnerContext);
-		if (preparation.failure) return preparation.failure;
-		return this.executeEmbeddedSubagentRun(request, preparation, runnerContext.registry);
+		const prepared = await this.createEmbeddedSubagent(request, runnerContext);
+		if (prepared.failure) return prepared.failure;
+		const { child } = prepared;
+		runnerContext.children.add(child);
+		let unsubscribe: (() => void) | undefined;
+		let session: AgentSession | undefined;
+		const abort = (): void => {
+			if (session) void session.abort();
+		};
+		try {
+			session = await this.createEmbeddedSubagentSession(prepared);
+			unsubscribe = session.subscribe((event) => {
+				if (event.type !== "message_end") return;
+				if (event.message.role === "assistant" || event.message.role === "toolResult") {
+					request.onMessage(event.message as Message);
+				}
+			});
+			if (request.signal?.aborted) return { exitCode: 1, stderr: "Subagent was aborted" };
+			request.signal?.addEventListener("abort", abort, { once: true });
+			await session.prompt(request.prompt);
+			return { exitCode: request.signal?.aborted ? 1 : 0, stderr: "" };
+		} catch (error) {
+			return { exitCode: 1, stderr: error instanceof Error ? error.message : String(error) };
+		} finally {
+			request.signal?.removeEventListener("abort", abort);
+			unsubscribe?.();
+			runnerContext.children.delete(child);
+			await child.dispose();
+		}
 	}
 
 	private createEmbeddedSubagentRunner(
 		services: GripAgentServices,
 		excludedTools: string[],
-		registry: MutableSubagentRunRegistry,
+		allowedToolNames: string[] | undefined,
 	): SubagentRunner {
-		const runtime: EmbeddedSubagentRuntimeState = { nextRunNumber: 1, children: new Map() };
-		const runnerContext: EmbeddedSubagentRunnerContext = { services, excludedTools, registry, runtime };
-		const cleanup = async (): Promise<void> => {
-			for (const { child } of runtime.children.values()) await child.dispose();
-			runtime.children.clear();
+		const runnerContext: EmbeddedSubagentRunnerContext = {
+			services,
+			excludedTools,
+			allowedToolNames,
+			children: this.activeSubagents,
 		};
-		this.subagentCleanupCallbacks.add(cleanup);
+		this._embeddedSubagentRunnerContext = runnerContext;
 		return (request) => this.runEmbeddedSubagent(request, runnerContext);
 	}
 
@@ -1159,6 +1018,16 @@ export class GripAgent {
 		});
 	}
 
+	private async discoverSessionSubagents(cwd: string, options: GripAgentSessionOptions): Promise<AvailableSubagent[]> {
+		if (
+			options.noTools ||
+			options.excludedTools?.includes("subagent") ||
+			(options.tools !== undefined && !options.tools.includes("subagent"))
+		)
+			return [];
+		return discoverAvailableSubagents(cwd, options.toolOperations);
+	}
+
 	private async buildAgentSession(
 		activeSession: Session,
 		sessionStartEvent?: SessionStartEvent,
@@ -1197,6 +1066,7 @@ export class GripAgent {
 		const initialActiveToolNames = [
 			...(sessionOptions.tools ?? (sessionOptions.noTools ? [] : defaultActiveToolNames)),
 		];
+		const availableSubagents = await this.discoverSessionSubagents(services.cwd, sessionOptions);
 		const extensionRunnerRef: ExtensionRunnerReference = {};
 		const agent = this.createCoreAgent(services, activeSession, model, thinkingLevel, extensionRunnerRef);
 
@@ -1208,8 +1078,6 @@ export class GripAgent {
 			activeSession.appendThinkingLevelChange(thinkingLevel);
 		}
 
-		const subagentRunRegistry = this.createSubagentRunRegistry();
-		const subagentConfigRegistry = this.createSubagentConfigRegistry();
 		const hookOptions = this.options.hooks;
 		return {
 			session: new AgentSession({
@@ -1222,16 +1090,15 @@ export class GripAgent {
 				customTools: sessionOptions.customTools,
 				toolOperations: sessionOptions.toolOperations,
 				modelRegistry: services.modelRegistry,
+				availableSubagents,
 				initialActiveToolNames,
 				excludedToolNames: sessionOptions.excludedTools,
 				allowedToolNames,
 				subagentRunner: this.createEmbeddedSubagentRunner(
 					services,
 					sessionOptions.excludedTools ?? [],
-					subagentRunRegistry,
+					allowedToolNames,
 				),
-				subagentRunRegistry,
-				subagentConfigRegistry,
 				trustProjectAgents: sessionOptions.trustProjectAgents,
 				extensionRunnerRef,
 				sessionStartEvent,
@@ -1319,6 +1186,48 @@ export class GripAgent {
 		return this._session;
 	}
 
+	/** Build the exact initial prompt for a named subagent without executing a task or requesting project trust. */
+	async previewSubagentSystemPrompt(name: string, agentScope: AgentScope = "user"): Promise<string> {
+		const operations = this.session.getToolOperations();
+		const backend = operations.getBackendInfo?.();
+		if (backend?.type === "remote" && !backend.configured) {
+			throw new Error("Subagents cannot run with an unconfigured remote backend.");
+		}
+		const workspaceCwd = operations.cwd ?? this.session.session.getCwd();
+		const discovery = await discoverAgentsWithOperations(workspaceCwd, agentScope, operations);
+		const preset = discovery.agents.find((agent) => agent.name === name);
+		if (!preset) throw new Error(`Unknown subagent: ${name} (agentScope: ${agentScope}).`);
+		const runnerContext = this._embeddedSubagentRunnerContext;
+		if (!runnerContext) throw new Error("Subagent runner is not configured for this session.");
+		const configuredModel = this.settingsManager.getSubagentModel(name);
+		const parentModel = this.session.model;
+		const request: SubagentRunRequest = {
+			cwd: preset.cwd ?? workspaceCwd,
+			toolOperations: operations,
+			prompt: "",
+			task: "",
+			agent: name,
+			agentSource: preset.source,
+			systemPrompt: preset.systemPrompt,
+			model:
+				configuredModel ||
+				process.env.GRIP_DEFAULT_SUBAGENT_MODEL?.trim() ||
+				(parentModel ? `${parentModel.provider}/${parentModel.id}` : undefined),
+			tools: preset.tools,
+			skills: preset.skills,
+			includeDefaultSkillTool: true,
+			onMessage: () => {},
+		};
+		const prepared = await this.createEmbeddedSubagent(request, runnerContext, true);
+		if (prepared.failure) throw new Error(prepared.failure.stderr);
+		const { child } = prepared;
+		try {
+			const childSession = await this.createEmbeddedSubagentSession(prepared);
+			return childSession.systemPrompt;
+		} finally {
+			await child.dispose();
+		}
+	}
 	get modelFallbackMessage(): string | undefined {
 		return this._modelFallbackMessage;
 	}
@@ -1672,8 +1581,8 @@ export class GripAgent {
 				this.toolOperationsDisposed = true;
 				await this.options.toolOperations?.dispose?.();
 			}
-			for (const cleanup of this.subagentCleanupCallbacks) await cleanup();
-			this.subagentCleanupCallbacks.clear();
+			for (const child of this.activeSubagents) await child.dispose();
+			this.activeSubagents.clear();
 		}
 	}
 }

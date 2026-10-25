@@ -23,6 +23,10 @@ describe("buildSystemPrompt", () => {
 			});
 
 			expect(prompt).toContain("Show file paths clearly");
+			expect(prompt).toContain("## Guidelines");
+			expect(prompt).not.toContain("## Skills");
+			expect(prompt).not.toContain("<available_skills>");
+			expect(prompt).not.toContain("## Subagents");
 		});
 	});
 
@@ -44,6 +48,9 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("- bash:");
 			expect(prompt).toContain("- edit:");
 			expect(prompt).toContain("- write:");
+			expect(prompt).toContain(
+				"Use bash for shell commands; follow project-specific instructions for repository file operations",
+			);
 		});
 
 		test("instructs models to resolve grip docs and examples under absolute base paths", () => {
@@ -57,9 +64,10 @@ describe("buildSystemPrompt", () => {
 				"- When reading grip docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory",
 			);
 			expect(prompt).toContain("You are an expert coding assistant operating inside grip");
-			expect(prompt).toContain("Grip documentation (read only when the user asks about grip itself");
+			expect(prompt).toContain("## Grip documentation");
 			expect(prompt).toContain("adding models (docs/models.md), grip packages (docs/packages.md)");
 			expect(prompt).not.toContain("operating inside pi");
+			expect(prompt).toMatch(/Current date: \d{4}-\d{2}-\d{2}/);
 		});
 	});
 
@@ -84,6 +92,45 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("<name>sample-skill</name>");
 			expect(prompt).toContain("Use load_skill with a skill name");
 			expect(prompt).not.toContain("<location>");
+		});
+
+		test("keeps default prompt sections in order around visible skills and active subagents", () => {
+			const prompt = buildSystemPrompt({
+				selectedTools: ["read", "load_skill", "subagent"],
+				skills: [skill],
+				subagentPrompt: {
+					catalog: '<available_subagents><subagent name="worker" /></available_subagents>',
+					guidance: "Use a subagent for bounded work.",
+				},
+				cwd: process.cwd(),
+			});
+			const positions = [
+				prompt.indexOf("## Guidelines"),
+				prompt.indexOf("## Skills"),
+				prompt.indexOf("## Subagents"),
+				prompt.indexOf("## Grip documentation"),
+			];
+			expect(positions.every((position) => position >= 0)).toBe(true);
+			expect(positions).toEqual([...positions].sort((a, b) => a - b));
+			expect(prompt.indexOf("<available_skills>")).toBeLessThan(prompt.indexOf("<available_subagents>"));
+			expect(prompt.indexOf("<available_subagents>")).toBeLessThan(prompt.indexOf("## Subagents"));
+			expect(prompt).toContain("## Subagents\nUse a subagent for bounded work.");
+		});
+
+		test("custom prompts omit default sections but retain active built-in subagent guidance", () => {
+			const prompt = buildSystemPrompt({
+				customPrompt: "Custom system instructions.",
+				subagentPrompt: {
+					catalog: '<available_subagents><subagent name="worker" /></available_subagents>',
+					guidance: "Use a subagent for bounded work.",
+				},
+				selectedTools: ["read", "subagent"],
+				cwd: process.cwd(),
+			});
+			expect(prompt).not.toContain("## Guidelines");
+			expect(prompt).not.toContain("## Grip documentation");
+			expect(prompt).toContain("## Subagents");
+			expect(prompt).toContain('<subagent name="worker" />');
 		});
 
 		test("does not list skills if load_skill is unavailable", () => {
@@ -118,8 +165,8 @@ describe("buildSystemPrompt", () => {
 		});
 	});
 
-	describe("subagent orchestration", () => {
-		test("describes the primary agent as the final decision-maker when subagent is active", () => {
+	describe("subagent catalog", () => {
+		test("does not hardcode preset names or guidance into the generic prompt", () => {
 			const prompt = buildSystemPrompt({
 				selectedTools: ["read", "subagent"],
 				toolSnippets: { subagent: "Delegate focused tasks" },
@@ -128,13 +175,12 @@ describe("buildSystemPrompt", () => {
 				cwd: process.cwd(),
 			});
 
-			expect(prompt).toContain("## Orchestration");
-			expect(prompt).toContain("You are the primary agent and final decision-maker.");
-			expect(prompt).toContain("Treat its output as evidence, not authority");
-			expect(prompt).toContain("Do not delegate responsibility for the final answer.");
+			expect(prompt).not.toContain("## Orchestration");
+			expect(prompt).not.toContain("<available_subagents>");
+			expect(prompt).not.toContain("Choose explore for focused codebase investigation");
 		});
 
-		test("omits orchestration guidance when subagent is unavailable", () => {
+		test("omits a subagent catalog when the tool is unavailable", () => {
 			const prompt = buildSystemPrompt({
 				selectedTools: ["read"],
 				contextFiles: [],
@@ -142,7 +188,7 @@ describe("buildSystemPrompt", () => {
 				cwd: process.cwd(),
 			});
 
-			expect(prompt).not.toContain("## Orchestration");
+			expect(prompt).not.toContain("<available_subagents>");
 		});
 	});
 

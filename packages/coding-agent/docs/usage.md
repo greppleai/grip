@@ -41,6 +41,11 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/login`, `/logout` | Manage OAuth or API-key credentials |
 | `/websearch login` | Select DuckDuckGo, Brave Search, or Firecrawl; save or update search API keys |
 | `/model [reference or query]` | Choose a provider and model, select an exact reference, or search across providers |
+| `/subagent list` | List available bundled, user, and project presets and their effective models |
+| `/subagent model get --name <name>` | Show the effective model and source for a preset |
+| `/subagent model set --name <name> --model <provider/model-id>` | Save a named model override in global settings |
+| `/system-prompt` | Show the current main-agent system prompt in the TUI without sending a message to the model |
+| `/system-prompt --subagent <name> [--agent-scope user\|project\|both]` | Preview a named subagent's generated system prompt, including its selected tools and preloaded skills; defaults to user scope |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
@@ -55,7 +60,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/copy` | Copy last assistant message to clipboard |
 | `/export [file]` | Export session to HTML |
 | `/share` | Upload as private GitHub gist with shareable HTML link |
-| `/reload` | Reload keybindings, hooks, extensions, skills, rules, prompts, and context files |
+`/hooks`, `/sandbox`, `/subagent`, and `/system-prompt` are user-only interactive commands hidden from model-visible command catalogs. `/system-prompt` only renders a prompt in the TUI; it neither delegates a task nor sends a message to an LLM. Quote subagent names containing spaces. Use `--agent-scope project` for project presets; previewing one does not approve it for execution. `/sandbox` shows or clears the current backend, attaches a sandbox daemon, manages Lima sandboxes, and can set a per-directory default with `/sandbox start --name <vm> --set-default` or `/sandbox default set`; see [Workspace Sandbox](sandbox.md). `/subagent` autocompletes subcommands, flags, preset names, and available models. Quote preset names containing spaces (for example, `--name "source explorer"`). Listing project presets does not approve them for execution.
 | `/hooks <enable|disable>` | Enable or disable subsequent hooks for the current session |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
@@ -63,7 +68,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 
 `/hooks disable` immediately prevents subsequent hook events in the current session; a hook execution already in progress is allowed to finish. `/hooks enable` resumes dispatch. Skipped events are not replayed, and a newly created or resumed session starts with hooks enabled. `/reload` preserves this enabled/disabled state while refreshing file-backed hook configuration.
 
-`/hooks` and `/sandbox` are user-only interactive commands hidden from model-visible command catalogs. `/sandbox` shows or clears the current backend, attaches a sandbox daemon, manages Lima sandboxes, and can set a per-directory default with `/sandbox start --name <vm> --set-default` or `/sandbox default set`; see [Workspace Sandbox](sandbox.md).
+`/hooks`, `/sandbox`, and `/subagent` are user-only interactive commands hidden from model-visible command catalogs. `/sandbox` shows or clears the current backend, attaches a sandbox daemon, manages Lima sandboxes, and can set a per-directory default with `/sandbox start --name <vm> --set-default` or `/sandbox default set`; see [Workspace Sandbox](sandbox.md). `/subagent` autocompletes subcommands, flags, preset names, and available models. Quote preset names containing spaces (for example, `--name "source explorer"`). Listing project presets does not approve them for execution.
 
 ## Model Selection
 
@@ -236,12 +241,17 @@ cat README.md | grip -p "Summarize this text"
 | `--no-tools`, `-nt` | Disable all tools |
 | `--remote <url>` | Run built-in tools through a `grip --daemon` backend (`ws://` or `wss://`) |
 
-Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `session_search`, `session_entry_get`, `subagent`, `subagent_runs`, and `create_subagent`.
+Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `session_search`, `session_entry_get`, and `subagent`.
 
-The three subagent tools are inactive by default. Enable them through `/settings` or `"enableSubagents": true` in `settings.json`. An explicit `--tools` allowlist can opt in to any subset regardless of that setting; `--no-tools` and `--no-builtin-tools` still suppress them.
+The `subagent` tool is active by default. When it is available, the main agent's system prompt includes an `<available_subagents>` block with the currently discovered preset names, sources, purposes, and invocation scopes. Bundled and user presets use the default `agentScope: "user"`; project presets appear separately with `agentScope: "project"` and still require approval to run unless the host explicitly grants trust. With `agentScope: "both"`, a project preset overrides a bundled or user preset with the same name. The block refreshes on `/reload` and sandbox backend changes; listing a project preset does not approve it. Disable the tool through `/settings` or `"enableSubagents": false` in `settings.json`. An explicit `--tools` allowlist selects its own subset regardless of that setting; no-tools modes still suppress it. Parent tool allowlists and exclusions also bound child tool access.
 
-The `subagent` tool runs fresh in-memory agent sessions in single, parallel, or chained mode. Each session has an isolated conversation while sharing parent authentication and model services, avoiding separate process startup. Each task can provide an optional named preset, persona (`systemPrompt`), output contract (`responseFormat`), model, tool allowlist, and working directory. Without a model it inherits the parent model; the parent receives authenticated same-family model metadata including context and token costs. Bundled presets are `explore`, `worker`, and `reviewer`. User definitions in `~/.grip/agent/agents/*.md` override bundled presets; project definitions in `.grip/agents/*.md` are opt-in through `agentScope` and require interactive confirmation by default.
+The default prompt separates `## Guidelines`, `## Skills` (when visible skills and `load_skill` are available), `## Subagents` (when the built-in tool is active), and `## Grip documentation`, in that order. The discovery-only `<available_subagents>` catalog appears next to the skills list, **before** the separate Subagents guidance section. Custom system prompts replace the default Guidelines and Grip documentation, while available skill and subagent sections still follow the custom text when applicable.
 
+Use `subagent` only for a bounded job with a concrete deliverable that benefits from isolated context; work directly for trivial work and retain responsibility for the final answer. Choose `explore` to find and summarize relevant source, `reviewer` for independent review of specified changes, or `worker` for a bounded implementation slice: make the change, add or update tests, run focused checks, and return changed files, results, and remaining issues. A worker can also run a focused test or fix an isolated issue when explicitly tasked. Use `{ "agent": "explore", "task": "Find authentication entrypoints; return file paths and line ranges" }` for a single job, `tasks` for independent parallel jobs, or `chain` for sequential jobs with `{previous}` handoff. Each run is a **fresh** in-memory session; there are no resumable runs or model-selecting tool arguments. For named presets, `/subagent model set --name worker --model provider/model-id` saves a global model override that takes precedence over `GRIP_DEFAULT_SUBAGENT_MODEL`; without either, the run inherits the parent model. Set accepts only currently available models; unavailable configured models fail the delegated job. User definitions in `~/.grip/agent/agents/*.md` override bundled presets; project definitions in `.grip/agents/*.md` require `agentScope: "project"` or `"both"` and interactive confirmation by default. Agent definitions no longer select a model.
+
+Subagents inherit the parent's available skill catalog (including host-installed skills and workspace skills), and may call `load_skill` to read full instructions on demand. Pass `skills: ["skill-name"]` to **force-preload** named skills before a subagent's first turn; per-task `skills` overrides the preset's `skills` list, and unknown names fail the delegated job. `load_skill` is included with preset/default tools. An explicit per-task `tools` list suppresses this default, so include `load_skill` to load other skills on demand. Selected skills can still contribute their associated tools, subject to parent tool allowlists/exclusions. Remote children can load or force-preload parent-visible host-installed skills from the host and workspace skills from the active backend; ordinary workspace tools remain on the active backend.
+
+Extensions do not automatically run in subagents. An extension may opt in with `pi.registerSubagentFactory()` to register fresh child-specific hooks. The Grepple Grip extension opts in its workflow guidance, tool selection, and backend grep guard, but does not expose `/grepple-install` to children. Child tools still obey the parent tool ceiling and use the active workspace backend.
 Use `--remote-deferred --remote-cwd <path>` to start without a connected tool backend, then connect from interactive mode with `/sandbox --attach <ws://url>`. Connecting reloads project instruction resources from the selected daemon backend.
 
 ### Resource Options
@@ -329,6 +339,7 @@ grip --tools read,grep,find,ls -p "Review the code"
 | `GRIP_OFFLINE` | Disable startup network operations, including update checks, package update checks, and install/update telemetry |
 | `GRIP_SKIP_VERSION_CHECK` | Skip the Grip version update check at startup. This prevents the npm metadata request |
 | `GRIP_TELEMETRY` | Override install/update telemetry: `1`/`true`/`yes` or `0`/`false`/`no`. This does not disable update checks |
+| `GRIP_DEFAULT_SUBAGENT_MODEL` | Optional `provider/model-id` for built-in runs without a named override; unset inherits the parent model. Set in the Grip process environment (not the sandbox) |
 | `GRIP_CACHE_RETENTION` | Set to `long` for extended prompt cache where supported |
 | `VISUAL`, `EDITOR` | External editor for Ctrl+G |
 

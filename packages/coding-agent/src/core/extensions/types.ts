@@ -1371,6 +1371,8 @@ export interface ExtensionAPI {
 	// Command, Shortcut, Flag Registration
 	// =========================================================================
 
+	/** Register a child-only extension factory for fresh built-in subagents. Other extensions remain isolated. */
+	registerSubagentFactory(factory: ExtensionFactory): void;
 	/** Register a custom command. */
 	registerCommand(name: string, options: Omit<RegisteredCommand, "name" | "sourceInfo">): void;
 
@@ -1801,6 +1803,8 @@ export interface Extension {
 	path: string;
 	resolvedPath: string;
 	sourceInfo: SourceInfo;
+	/** Fresh child-specific factory, explicitly opted in by this extension. */
+	subagentFactory?: ExtensionFactory;
 	handlers: ExtensionHandlers;
 	tools: Map<string, RegisteredTool>;
 	messageRenderers: Map<string, MessageRenderer>;

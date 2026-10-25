@@ -70,10 +70,11 @@ By default, Grip gives the model tools for:
 
 - reading, writing, and editing files
 - running shell commands
-
+- running shell commands
+- delegating bounded jobs to isolated subagents
 Additional built-in read-only tools (`grep`, `find`, `ls`) are available through tool options. Grip runs in your current working directory and can modify files there. Use git or another checkpointing workflow if you want easy rollback.
 
-Subagent delegation is opt-in. Open `/settings` and set **Enable subagents** to `true`, or set `"enableSubagents": true` in `settings.json`, to activate `subagent`, `subagent_runs`, and `create_subagent`. The `subagent` tool includes explore, worker, and reviewer presets.
+Subagent delegation is enabled by default. Offload bounded jobs with a concrete deliverable: use `explore` for source investigation, `reviewer` for independent review, and `worker` for focused implementation. To disable it, switch **Enable subagents** off in `/settings` or set `"enableSubagents": false` in `settings.json`. Subagents use the parent model unless the host sets `GRIP_DEFAULT_SUBAGENT_MODEL=provider/model-id` or configures a named preset with `/subagent model set`.
 
 ## Give Grip project instructions
 
