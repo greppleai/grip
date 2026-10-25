@@ -39,6 +39,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | Command | Description |
 |---------|-------------|
 | `/login`, `/logout` | Manage OAuth or API-key credentials |
+| `/websearch login` | Select DuckDuckGo, Brave Search, or Firecrawl; save or update search API keys |
 | `/model [reference or query]` | Choose a provider and model, select an exact reference, or search across providers |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |

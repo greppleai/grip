@@ -214,7 +214,11 @@ import {
 	type SubagentRunRegistry,
 } from "./tools/subagent.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
-import { createWebsearchToolDefinition, parseWebsearchToolOptions } from "./tools/websearch.ts";
+import {
+	createWebsearchToolDefinition,
+	parseWebsearchToolOptions,
+	WEBSEARCH_AUTH_PROVIDER_IDS,
+} from "./tools/websearch.ts";
 import { WORKSPACE_TOOL_NAMES, WorkspaceToolHost } from "./tools/workspace-tool-host.ts";
 
 // ============================================================================
@@ -5701,7 +5705,18 @@ export class AgentSession {
 				this._pendingContextCompression = request;
 			}) as unknown as ToolDefinition,
 			websearch: createWebsearchToolDefinition(
-				parseWebsearchToolOptions(this.settingsManager.getToolSettings("websearch")),
+				() => parseWebsearchToolOptions(this.settingsManager.getToolSettings("websearch")),
+				(source) => {
+					const id =
+						source === "brave-search"
+							? WEBSEARCH_AUTH_PROVIDER_IDS.brave
+							: source === "firecrawl-search"
+								? WEBSEARCH_AUTH_PROVIDER_IDS.firecrawl
+								: undefined;
+					if (!id) return undefined;
+					const credential = this.modelRegistry.authStorage.get(id);
+					return credential?.type === "api_key" ? credential.key : undefined;
+				},
 			) as unknown as ToolDefinition,
 			subagent: createSubagentToolDefinition({
 				runner: this._subagentRunner,

@@ -186,7 +186,9 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 }
 ```
 
-Global and project `tools` settings merge per tool name, so a project can override `tools.websearch.baseUrl` while keeping a global `tools.websearch.apiKey`. Environment variables remain supported for `websearch`; explicit settings take precedence. Firecrawl uses `POST /v2/search` with web results only.
+Global and project `tools` settings merge per tool name, so a project can override `tools.websearch.baseUrl` while keeping a global `tools.websearch.apiKey`. Environment variables remain supported for `websearch`; explicit settings take precedence over environment variables. Firecrawl uses `POST /v2/search` with web results only.
+
+In interactive mode, run `/websearch login` to select DuckDuckGo (no key), Brave Search, or Firecrawl. Brave and Firecrawl keys entered there are stored separately per engine in `~/.grip/agent/auth.json` (not in `settings.json`); selecting an engine again lets you keep its saved key by submitting an empty prompt, or replace it by entering a new key. The selected provider is saved globally under `tools.websearch.provider` and takes effect on the next tool call. `/logout` can remove saved web search credentials. Keys saved by this command take precedence over `tools.websearch.apiKey`; provider-specific environment variables remain fallbacks.
 
 ### Lima Sandbox
 

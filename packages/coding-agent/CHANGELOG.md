@@ -4,6 +4,10 @@ All notable changes to Grip are documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- Added `/websearch login` to choose a web search engine and save per-provider API keys in credential storage.
+
 ### Breaking Changes
 
 - Removed the built-in LSP client and tools, language-server configuration, daemon protocol support, and SDK/extension LSP APIs.

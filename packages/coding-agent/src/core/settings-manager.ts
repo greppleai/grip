@@ -68,6 +68,7 @@ export interface WarningSettings {
 }
 
 export type ToolSettings = Record<string, Record<string, unknown> | undefined>;
+export type WebsearchSettingProvider = "duckduckgo" | "brave" | "firecrawl";
 
 export interface SandboxSettings {
 	limaBinary?: string; // default: limactl
@@ -722,6 +723,19 @@ export class SettingsManager {
 	getToolSettings(toolName: string): Record<string, unknown> | undefined {
 		const value = this.settings.tools?.[toolName];
 		return value ? structuredClone(value) : undefined;
+	}
+
+	/** Persist the selected web search engine without putting its API key in settings.json. */
+	setWebsearchProvider(provider: WebsearchSettingProvider): void {
+		const websearch: Record<string, unknown> = { ...this.globalSettings.tools?.websearch, provider };
+		if (this.globalSettings.tools?.websearch?.provider !== provider) {
+			// Old provider-specific credentials and endpoints must not carry over to a new engine.
+			delete websearch.apiKey;
+			delete websearch.baseUrl;
+		}
+		this.globalSettings.tools = { ...this.globalSettings.tools, websearch };
+		this.markModified("tools", "websearch");
+		this.save();
 	}
 
 	getLastChangelogVersion(): string | undefined {

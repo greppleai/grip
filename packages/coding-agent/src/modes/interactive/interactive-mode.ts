@@ -146,13 +146,18 @@ import { LocalSessionManager } from "../../core/session/local-session-manager.ts
 import type { Session } from "../../core/session/session.ts";
 import type { SessionContext } from "../../core/session/types.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
-import { type FullscreenExitOutput, isValidModelProfileName } from "../../core/settings-manager.ts";
+import {
+	type FullscreenExitOutput,
+	isValidModelProfileName,
+	type WebsearchSettingProvider,
+} from "../../core/settings-manager.ts";
 import type { LoadSkillsResult } from "../../core/skills.ts";
 import { BUILTIN_SLASH_COMMANDS, HIDDEN_BUILTIN_SLASH_COMMAND_NAMES } from "../../core/slash-commands.ts";
 import { getSourceBackendIcon, type SourceInfo } from "../../core/source-info.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 import type { ToolBackendInfo } from "../../core/tools/operations.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
+import { parseWebsearchToolOptions, WEBSEARCH_AUTH_PROVIDER_IDS } from "../../core/tools/websearch.ts";
 import { getNewEntries, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
@@ -246,6 +251,7 @@ interface PendingStopHookNotification {
 type CompactionDisplayReason = "manual" | "threshold" | "overflow";
 type ProviderAuthenticationType = "oauth" | "api_key";
 type AuthenticationOperation = "login" | "logout";
+type WebsearchApiKeyProvider = Exclude<WebsearchSettingProvider, "duckduckgo">;
 type SessionPathCommand = "/cd" | "/export" | "/import";
 
 interface ProviderAuthenticationModelSelection {
@@ -871,6 +877,7 @@ export class InteractiveMode {
 		}
 		for (const [name, hint, choices] of [
 			["hooks", "<enable|disable>", ["enable", "disable"]],
+			["websearch", "<login>", ["login"]],
 			["context-compression", "[on|off]", ["on", "off"]],
 			["compress-detection", "[on|off]", ["on", "off"]],
 		] as const) {
@@ -3371,9 +3378,25 @@ export class InteractiveMode {
 		};
 		return commands[text];
 	}
+	private resolveWebsearchEditorCommand(text: string): EditorCommandAction | undefined {
+		if (!this.matchesEditorCommand(text, "/websearch")) return undefined;
+		return {
+			run: () => {
+				this.editor.setText("");
+				if (text.slice("/websearch".length).trim() !== "login") {
+					this.showWarning("Usage: /websearch login");
+					return;
+				}
+				this.showWebsearchLoginSelector();
+			},
+		};
+	}
 
 	private async handleBuiltInEditorCommand(text: string): Promise<boolean> {
-		const action = this.resolveParameterizedEditorCommand(text) ?? this.resolveExactEditorCommand(text);
+		const action =
+			this.resolveWebsearchEditorCommand(text) ??
+			this.resolveParameterizedEditorCommand(text) ??
+			this.resolveExactEditorCommand(text);
 		if (!action) return false;
 		await action.run();
 		return true;
@@ -5605,7 +5628,12 @@ export class InteractiveMode {
 			}
 			options.push({
 				id: providerId,
-				name: this.session.modelRegistry.getProviderDisplayName(providerId),
+				name:
+					providerId === WEBSEARCH_AUTH_PROVIDER_IDS.brave
+						? "Brave Search (web search)"
+						: providerId === WEBSEARCH_AUTH_PROVIDER_IDS.firecrawl
+							? "Firecrawl (web search)"
+							: this.session.modelRegistry.getProviderDisplayName(providerId),
 				authType: credential.type,
 			});
 		}
@@ -5823,6 +5851,83 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private showWebsearchLoginSelector(): void {
+		const choices = ["DuckDuckGo (no API key)", "Brave Search", "Firecrawl"];
+		this.showSelector((done) => {
+			const selector = new ExtensionSelectorComponent(
+				"Choose a web search engine:",
+				choices,
+				async (choice) => {
+					done();
+					if (choice === choices[0]) {
+						await this.activateWebsearchProvider("duckduckgo", "DuckDuckGo");
+					} else if (choice === choices[1]) {
+						await this.showWebsearchApiKeyDialog("brave", "Brave Search");
+					} else if (choice === choices[2]) {
+						await this.showWebsearchApiKeyDialog("firecrawl", "Firecrawl");
+					}
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector };
+		});
+	}
+
+	private async activateWebsearchProvider(provider: WebsearchSettingProvider, name: string): Promise<void> {
+		try {
+			const loadError = this.settingsManager.getLoadError("global");
+			if (loadError) throw new Error(`Cannot save global settings: ${loadError.message}`);
+			this.settingsManager.setWebsearchProvider(provider);
+			await this.settingsManager.flush();
+			const writeError = this.settingsManager.drainErrors().find((entry) => entry.scope === "global");
+			if (writeError) throw writeError.error;
+			const effective = parseWebsearchToolOptions(this.settingsManager.getToolSettings("websearch"));
+			if (effective?.provider !== provider) {
+				this.showWarning(`Saved ${name}, but a project or runtime setting overrides the websearch provider.`);
+			} else {
+				this.showStatus(`Web search engine: ${name}`);
+			}
+		} catch (error) {
+			this.showError(`Failed to configure web search: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	private hasWebsearchApiKey(provider: WebsearchApiKeyProvider): boolean {
+		const credential = this.session.modelRegistry.authStorage.get(WEBSEARCH_AUTH_PROVIDER_IDS[provider]);
+		if (credential?.type === "api_key" && credential.key.trim()) return true;
+		const config = parseWebsearchToolOptions(this.settingsManager.getToolSettings("websearch"));
+		if ((config?.provider === provider || config?.provider === `${provider}-search`) && config.apiKey) return true;
+		return provider === "brave"
+			? Boolean(process.env.GRIP_WEBSEARCH_BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY)
+			: Boolean(process.env.GRIP_WEBSEARCH_FIRECRAWL_API_KEY || process.env.FIRECRAWL_API_KEY);
+	}
+
+	private async showWebsearchApiKeyDialog(provider: WebsearchApiKeyProvider, name: string): Promise<void> {
+		const authId = WEBSEARCH_AUTH_PROVIDER_IDS[provider];
+		const dialog = new LoginDialogComponent(this.ui, authId, () => {}, name, `Configure ${name} web search`);
+		this.editorContainer.clear();
+		this.editorContainer.addChild(dialog);
+		this.ui.setFocus(dialog);
+		this.ui.requestRender();
+		try {
+			const apiKey = (await dialog.showPrompt("Enter API key (or leave blank to use an existing key):")).trim();
+			if (!apiKey && !this.hasWebsearchApiKey(provider)) throw new Error(`${name} requires an API key`);
+			if (apiKey) this.session.modelRegistry.authStorage.set(authId, { type: "api_key", key: apiKey });
+			await this.activateWebsearchProvider(provider, name);
+		} catch (error) {
+			if (!(error instanceof Error && error.message === "Login cancelled")) {
+				this.showError(`Failed to configure ${name}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		} finally {
+			this.editorContainer.clear();
+			this.editorContainer.addChild(this.editor);
+			this.ui.setFocus(this.editor);
+			this.ui.requestRender();
+		}
+	}
 	private async showApiKeyLoginDialog(providerId: string, providerName: string): Promise<void> {
 		const previousModel = this.session.model;
 
