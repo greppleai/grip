@@ -2,6 +2,27 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.1.8](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.7...@greppleai/grip-v0.1.8) (2026-10-26)
+
+
+### Features
+
+* **coding-agent:** streamline subagents and organize system prompts ([7c0e400](https://github.com/greppleai/grip/commit/7c0e400634486970de3f19cc4549e5c13a9ec671))
+
+
+### Bug Fixes
+
+* **coding-agent:** keep sandbox connected when resuming sessions ([712de6a](https://github.com/greppleai/grip/commit/712de6a00edcba98e8fe7fc9483fa7354a16d1e4))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.1.7 to ^0.1.8
+    * @greppleai/grip-ai bumped from ^0.1.7 to ^0.1.8
+    * @greppleai/grip-tui bumped from ^0.1.7 to ^0.1.8
+
 ## [Unreleased]
 
 ### Features
