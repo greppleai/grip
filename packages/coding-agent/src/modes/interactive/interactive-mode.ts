@@ -144,6 +144,7 @@ import {
 import {
 	redactSecrets,
 	type SandboxService,
+	type SandboxStartOptions,
 	type SandboxStartResult,
 	type SandboxStopResult,
 } from "../../core/sandbox/config.ts";
@@ -7050,13 +7051,16 @@ export class InteractiveMode {
 	): Promise<SandboxStartResult> {
 		const loader = this.showSandboxStartupLoader();
 		try {
-			const result = await service.start({
-				workspaceRoot,
-				...(command.name ? { name: command.name } : {}),
-				...(command.template ? { limaTemplate: command.template } : {}),
-				...(command.update ? { update: true } : {}),
+			// Expand only a leading home reference, never shell expressions or other variables.
+			const workspace = command.workspace?.replace(/^(?:\$HOME|\$\{HOME\}|~)(?=$|[/\\])/, () => os.homedir());
+			const options: SandboxStartOptions = {
+				workspaceRoot: workspace ? path.resolve(workspaceRoot, workspace) : workspaceRoot,
 				sessionId: this.activeSession.getSessionId(),
-			});
+			};
+			if (command.name) options.name = command.name;
+			if (command.template) options.limaTemplate = command.template;
+			if (command.update) options.update = true;
+			const result = await service.start(options);
 			if (updatingAttached) {
 				await this.session.abort();
 				await this.session.clearRemoteSandbox();
@@ -7065,7 +7069,7 @@ export class InteractiveMode {
 				this.activeSandboxBackendConnected = false;
 			}
 			this.activeSandboxContainerId = result.containerId;
-			const info = await this.activateStartedSandbox(service, workspaceRoot, result);
+			const info = await this.activateStartedSandbox(service, result.workspaceRoot, result);
 			this.activeSandboxBackendConnected = true;
 			this.sessionSandboxStates.set(sessionKey, {
 				type: "daemon",
