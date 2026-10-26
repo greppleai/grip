@@ -1,6 +1,6 @@
 # Remote Workspace Daemon
 
-`grip --daemon` starts Grip as a remote workspace runtime. A normal local Grip process remains the orchestrator: it owns provider credentials, model calls, prompts, sessions, compaction, extensions, subagents, RPC, and UI. The daemon owns one configured workspace and executes canonical workspace tools, primitive project-resource operations, streamed file transfers, optional process execution, and optional colocated LSP.
+`grip --daemon` starts Grip as a remote workspace runtime. A normal local Grip process remains the orchestrator: it owns provider credentials, model calls, prompts, sessions, compaction, extensions, jobs, RPC, and UI. The daemon owns one configured workspace and executes canonical workspace tools, primitive project-resource operations, streamed file transfers, and optional process execution.
 
 Grip includes the daemon in the single-file executable; install a published, checksummed binary using [Quickstart](quickstart.md#install) or use a locally built executable. The daemon needs no npm installation on its host.
 
@@ -33,7 +33,7 @@ Use `GRIP_REMOTE_TOKEN` on the client. Do not put tokens in query strings or URL
 
 In ordinary v1 mode, each daemon connection exposes a single workspace root; all clients of a daemon still share its OS-user trust domain. The daemon is an authenticated remote-code-execution service: anyone with the bearer token can use every advertised daemon capability. The separately negotiated v2 shared-Lima mode binds a workspace root per channel, but does **not** provide hostile-client isolation.
 
-Application-layer confinement prevents protocol paths and symlinks from escaping the configured workspace and optional temporary root for file tools, resource reads, file transfers, temporary outputs, subprocess working directories, and LSP paths. `GRIP_DAEMON_TEMP_ROOT` is opt-in and should point only to disposable storage inside an OS sandbox; it is unset by default. This is not an operating-system sandbox. If process execution is enabled, commands can access anything the daemon OS user can access. Run the daemon as a dedicated unprivileged user, in a container, VM, or equivalent sandbox for hostile repositories.
+Application-layer confinement prevents protocol paths and symlinks from escaping the configured workspace and optional temporary root for file tools, resource reads, file transfers, temporary outputs, and subprocess working directories. `GRIP_DAEMON_TEMP_ROOT` is opt-in and should point only to disposable storage inside an OS sandbox; it is unset by default. This is not an operating-system sandbox. If process execution is enabled, commands can access anything the daemon OS user can access. Run the daemon as a dedicated unprivileged user, in a container, VM, or equivalent sandbox for hostile repositories.
 
 The daemon refuses root and insecure non-loopback deployment by default. Non-loopback HTTP requires explicit override and should only be used behind a trusted TLS terminator. Prefer TLS for direct non-local use.
 
@@ -53,19 +53,16 @@ Common options:
 | environment only | `GRIP_DAEMON_TOKEN` | Server bearer token required by clients. |
 | environment only | `GRIP_DAEMON_ORIGINS` | Optional comma-separated exact WebSocket Origin allowlist. |
 | `--daemon-tls-cert <file>` / `--daemon-tls-key <file>` | `GRIP_DAEMON_TLS_CERT` / `GRIP_DAEMON_TLS_KEY` | Direct TLS listener material. |
-| `--daemon-allow-process-exec` | `GRIP_DAEMON_ALLOW_PROCESS_EXEC` | Enable shell/tool subprocess execution and managed LSP spawns. |
-| `--daemon-lsp-config <file>` | `GRIP_DAEMON_LSP_CONFIG` | Operator-reviewed LSP configuration layer. |
-| `--daemon-trust-project-lsp` | `GRIP_DAEMON_TRUST_PROJECT_LSP` | Include workspace `.grip/settings.json` LSP config. |
+| `--daemon-allow-process-exec` | `GRIP_DAEMON_ALLOW_PROCESS_EXEC` | Enable shell/tool subprocess execution. |
 
 Run `grip --daemon --help` for the complete limit and deployment option list.
 
-## Resources, extensions, and LSP
+## Resources and extensions
 
 Project instructions, skills, rules, and prompt templates are read through the daemon's confined primitive operations and parsed by the local orchestrating Grip with remote provenance. User and package resources remain local.
 
 Extensions always run in the orchestrating Grip process. `grip --daemon` does not discover or execute user, package, or project extensions and does not provide a fake `ExtensionContext`. Local extension hooks still wrap remote tool calls once, and backend-aware extensions may use the borrowed daemon `ToolOperations` facade.
 
-Daemon LSP is operator-owned and daemon-global. Configure it with `--daemon-lsp-config`; optionally include trusted project LSP settings with `--daemon-trust-project-lsp`. Managed spawned servers require `--daemon-allow-process-exec`. The orchestrator suppresses its local LSP manager for remote files and consumes the daemon's negotiated `lsp_*` tools and sanitized status.
 
 ## Operations and file transfer
 
@@ -90,7 +87,6 @@ GRIP_REMOTE_TOKEN=dev-token-dev-token-dev-token-dev-token ./grip-test.sh --remot
 - `404`: connect to `/grip/workspace`.
 - Non-loopback bind rejected: use loopback, enable TLS, or explicitly accept insecure transport only behind a trusted boundary.
 - `bash` unavailable: start the daemon with `--daemon-allow-process-exec` and isolate the OS user/container.
-- LSP unavailable: verify `--daemon-lsp-config`, process-exec grants for managed spawns, confined paths, and daemon status.
 - Resource reload mismatch: reconnect or run `/reload` after changing remote project resources.
 
 ## Migration from `pi-daemon`
@@ -107,6 +103,6 @@ Breaking changes from the retired daemon:
 - no separate daemon package, `pi-daemon` binary, compatibility shim, or old unversioned protocol;
 - no query-string or userinfo tokens; use `Authorization: Bearer` via `GRIP_REMOTE_TOKEN`;
 - no `HOST`/`PORT` aliases; use `GRIP_DAEMON_HOST`/`GRIP_DAEMON_PORT` or CLI flags;
-- workspace paths, symlinks, transfers, subprocess cwd, temporary outputs, resources, and LSP paths are confined;
+- workspace paths, symlinks, transfers, subprocess cwd, temporary outputs, and resources are confined;
 - process execution is disabled unless explicitly granted;
 - non-loopback and root deployments are refused unless explicitly overridden.

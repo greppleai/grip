@@ -33,7 +33,12 @@ const readSchema = Type.Object({
 	limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
 });
 
+const readImageSchema = Type.Object({
+	path: Type.String({ description: "Path to an image file to send to the model (relative or absolute)" }),
+});
+
 export type ReadToolInput = Static<typeof readSchema>;
+export type ReadImageToolInput = Static<typeof readImageSchema>;
 
 export interface ReadToolDetails {
 	truncation?: TruncationResult;
@@ -231,10 +236,10 @@ interface ReadExecutionOptions {
 	cwd: string;
 	operationsForPath: ReadToolOperationsSelector | undefined;
 	autoResizeImages: boolean;
+	imageOnly?: boolean;
 	model: Model<Api> | undefined;
 	signal: AbortSignal | undefined;
 }
-
 interface TextReadOutputOptions {
 	truncation: TruncationResult;
 	allLines: string[];
@@ -355,6 +360,9 @@ async function executeReadRequest(
 		? await target.operations.detectImageMimeType(target.path)
 		: undefined;
 	const nonVisionImageNote = getNonVisionImageNote(options.model);
+	if (options.imageOnly && !mimeType) {
+		throw new Error(`Not a supported image file: ${options.input.path}`);
+	}
 	const result = mimeType
 		? await readImageFile(target.operations, target.path, mimeType, options.autoResizeImages, nonVisionImageNote)
 		: await readTextFile(target.operations, target.path, options.input.offset, options.input.limit);
@@ -441,4 +449,73 @@ export function createReadToolDefinition(operations: ToolOperations, options?: R
 
 export function createReadTool(operations: ToolOperations, options?: ReadToolOptions): AgentTool<typeof readSchema> {
 	return wrapToolDefinition(createReadToolDefinition(operations, options));
+}
+
+export type ReadImageToolDefinition = ToolDefinition<typeof readImageSchema, ReadToolDetails | undefined>;
+
+/** Read image attachments independently of the text-file read tool. */
+export function createReadImageToolDefinition(
+	operations: ToolOperations,
+	options?: ReadToolOptions,
+): ReadImageToolDefinition {
+	const autoResizeImages = options?.autoResizeImages ?? true;
+	const operationsForPath = options?.operationsForPath;
+	const cwd = operations.cwd;
+	return {
+		name: "read_image",
+		label: "read_image",
+		description:
+			"Read an image file into the model context. Supports JPEG, PNG, GIF, WebP, and BMP; rejects non-image files. Use for screenshots or other images, not text files.",
+		promptSnippet: "Read an image into context (image files only)",
+		parameters: readImageSchema,
+		async execute(_toolCallId, input: ReadImageToolInput, signal?: AbortSignal, _onUpdate?, ctx?) {
+			return executeAbortableRead({
+				input,
+				defaultOperations: operations,
+				cwd,
+				operationsForPath,
+				autoResizeImages,
+				imageOnly: true,
+				model: ctx?.model,
+				signal,
+			});
+		},
+		renderCall(args, theme, context) {
+			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			const rawPath = str((args as { path?: unknown } | undefined)?.path);
+			const path = rawPath !== null ? shortenPath(rawPath) : null;
+			const pathDisplay =
+				path === null ? invalidArgText(theme) : path ? theme.fg("accent", path) : theme.fg("toolOutput", "...");
+			const displayOps = rawPath
+				? (getReadToolOperations(operationsForPath?.(resolveToCwd(rawPath, cwd))) ?? operations)
+				: operations;
+			text.setText(
+				formatBackendIcon(displayOps.getBackendInfo?.(), theme) +
+					`${theme.fg("toolTitle", theme.bold("read_image"))} ${pathDisplay}`,
+			);
+			return text;
+		},
+		renderResult(result, renderOptions, theme, context) {
+			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			text.setText(
+				formatReadResult(
+					context.args,
+					result,
+					renderOptions,
+					theme,
+					context.showImages,
+					context.cwd,
+					context.isError,
+				),
+			);
+			return text;
+		},
+	};
+}
+
+export function createReadImageTool(
+	operations: ToolOperations,
+	options?: ReadToolOptions,
+): AgentTool<typeof readImageSchema> {
+	return wrapToolDefinition(createReadImageToolDefinition(operations, options));
 }

@@ -2,7 +2,7 @@ import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, posix, resolve, win32 } from "node:path";
 import type { AutocompleteItem } from "@greppleai/grip-tui";
-import type { PortablePathFlavor } from "../core/lsp/portable-path.ts";
+import type { PortablePathFlavor } from "../core/portable-path.ts";
 
 function expandHome(value: string): string {
 	if (value === "~") return homedir();

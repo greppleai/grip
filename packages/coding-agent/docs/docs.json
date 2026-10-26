@@ -32,10 +32,6 @@
           "path": "keybindings.md"
         },
         {
-          "title": "Language Servers",
-          "path": "lsp.md"
-        },
-        {
           "title": "Remote Daemon",
           "path": "daemon.md"
         },

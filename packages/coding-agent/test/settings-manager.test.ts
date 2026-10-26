@@ -45,6 +45,26 @@ describe("SettingsManager", () => {
 			"compressionDetectionModel",
 		);
 	});
+	it("stores the global job model and clears it when set to undefined", async () => {
+		writeFileSync(
+			join(projectDir, CONFIG_DIR_NAME, "settings.json"),
+			JSON.stringify({ jobModel: "untrusted/project-model" }),
+		);
+		const manager = SettingsManager.create(projectDir, agentDir);
+		expect(manager.getJobModel()).toBeUndefined();
+
+		manager.setJobModel("anthropic/claude-sonnet");
+		await manager.flush();
+		expect(manager.getJobModel()).toBe("anthropic/claude-sonnet");
+		expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).jobModel).toBe(
+			"anthropic/claude-sonnet",
+		);
+
+		manager.setJobModel(undefined);
+		await manager.flush();
+		expect(manager.getJobModel()).toBeUndefined();
+		expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"))).not.toHaveProperty("jobModel");
+	});
 	describe("preserves externally added settings", () => {
 		it("should preserve enabledModels when changing thinking level", async () => {
 			// Create initial settings file
@@ -360,66 +380,66 @@ describe("SettingsManager", () => {
 		});
 	});
 
-	describe("enableSubagents", () => {
-		it("defaults to false when omitted", () => {
+	describe("enableJobs", () => {
+		it("defaults to true when omitted", () => {
 			const manager = SettingsManager.create(projectDir, agentDir);
-			expect(manager.getEnableSubagents()).toBe(false);
+			expect(manager.getEnableJobs()).toBe(true);
 		});
 
 		it("reads explicit values from global and project settings", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enableSubagents: true }));
-			expect(SettingsManager.create(projectDir, agentDir).getEnableSubagents()).toBe(true);
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enableJobs: true }));
+			expect(SettingsManager.create(projectDir, agentDir).getEnableJobs()).toBe(true);
 
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enableSubagents: false }));
-			expect(SettingsManager.create(projectDir, agentDir).getEnableSubagents()).toBe(false);
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enableJobs: false }));
+			expect(SettingsManager.create(projectDir, agentDir).getEnableJobs()).toBe(false);
 		});
 
 		it("lets project settings override global settings", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enableSubagents: true }));
-			writeFileSync(join(projectDir, CONFIG_DIR_NAME, "settings.json"), JSON.stringify({ enableSubagents: false }));
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enableJobs: true }));
+			writeFileSync(join(projectDir, CONFIG_DIR_NAME, "settings.json"), JSON.stringify({ enableJobs: false }));
 
 			const manager = SettingsManager.create(projectDir, agentDir);
-			expect(manager.getEnableSubagents()).toBe(false);
+			expect(manager.getEnableJobs()).toBe(false);
 		});
 
 		it("lets runtime overrides override file settings", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enableSubagents: false }));
-			writeFileSync(join(projectDir, CONFIG_DIR_NAME, "settings.json"), JSON.stringify({ enableSubagents: false }));
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enableJobs: false }));
+			writeFileSync(join(projectDir, CONFIG_DIR_NAME, "settings.json"), JSON.stringify({ enableJobs: false }));
 
 			const manager = SettingsManager.create(projectDir, agentDir);
-			manager.applyOverrides({ enableSubagents: true });
-			expect(manager.getEnableSubagents()).toBe(true);
+			manager.applyOverrides({ enableJobs: true });
+			expect(manager.getEnableJobs()).toBe(true);
 		});
 
 		it("persists setter updates and preserves unrelated file changes", async () => {
 			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(settingsPath, JSON.stringify({ theme: "dark", enableSubagents: false }));
+			writeFileSync(settingsPath, JSON.stringify({ theme: "dark", enableJobs: false }));
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 			const currentSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
 			currentSettings.shellPath = "/bin/zsh";
 			writeFileSync(settingsPath, JSON.stringify(currentSettings, null, 2));
 
-			manager.setEnableSubagents(true);
+			manager.setEnableJobs(true);
 			await manager.flush();
 
 			const savedSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-			expect(savedSettings.enableSubagents).toBe(true);
+			expect(savedSettings.enableJobs).toBe(true);
 			expect(savedSettings.theme).toBe("dark");
 			expect(savedSettings.shellPath).toBe("/bin/zsh");
 		});
 
-		it("reloads enableSubagents from disk", async () => {
+		it("reloads enableJobs from disk", async () => {
 			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(settingsPath, JSON.stringify({ enableSubagents: false }));
+			writeFileSync(settingsPath, JSON.stringify({ enableJobs: false }));
 
 			const manager = SettingsManager.create(projectDir, agentDir);
-			expect(manager.getEnableSubagents()).toBe(false);
+			expect(manager.getEnableJobs()).toBe(false);
 
-			writeFileSync(settingsPath, JSON.stringify({ enableSubagents: true }));
+			writeFileSync(settingsPath, JSON.stringify({ enableJobs: true }));
 			await manager.reload();
 
-			expect(manager.getEnableSubagents()).toBe(true);
+			expect(manager.getEnableJobs()).toBe(true);
 		});
 	});
 
@@ -591,30 +611,6 @@ describe("SettingsManager", () => {
 				baseUrl: "https://search.example.test",
 			});
 			expect(manager.getToolSettings("custom")).toEqual({ enabled: true });
-		});
-	});
-	describe("enableLspTools", () => {
-		it("defaults off and respects settings precedence and runtime overrides", () => {
-			const manager = SettingsManager.create(projectDir, agentDir);
-			expect(manager.getEnableLspTools()).toBe(false);
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enableLspTools: true }));
-			writeFileSync(join(projectDir, CONFIG_DIR_NAME, "settings.json"), JSON.stringify({ enableLspTools: false }));
-			const layered = SettingsManager.create(projectDir, agentDir);
-			expect(layered.getEnableLspTools()).toBe(false);
-			layered.applyOverrides({ enableLspTools: true });
-			expect(layered.getEnableLspTools()).toBe(true);
-		});
-	});
-	describe("LSP settings", () => {
-		it("keeps global and project layers separate instead of shallow-merging them", () => {
-			const globalLsp = { servers: [{ id: "global", enabled: false }] };
-			const projectLsp = { enabled: false };
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ lsp: globalLsp }));
-			writeFileSync(join(projectDir, CONFIG_DIR_NAME, "settings.json"), JSON.stringify({ lsp: projectLsp }));
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			expect(manager.getGlobalLspConfiguration()).toEqual(globalLsp);
-			expect(manager.getProjectLspConfiguration()).toEqual(projectLsp);
 		});
 	});
 });

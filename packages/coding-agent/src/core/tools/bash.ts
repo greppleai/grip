@@ -20,11 +20,25 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult
 
 const bashSchema = Type.Object({
 	command: Type.String({ description: "Bash command to execute" }),
-	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
+	host: Type.Optional(
+		Type.Boolean({
+			description:
+				"Run on the host instead of the active tool backend; requires a mapped sandbox and fresh user approval",
+		}),
+	),
+	description: Type.Optional(
+		Type.String({
+			description:
+				"Required with host: true: explain why host execution is necessary and its side effects (unverified agent text)",
+		}),
+	),
+	timeout: Type.Optional(
+		Type.Number({ description: "Timeout in seconds (optional; host commands default to 120 seconds)" }),
+	),
 	output_mode: Type.Optional(
 		Type.Union([Type.Literal("always"), Type.Literal("on_fail"), Type.Literal("never")], {
 			description:
-				"Output sent to the model: always (default) includes stdout/stderr, on_fail includes it only if the command fails, never omits it even on failure. The UI and session history retain the output.",
+				"Output sent to the model for ordinary (non-host) commands: on_fail (recommended for pass/fail checks) includes stdout/stderr only if the command fails; always (runtime default) includes it on success and failure; never omits it even on failure. The UI and session history retain ordinary command output. Host output is withheld regardless of this setting.",
 		}),
 	),
 });
@@ -139,6 +153,7 @@ function formatBashCall(args: Partial<BashToolInput> | undefined, backendInfo?: 
 	const commandDisplay = command === null ? invalidArgText(theme) : command ? command : theme.fg("toolOutput", "...");
 	return (
 		formatBackendIcon(backendInfo, theme) +
+		(args?.host ? theme.fg("warning", "[host] ") : "") +
 		theme.fg("toolTitle", theme.bold("$ ")) +
 		theme.fg("accent", theme.bold(commandDisplay))
 	);
@@ -270,6 +285,38 @@ function throwBashExecutionError(error: unknown, outputText: string): never {
 	throw error;
 }
 
+async function executeApprovedHostBash(
+	command: string,
+	description: string | undefined,
+	timeout: number | undefined,
+	signal: AbortSignal | undefined,
+	ctx: ExtensionContext | undefined,
+): Promise<AgentToolResult<BashToolDetails | undefined>> {
+	if (typeof description !== "string" || !description.trim()) {
+		throw new Error("Host bash requires a non-empty description of purpose and side effects");
+	}
+	if (typeof command !== "string" || !command.trim() || command.includes("\0")) {
+		throw new Error("Host bash requires a non-empty command");
+	}
+	if (!ctx?.isSandbox()) throw new Error("Host bash requires an active Grip sandbox");
+	const result = await ctx.execHostCommand(command, {
+		question: `Run this shell command on the host? Unverified agent description: ${description}`,
+		signal,
+		approvalTimeoutMs: 60_000,
+		timeout: timeout ?? 120,
+	});
+	// Host stdout/stderr may contain secrets. Never stream them to the model or
+	// persist them in the tool result (including the host-side fullOutputPath).
+	if ((result.cancelled || result.exitCode !== 0) && ctx.hasUI && result.output.trim()) {
+		ctx.ui.notify(`Host command output:\n${result.output.trim()}`, "error");
+	}
+	if (result.cancelled) throw new Error("Host command was cancelled or timed out; output withheld");
+	if (result.exitCode !== 0) {
+		throw new Error(`Host command failed (exit code ${result.exitCode ?? "unknown"}); output withheld`);
+	}
+	return { content: [{ type: "text", text: "Host command succeeded; output withheld" }], details: undefined };
+}
+
 export type BashToolDefinition = ToolDefinition<typeof bashSchema, BashToolDetails | undefined, BashRenderState>;
 
 export function createBashToolDefinition(operations: ToolOperations, options?: BashToolOptions): BashToolDefinition {
@@ -280,13 +327,21 @@ export function createBashToolDefinition(operations: ToolOperations, options?: B
 	return {
 		name: "bash",
 		label: "bash",
-		description: `Execute a bash command in the current working directory. By default, the model receives stdout and stderr; output_mode can omit them from model context while retaining the UI and session output. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
+		description: `Execute a bash command in the active tool backend. Set host: true ONLY if the user specifically requests host execution: this requires a non-empty description, a mapped Grip sandbox, and fresh user approval (60-second deadline). Host output is withheld from model results. For ordinary commands the model receives stdout and stderr by default; output_mode can omit them from model context while retaining UI and session output. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
 		promptSnippet: "Execute bash commands (ls, grep, find, etc.)",
 		promptGuidelines: [
-			"For bash checks such as tests or builds, use output_mode: on_fail when only success or failure matters. Use always (default) when output contains needed data or warnings; use never only if output is unnecessary even on failure.",
+			"For Bash tests, builds, linters, and other pass/fail checks, explicitly set output_mode: on_fail when the exit status is sufficient on success; failure output remains visible. Use always (the runtime default) when successful output or warnings must be inspected, including project-required full logs. Do not use always merely to report passing-test counts. Use never only if even failure output is unnecessary.",
+			"Use bash with host: true only when the user specifically requests execution on the host. Supply a non-empty description explaining why host access is needed and the side effects. Review the exact command and mapped host cwd in the mandatory per-call approval; never use host: true as a fallback when sandbox commands fail. Host output is withheld from the model regardless of output_mode.",
 		],
 		parameters: bashSchema,
-		async execute(_toolCallId, { command, timeout }: BashToolInput, signal?: AbortSignal, onUpdate?, ctx?) {
+		async execute(
+			_toolCallId,
+			{ command, timeout, host, description }: BashToolInput,
+			signal?: AbortSignal,
+			onUpdate?,
+			ctx?,
+		) {
+			if (host === true) return executeApprovedHostBash(command, description, timeout, signal, ctx);
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
 			const spawnContext = resolveSpawnContext(resolvedCommand, ops.cwd, spawnHook, exposeSessionEnvironment, ctx);
 			const output = new OutputAccumulator({ tempFilePrefix: "grip-bash" });

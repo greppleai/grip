@@ -11,7 +11,6 @@ import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
-import type { LspConfigurationLayer } from "./lsp/config.ts";
 import type { SandboxCleanupBehavior } from "./sandbox/config.ts";
 
 // grip-ignore noNearIdenticalDataStructures: Persisted overrides permit omitted fields so settings layering can apply defaults independently of the fully resolved harness runtime contract.
@@ -69,6 +68,7 @@ export interface WarningSettings {
 }
 
 export type ToolSettings = Record<string, Record<string, unknown> | undefined>;
+export type WebsearchSettingProvider = "duckduckgo" | "brave" | "firecrawl";
 
 export interface SandboxSettings {
 	limaBinary?: string; // default: limactl
@@ -126,8 +126,8 @@ export interface Settings {
 	prompts?: string[]; // Array of local prompt template paths or directories
 	themes?: string[]; // Array of local theme file paths or directories
 	enableSkillCommands?: boolean; // default: true - register skills and rules as /skill:name and /rule:name commands
-	enableSubagents?: boolean; // default: false - expose built-in subagent tools
-	enableLspTools?: boolean; // default: false - expose configured LSP tools by default
+	enableJobs?: boolean; // default: true - expose built-in job tools
+	jobModel?: string; // Global provider/model ID used for jobs
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
@@ -142,8 +142,6 @@ export interface Settings {
 	markdown?: MarkdownSettings;
 	warnings?: WarningSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
-	/** LSP configuration layer for this settings scope. Global and project layers resolve separately. */
-	lsp?: LspConfigurationLayer;
 	tools?: ToolSettings; // Per-tool configuration keyed by tool name (for example tools.websearch)
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
@@ -218,11 +216,6 @@ function applySettingsOverride(
 	overrideValue: Settings[keyof Settings],
 ): void {
 	const resultRecord = result as Record<string, unknown>;
-	// LSP layers are resolved independently with scope-specific trust policy.
-	if (key === "lsp") {
-		setOwnValue(resultRecord, key, overrideValue);
-		return;
-	}
 	// Tool names merge, but each tool's configuration remains a shallow layer.
 	if (key === "tools" && isMergeableObject(overrideValue)) {
 		result.tools = mergeToolSettings(base.tools, overrideValue as ToolSettings);
@@ -521,14 +514,6 @@ export class SettingsManager {
 		return structuredClone(this.projectSettings);
 	}
 
-	getGlobalLspConfiguration(): unknown {
-		return this.globalSettings.lsp === undefined ? undefined : structuredClone(this.globalSettings.lsp);
-	}
-
-	getProjectLspConfiguration(): unknown {
-		return this.projectSettings.lsp === undefined ? undefined : structuredClone(this.projectSettings.lsp);
-	}
-
 	async reload(): Promise<void> {
 		await this.writeQueue;
 		const globalLoad = SettingsManager.tryLoadFromStorage(this.storage, "global");
@@ -739,6 +724,19 @@ export class SettingsManager {
 	getToolSettings(toolName: string): Record<string, unknown> | undefined {
 		const value = this.settings.tools?.[toolName];
 		return value ? structuredClone(value) : undefined;
+	}
+
+	/** Persist the selected web search engine without putting its API key in settings.json. */
+	setWebsearchProvider(provider: WebsearchSettingProvider): void {
+		const websearch: Record<string, unknown> = { ...this.globalSettings.tools?.websearch, provider };
+		if (this.globalSettings.tools?.websearch?.provider !== provider) {
+			// Old provider-specific credentials and endpoints must not carry over to a new engine.
+			delete websearch.apiKey;
+			delete websearch.baseUrl;
+		}
+		this.globalSettings.tools = { ...this.globalSettings.tools, websearch };
+		this.markModified("tools", "websearch");
+		this.save();
 	}
 
 	getLastChangelogVersion(): string | undefined {
@@ -1125,17 +1123,26 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getEnableSubagents(): boolean {
-		return this.settings.enableSubagents ?? false;
+	getEnableJobs(): boolean {
+		return this.settings.enableJobs ?? true;
 	}
 
-	getEnableLspTools(): boolean {
-		return this.settings.enableLspTools ?? false;
+	setEnableJobs(enabled: boolean): void {
+		this.globalSettings.enableJobs = enabled;
+		this.markModified("enableJobs");
+		this.save();
 	}
 
-	setEnableSubagents(enabled: boolean): void {
-		this.globalSettings.enableSubagents = enabled;
-		this.markModified("enableSubagents");
+	getJobModel(): string | undefined {
+		const model = this.globalSettings.jobModel;
+		return typeof model === "string" && model.trim() ? model : undefined;
+	}
+
+	setJobModel(model: string | undefined): void {
+		if (model !== undefined && !model.trim()) throw new Error("A job model is required");
+		if (model === undefined) delete this.globalSettings.jobModel;
+		else this.globalSettings.jobModel = model;
+		this.markModified("jobModel");
 		this.save();
 	}
 

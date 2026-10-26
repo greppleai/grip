@@ -94,8 +94,8 @@ describe("Mermaid settings", () => {
 		expect(manager.getCodeBlockIndent()).toBe("\t");
 	});
 
-	it("offers subagent, Mermaid, and fullscreen settings and invokes their callbacks", () => {
-		const onEnableSubagentsChange = vi.fn();
+	it("offers job, Mermaid, and fullscreen settings and invokes their callbacks", () => {
+		const onEnableJobsChange = vi.fn();
 		const onMermaidRenderingModeChange = vi.fn();
 		const onFullscreenExitOutputChange = vi.fn();
 		const onFullscreenScrollbarChange = vi.fn();
@@ -106,7 +106,7 @@ describe("Mermaid settings", () => {
 			autoResizeImages: true,
 			blockImages: false,
 			enableSkillCommands: true,
-			enableSubagents: false,
+			enableJobs: false,
 			steeringMode: "one-at-a-time",
 			followUpMode: "one-at-a-time",
 			transport: "auto",
@@ -141,7 +141,7 @@ describe("Mermaid settings", () => {
 			onAutoResizeImagesChange: noop,
 			onBlockImagesChange: noop,
 			onEnableSkillCommandsChange: noop,
-			onEnableSubagentsChange,
+			onEnableJobsChange,
 			onSteeringModeChange: noop,
 			onFollowUpModeChange: noop,
 			onTransportChange: noop,
@@ -167,13 +167,13 @@ describe("Mermaid settings", () => {
 			onWarningsChange: noop,
 			onCancel: noop,
 		};
-		const subagentSelector = new SettingsSelectorComponent(config, callbacks);
-		const subagentList = subagentSelector.getSettingsList();
-		for (const character of "Enable subagents") subagentList.handleInput(character);
-		expect(subagentSelector.render(80).join("\n")).toContain("Enable subagents");
-		subagentList.handleInput("\r");
-		subagentList.handleInput("\r");
-		expect(onEnableSubagentsChange.mock.calls.map(([enabled]) => enabled)).toEqual([true, false]);
+		const jobsSelector = new SettingsSelectorComponent(config, callbacks);
+		const jobsList = jobsSelector.getSettingsList();
+		for (const character of "Enable jobs") jobsList.handleInput(character);
+		expect(jobsSelector.render(80).join("\n")).toContain("Enable jobs");
+		jobsList.handleInput("\r");
+		jobsList.handleInput("\r");
+		expect(onEnableJobsChange.mock.calls.map(([enabled]) => enabled)).toEqual([true, false]);
 
 		const selector = new SettingsSelectorComponent(config, callbacks);
 		const list = selector.getSettingsList();

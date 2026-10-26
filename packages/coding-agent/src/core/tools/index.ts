@@ -4,58 +4,45 @@ import { type BashToolOptions, createBashTool, createBashToolDefinition } from "
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.ts";
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
+import { createJobTool, createJobToolDefinition, type JobToolOptions } from "./job.ts";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import type { ToolOperations } from "./operations.ts";
-import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
 import {
-	createCreateSubagentTool,
-	createCreateSubagentToolDefinition,
-	createSubagentRunsTool,
-	createSubagentRunsToolDefinition,
-	createSubagentTool,
-	createSubagentToolDefinition,
-	type SubagentToolOptions,
-} from "./subagent.ts";
+	createReadImageTool,
+	createReadImageToolDefinition,
+	createReadTool,
+	createReadToolDefinition,
+	type ReadToolOptions,
+} from "./read.ts";
 import { createWebsearchTool, createWebsearchToolDefinition, type WebsearchToolOptions } from "./websearch.ts";
 import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } from "./write.ts";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName =
-	| "read"
-	| "bash"
-	| "edit"
-	| "write"
-	| "grep"
-	| "find"
-	| "ls"
-	| "subagent"
-	| "subagent_runs"
-	| "create_subagent"
-	| "websearch";
+export type ToolName = "read" | "read_image" | "bash" | "edit" | "write" | "grep" | "find" | "ls" | "job" | "websearch";
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
+	"read_image",
 	"bash",
 	"edit",
 	"write",
 	"grep",
 	"find",
 	"ls",
-	"subagent",
-	"subagent_runs",
-	"create_subagent",
+	"job",
 	"websearch",
 ]);
 
 export interface ToolsOptions {
 	read?: ReadToolOptions;
+	read_image?: ReadToolOptions;
 	bash?: BashToolOptions;
 	write?: WriteToolOptions;
 	edit?: EditToolOptions;
 	grep?: GrepToolOptions;
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
-	subagent?: SubagentToolOptions;
+	job?: JobToolOptions;
 	websearch?: WebsearchToolOptions;
 }
 
@@ -63,6 +50,8 @@ export function createToolDefinition(toolName: ToolName, operations: ToolOperati
 	switch (toolName) {
 		case "read":
 			return createReadToolDefinition(operations, options?.read);
+		case "read_image":
+			return createReadImageToolDefinition(operations, options?.read_image ?? options?.read);
 		case "bash":
 			return createBashToolDefinition(operations, options?.bash);
 		case "edit":
@@ -75,12 +64,8 @@ export function createToolDefinition(toolName: ToolName, operations: ToolOperati
 			return createFindToolDefinition(operations, options?.find);
 		case "ls":
 			return createLsToolDefinition(operations, options?.ls);
-		case "subagent":
-			return createSubagentToolDefinition(options?.subagent);
-		case "subagent_runs":
-			return createSubagentRunsToolDefinition(options?.subagent?.runRegistry);
-		case "create_subagent":
-			return createCreateSubagentToolDefinition(options?.subagent?.configRegistry);
+		case "job":
+			return createJobToolDefinition(options?.job);
 		case "websearch":
 			return createWebsearchToolDefinition(options?.websearch);
 		default:
@@ -92,6 +77,8 @@ export function createTool(toolName: ToolName, operations: ToolOperations, optio
 	switch (toolName) {
 		case "read":
 			return createReadTool(operations, options?.read);
+		case "read_image":
+			return createReadImageTool(operations, options?.read_image ?? options?.read);
 		case "bash":
 			return createBashTool(operations, options?.bash);
 		case "edit":
@@ -104,12 +91,8 @@ export function createTool(toolName: ToolName, operations: ToolOperations, optio
 			return createFindTool(operations, options?.find);
 		case "ls":
 			return createLsTool(operations, options?.ls);
-		case "subagent":
-			return createSubagentTool(options?.subagent);
-		case "subagent_runs":
-			return createSubagentRunsTool(options?.subagent?.runRegistry);
-		case "create_subagent":
-			return createCreateSubagentTool(options?.subagent?.configRegistry);
+		case "job":
+			return createJobTool(options?.job);
 		case "websearch":
 			return createWebsearchTool(options?.websearch);
 		default:
@@ -120,7 +103,7 @@ export function createTool(toolName: ToolName, operations: ToolOperations, optio
 export function createCodingToolDefinitions(operations: ToolOperations, options?: ToolsOptions): ToolDef[] {
 	return [
 		createReadToolDefinition(operations, options?.read),
-		createBashToolDefinition(operations, options?.bash),
+		createReadImageToolDefinition(operations, options?.read_image ?? options?.read),
 		createEditToolDefinition(operations, options?.edit),
 		createWriteToolDefinition(operations, options?.write),
 	];
@@ -129,6 +112,7 @@ export function createCodingToolDefinitions(operations: ToolOperations, options?
 export function createReadOnlyToolDefinitions(operations: ToolOperations, options?: ToolsOptions): ToolDef[] {
 	return [
 		createReadToolDefinition(operations, options?.read),
+		createReadImageToolDefinition(operations, options?.read_image ?? options?.read),
 		createGrepToolDefinition(operations, options?.grep),
 		createFindToolDefinition(operations, options?.find),
 		createLsToolDefinition(operations, options?.ls),
@@ -141,15 +125,14 @@ export function createAllToolDefinitions(
 ): Record<ToolName, ToolDef> {
 	return {
 		read: createReadToolDefinition(operations, options?.read),
+		read_image: createReadImageToolDefinition(operations, options?.read_image ?? options?.read),
 		bash: createBashToolDefinition(operations, options?.bash),
 		edit: createEditToolDefinition(operations, options?.edit),
 		write: createWriteToolDefinition(operations, options?.write),
 		grep: createGrepToolDefinition(operations, options?.grep),
 		find: createFindToolDefinition(operations, options?.find),
 		ls: createLsToolDefinition(operations, options?.ls),
-		subagent: createSubagentToolDefinition(options?.subagent),
-		subagent_runs: createSubagentRunsToolDefinition(options?.subagent?.runRegistry),
-		create_subagent: createCreateSubagentToolDefinition(options?.subagent?.configRegistry),
+		job: createJobToolDefinition(options?.job),
 		websearch: createWebsearchToolDefinition(options?.websearch),
 	};
 }
@@ -157,7 +140,7 @@ export function createAllToolDefinitions(
 export function createCodingTools(operations: ToolOperations, options?: ToolsOptions): Tool[] {
 	return [
 		createReadTool(operations, options?.read),
-		createBashTool(operations, options?.bash),
+		createReadImageTool(operations, options?.read_image ?? options?.read),
 		createEditTool(operations, options?.edit),
 		createWriteTool(operations, options?.write),
 	];
@@ -166,6 +149,7 @@ export function createCodingTools(operations: ToolOperations, options?: ToolsOpt
 export function createReadOnlyTools(operations: ToolOperations, options?: ToolsOptions): Tool[] {
 	return [
 		createReadTool(operations, options?.read),
+		createReadImageTool(operations, options?.read_image ?? options?.read),
 		createGrepTool(operations, options?.grep),
 		createFindTool(operations, options?.find),
 		createLsTool(operations, options?.ls),
@@ -175,15 +159,14 @@ export function createReadOnlyTools(operations: ToolOperations, options?: ToolsO
 export function createAllTools(operations: ToolOperations, options?: ToolsOptions): Record<ToolName, Tool> {
 	return {
 		read: createReadTool(operations, options?.read),
+		read_image: createReadImageTool(operations, options?.read_image ?? options?.read),
 		bash: createBashTool(operations, options?.bash),
 		edit: createEditTool(operations, options?.edit),
 		write: createWriteTool(operations, options?.write),
 		grep: createGrepTool(operations, options?.grep),
 		find: createFindTool(operations, options?.find),
 		ls: createLsTool(operations, options?.ls),
-		subagent: createSubagentTool(options?.subagent),
-		subagent_runs: createSubagentRunsTool(options?.subagent?.runRegistry),
-		create_subagent: createCreateSubagentTool(options?.subagent?.configRegistry),
+		job: createJobTool(options?.job),
 		websearch: createWebsearchTool(options?.websearch),
 	};
 }

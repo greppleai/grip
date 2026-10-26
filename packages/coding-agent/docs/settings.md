@@ -169,8 +169,8 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `enableSubagents` | boolean | `false` | Enable the built-in `subagent`, `subagent_runs`, and `create_subagent` tools by default. Changes made in `/settings` apply immediately; `/reload` applies file edits. Explicit CLI/SDK tool allowlists can opt in to any subset, while no-tools modes remain authoritative. |
-| `enableLspTools` | boolean | `false` | Expose configured `lsp_*` tools by default. `--enable-lsp-tools` opts in for one CLI invocation; `/reload` applies settings-file edits. The LSP runtime still requires separate configuration; explicit tool allowlists override this default. |
+| `enableJobs` | boolean | `true` | Enable the built-in `job` tool for bounded delegated tasks. Changes made in `/settings` apply immediately; `/reload` applies file edits. An explicit CLI/SDK tool allowlist can still select `job`, while no-tools modes remain authoritative. |
+| `jobModel` | string | - | Global-only exact available `provider/model-id` for all jobs. Set via `/job model set --model <provider/model-id>` and clear via `/job model clear`. Takes precedence over `GRIP_DEFAULT_JOB_MODEL`, then the parent model; applies on the next job, not to a running child. |
 | `tools` | object | `{}` | Per-tool configuration keyed by tool name |
 | `tools.websearch.provider` | string | `"duckduckgo"` | Web search provider: `"duckduckgo"`, `"brave"`, or `"firecrawl"` |
 | `tools.websearch.apiKey` | string | - | Provider API key. Brave env fallback: `GRIP_WEBSEARCH_BRAVE_API_KEY` or `BRAVE_SEARCH_API_KEY`. Firecrawl env fallback: `GRIP_WEBSEARCH_FIRECRAWL_API_KEY` or `FIRECRAWL_API_KEY` |
@@ -187,7 +187,9 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 }
 ```
 
-Global and project `tools` settings merge per tool name, so a project can override `tools.websearch.baseUrl` while keeping a global `tools.websearch.apiKey`. Environment variables remain supported for `websearch`; explicit settings take precedence. Firecrawl uses `POST /v2/search` with web results only.
+Global and project `tools` settings merge per tool name, so a project can override `tools.websearch.baseUrl` while keeping a global `tools.websearch.apiKey`. Environment variables remain supported for `websearch`; explicit settings take precedence over environment variables. Firecrawl uses `POST /v2/search` with web results only.
+
+In interactive mode, run `/websearch login` to select DuckDuckGo (no key), Brave Search, or Firecrawl. Brave and Firecrawl keys entered there are stored separately per engine in `~/.grip/agent/auth.json` (not in `settings.json`); selecting an engine again lets you keep its saved key by submitting an empty prompt, or replace it by entering a new key. The selected provider is saved globally under `tools.websearch.provider` and takes effect on the next tool call. `/logout` can remove saved web search credentials. Keys saved by this command take precedence over `tools.websearch.apiKey`; provider-specific environment variables remain fallbacks.
 
 ### Lima Sandbox
 
@@ -255,32 +257,6 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 | `markdown.mermaid` | string | `"streaming"` | Terminal Mermaid rendering: `"off"`, `"final"`, or `"streaming"`. Invalid values fall back to `"streaming"` |
 
 Built-in Mermaid rendering applies only to ordinary user and assistant messages in the interactive transcript. `"final"` keeps streaming assistant fences as source until the message finishes; `"streaming"` renders best-effort partial diagrams while streaming. The built-in does not render Mermaid in thinking or custom messages, summaries, print/RPC/JSON output, or HTML export, and never changes session storage or model context.
-
-### Language Servers
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `lsp` | object | - | Validated external language-server configuration layer |
-
-Grip does not include a default language server. Configure spawned or attached servers explicitly:
-
-```json
-{
-  "lsp": {
-    "servers": [
-      {
-        "id": "rust",
-        "selectors": [{ "languageId": "rust", "pattern": "**/*.rs" }],
-        "transport": { "type": "tcp", "host": "127.0.0.1", "port": 9257 },
-        "lifecycle": { "type": "attached" },
-        "workspace": { "type": "session" }
-      }
-    ]
-  }
-}
-```
-
-Global and project `lsp` values are separate layers; project definitions override complete servers by ID. Active project-settings transports and positive top-level `enabled: true` activation are blocked unless an SDK host grants `trustProjectLspTransports`; this host-only decision cannot be enabled by project settings. Safe disable/removal entries remain effective. Malformed or unreadable LSP sources produce visible nonfatal diagnostics at the applicable error or warning severity and disable LSP; `--no-lsp` remains available as a per-invocation recovery path. CLI and host layers have higher precedence. See [Language Server Protocol](lsp.md) for spawn examples, merge/replace/disable semantics, trust, roots, transports, remote path mapping, and troubleshooting.
 
 ### Resources
 
@@ -353,7 +329,7 @@ See [packages.md](packages.md) for package management details. `pi-skills` above
 
 ## Project Overrides
 
-Project settings (`.grip/settings.json`) override global settings. Nested objects are merged, except `lsp`, which uses the server-ID layer semantics documented in [Language Servers](#language-servers):
+Project settings (`.grip/settings.json`) override global settings. Nested objects are merged:
 
 ```json
 // ~/.grip/agent/settings.json (global)

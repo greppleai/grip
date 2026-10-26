@@ -31,10 +31,8 @@ export interface DaemonConfiguration {
 	readonly allowProcessExec: boolean;
 	readonly allowRoot: boolean;
 	readonly forwardedEnvironment: readonly string[];
-	readonly lspConfigPath?: string;
 	readonly sandboxInstructionsPath?: string;
 	readonly userAgentsPath?: string;
-	readonly trustProjectLsp: boolean;
 	readonly maxConnections: number;
 	readonly maxGlobalRequests: number;
 	readonly maxGlobalTransfers: number;
@@ -71,8 +69,6 @@ interface ParsedDaemonInputs {
 	allowProcessExec?: boolean;
 	allowRoot?: boolean;
 	forwardedEnvironment: string[];
-	lspConfigPath?: string;
-	trustProjectLsp?: boolean;
 	maxConnections?: string;
 	maxPendingConnections?: string;
 	handshakeTimeoutMs?: string;
@@ -95,7 +91,6 @@ const VALUE_FLAGS = new Map<string, keyof ParsedDaemonInputs>([
 	["--daemon-shared-parent", "sharedParent"],
 	["--daemon-tls-cert", "tlsCertPath"],
 	["--daemon-tls-key", "tlsKeyPath"],
-	["--daemon-lsp-config", "lspConfigPath"],
 	["--daemon-max-connections", "maxConnections"],
 	["--daemon-max-pending-connections", "maxPendingConnections"],
 	["--daemon-handshake-timeout-ms", "handshakeTimeoutMs"],
@@ -107,7 +102,6 @@ const BOOLEAN_FLAGS = new Map<string, keyof ParsedDaemonInputs>([
 	["--daemon-allow-process-exec", "allowProcessExec"],
 	["--daemon-allow-root", "allowRoot"],
 	["--daemon-allow-full-filesystem", "allowFullFilesystem"],
-	["--daemon-trust-project-lsp", "trustProjectLsp"],
 ]);
 
 function parseBoolean(value: string | undefined, name: string, fallback = false): boolean {
@@ -485,9 +479,6 @@ export async function parseDaemonCommand(
 	const allowFullFilesystem =
 		inputs.allowFullFilesystem ??
 		parseBoolean(environment.GRIP_DAEMON_ALLOW_FULL_FILESYSTEM, "GRIP_DAEMON_ALLOW_FULL_FILESYSTEM");
-	const trustProjectLsp =
-		inputs.trustProjectLsp ??
-		parseBoolean(environment.GRIP_DAEMON_TRUST_PROJECT_LSP, "GRIP_DAEMON_TRUST_PROJECT_LSP");
 	const forwardedEnvironment = parseEnvironmentNames([
 		...(environment.GRIP_DAEMON_ENV?.split(",") ?? []),
 		...inputs.forwardedEnvironment,
@@ -537,11 +528,6 @@ export async function parseDaemonCommand(
 			allowProcessExec,
 			allowRoot,
 			forwardedEnvironment: Object.freeze(forwardedEnvironment),
-			lspConfigPath:
-				inputs.lspConfigPath || environment.GRIP_DAEMON_LSP_CONFIG
-					? resolve(startupCwd, inputs.lspConfigPath ?? environment.GRIP_DAEMON_LSP_CONFIG!)
-					: undefined,
-			trustProjectLsp,
 			sandboxInstructionsPath: environment.GRIP_DAEMON_SANDBOX_INSTRUCTIONS
 				? resolve(startupCwd, environment.GRIP_DAEMON_SANDBOX_INSTRUCTIONS)
 				: undefined,

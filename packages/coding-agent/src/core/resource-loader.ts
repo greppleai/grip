@@ -11,13 +11,13 @@ import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
 import { createExtensionRuntime, loadExtensionFromFactory, loadExtensions } from "./extensions/loader.ts";
 import type { Extension, ExtensionFactory, ExtensionRuntime, LoadExtensionsResult } from "./extensions/types.ts";
-import { dirnamePortablePath, joinPortablePath, pathComparisonValue, relativeWithin } from "./lsp/portable-path.ts";
 import {
 	DefaultPackageManager,
 	type PathMetadata,
 	type ResolvedPaths,
 	type ResolvedResource,
 } from "./package-manager.ts";
+import { dirnamePortablePath, joinPortablePath, pathComparisonValue, relativeWithin } from "./portable-path.ts";
 import type { PromptTemplate } from "./prompt-templates.ts";
 import { loadPromptTemplates, loadPromptTemplatesWithOperations } from "./prompt-templates.ts";
 import type { LoadRulesResult, Rule } from "./rules.ts";

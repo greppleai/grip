@@ -516,7 +516,6 @@ describe("grip --daemon CLI and lifecycle", () => {
 					"--no-prompt-templates",
 					"--no-themes",
 					"--no-context-files",
-					"--no-lsp",
 					"--provider",
 					"smoke",
 					"--model",

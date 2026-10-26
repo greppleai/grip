@@ -1,6 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
-import type { PortablePathFlavor } from "../lsp/portable-path.ts";
+import type { PortablePathFlavor } from "../portable-path.ts";
 import { matchesHookIf, matchesHookInput } from "./matcher.ts";
 import type {
 	CommandHookHandler,

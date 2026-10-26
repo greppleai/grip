@@ -9,7 +9,6 @@ export {
 	type AgentSessionConfig,
 	type AgentSessionEvent,
 	type AgentSessionEventListener,
-	type AgentSessionReloadResult,
 	type ConfigureRemoteSandboxOptions,
 	type ExecuteBashOptions,
 	type ForkableUserMessage,
@@ -119,6 +118,7 @@ export type {
 	InputEvent,
 	InputEventResult,
 	InputSource,
+	JobToolCallEvent,
 	KeybindingsManager,
 	LoadExtensionsResult,
 	LsToolCallEvent,
@@ -128,6 +128,7 @@ export type {
 	MessageRenderOptions,
 	ProviderConfig,
 	ProviderModelConfig,
+	ReadImageToolCallEvent,
 	ReadToolCallEvent,
 	RegisteredCommand,
 	RegisteredTool,
@@ -142,7 +143,6 @@ export type {
 	SessionShutdownReason,
 	SessionStartEvent,
 	SessionTreeEvent,
-	SubagentToolCallEvent,
 	TerminalInputHandler,
 	ToolCallEvent,
 	ToolCallEventResult,
@@ -167,9 +167,10 @@ export {
 	isEditToolResult,
 	isFindToolResult,
 	isGrepToolResult,
+	isJobToolResult,
 	isLsToolResult,
+	isReadImageToolResult,
 	isReadToolResult,
-	isSubagentToolResult,
 	isToolCallEventType,
 	isWebsearchToolResult,
 	isWriteToolResult,
@@ -197,123 +198,6 @@ export {
 	type InstructionResourceLoaderOptions,
 	type InstructionResourceLoaderWithOperationsOptions,
 } from "./core/instruction-resource-loader.ts";
-export {
-	LspClient,
-	type LspClientOptions,
-	type LspClientOwnership,
-	type LspClientStartResult,
-	type LspConnectionState,
-	type LspDocumentSyncCapabilities,
-	type LspShutdownMode,
-} from "./core/lsp/client.ts";
-export {
-	type LspClientInfo,
-	type LspConfigurationDiagnostic,
-	type LspConfigurationLayer,
-	type LspConfigurationMode,
-	type LspConfiguredServer,
-	type LspDisabledServer,
-	type LspDocumentSelector,
-	type LspJsonValue,
-	type LspNamedPipeTransport,
-	type LspPathMapping,
-	type LspProgrammaticTransport,
-	type LspServerEntry,
-	type LspServerFeatures,
-	type LspServerLifecycle,
-	type LspServerTimeouts,
-	type LspSpawnTransport,
-	type LspTcpTransport,
-	type LspTraceValue,
-	type LspTransport,
-	type LspUnixSocketTransport,
-	type LspWorkspaceRoot,
-	type ParseLspConfigurationResult,
-	parseLspConfiguration,
-	type ResolvedLspConfiguration,
-	resolveLspConfiguration,
-} from "./core/lsp/config.ts";
-export {
-	type LoadLspConfigurationOptions,
-	type LoadLspConfigurationResult,
-	type LspConfigurationInput,
-	type LspConfigurationInputScope,
-	type LspConfigurationSourceDiagnostic,
-	type LspConfigurationSourceDiagnosticSeverity,
-	loadLspConfiguration,
-	resolveLspConfigurationLayerPaths,
-} from "./core/lsp/config-loader.ts";
-export {
-	createLspDiagnosticsTool,
-	formatAutoDiagnosticsForChangedFile,
-	type LspDiagnosticsDetails,
-} from "./core/lsp/diagnostics.ts";
-export {
-	LspFileSync,
-	type LspSynchronizationFailure,
-	type LspSynchronizationResult,
-	type LspTrackedDocument,
-} from "./core/lsp/file-sync.ts";
-export {
-	createLspRuntimeState,
-	createLspToolDefinitions,
-	LSP_TOOL_NAMES,
-	type LspLifecycleOptions,
-	type LspRuntimeOwner,
-	type LspRuntimeState,
-	type LspSessionStatus,
-	type LspToolName,
-	registerLspLifecycleHandlers,
-	registerStandaloneLspLifecycleHandlers,
-} from "./core/lsp/integration.ts";
-export {
-	LspPathMapper,
-	type LspPathMappingResult,
-	type LspRouteFailure,
-	type LspRouteResult,
-	LspRouter,
-	type LspRouterOptions,
-	type LspRouteTarget,
-} from "./core/lsp/language-map.ts";
-export {
-	type LspClientRoute,
-	type LspClientRouteCollection,
-	type LspClientRouteFailure,
-	type LspClientStartedListener,
-	type LspClientsWillShutdownListener,
-	type LspConnectionFactoryResolver,
-	LspManager,
-	type LspManagerOptions,
-	type LspServerStatus,
-	type LspToolFeature,
-} from "./core/lsp/manager.ts";
-export {
-	createLspDefinitionTool,
-	createLspHoverTool,
-	createLspReferencesTool,
-	type LspHoverDetails,
-	type LspLocationDetails,
-} from "./core/lsp/navigation.ts";
-export {
-	createLspCodeActionsTool,
-	createLspRenameTool,
-	type LspCodeActionsDetails,
-	type LspRenameDetails,
-} from "./core/lsp/refactor.ts";
-export {
-	createManagedStdioConnectionFactory,
-	createNamedPipeConnectionFactory,
-	createTcpConnectionFactory,
-	createUnixSocketConnectionFactory,
-	type LspConnectionDisposalMode,
-	type LspConnectionEndpoint,
-	type LspConnectionFactory,
-	type LspConnectionFactoryContext,
-	type LspConnectionFactoryRegistry,
-	type LspConnectionHandle,
-	type ManagedStdioConnectionOptions,
-	resolveLspConnectionFactory,
-} from "./core/lsp/transport.ts";
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export type { ScopedModel } from "./core/model-resolver.ts";
@@ -457,6 +341,24 @@ export {
 } from "./core/tools/grep.ts";
 export { createCodingTools, createReadOnlyTools, type ToolsOptions } from "./core/tools/index.ts";
 export {
+	createJobTool,
+	createJobToolDefinition,
+	formatJobTaskPrompt,
+	type JobDetails,
+	type JobExecutionBackend,
+	type JobExecutionContext,
+	type JobMode,
+	type JobResult,
+	type JobRunner,
+	type JobRunOutcome,
+	type JobRunRequest,
+	type JobStatus,
+	type JobToolInput,
+	type JobToolOptions,
+	type JobUsageStats,
+	jobParamsSchema,
+} from "./core/tools/job.ts";
+export {
 	createLsTool,
 	createLsToolDefinition,
 	type LsToolDetails,
@@ -483,9 +385,14 @@ export {
 	type ToolMkdirOptions,
 	type ToolOperations,
 } from "./core/tools/operations.ts";
+
 export {
+	createReadImageTool,
+	createReadImageToolDefinition,
 	createReadTool,
 	createReadToolDefinition,
+	type ReadImageToolDefinition,
+	type ReadImageToolInput,
 	type ReadToolDetails,
 	type ReadToolInput,
 	type ReadToolOperations,
@@ -504,23 +411,7 @@ export {
 	type SessionSearchToolDetails,
 	type SessionSearchToolInput,
 } from "./core/tools/session-history.ts";
-export {
-	createSubagentTool,
-	createSubagentToolDefinition,
-	type SubagentDetails,
-	type SubagentResult,
-	type SubagentRunInfo,
-	type SubagentRunner,
-	type SubagentRunOutcome,
-	type SubagentRunRegistry,
-	type SubagentRunRequest,
-	type SubagentRunsToolInput,
-	type SubagentStatus,
-	type SubagentToolInput,
-	type SubagentToolOptions,
-	type SubagentUsageStats,
-} from "./core/tools/subagent.ts";
-export type { AgentListFormatResult } from "./core/tools/subagent-agents.ts";
+
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,

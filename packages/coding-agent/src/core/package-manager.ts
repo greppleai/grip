@@ -211,7 +211,7 @@ interface GitCheckoutTarget {
 	fetchArgs: string[];
 }
 
-// grip-ignore noNearIdenticalDataStructures: Parsed npm identity/version data and LSP client metadata have unrelated validation and ownership.
+// grip-ignore noNearIdenticalDataStructures: Parsed npm identity/version data and remote workspace metadata have unrelated validation and ownership.
 interface ParsedNpmSpec {
 	name: string;
 	version?: string;

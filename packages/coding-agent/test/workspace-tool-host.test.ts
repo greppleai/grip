@@ -157,12 +157,11 @@ describe("WorkspaceToolHost", () => {
 		const host = new WorkspaceToolHost({ cwd });
 		try {
 			expect(host.getCatalog().map((entry) => entry.name)).toEqual(WORKSPACE_TOOL_NAMES);
-			expect(host.getDefinition("subagent")).toBeUndefined();
+			expect(host.getDefinition("job")).toBeUndefined();
 			expect(host.getDefinition("load_tool")).toBeUndefined();
 			expect(host.getDefinition("session_search")).toBeUndefined();
 			expect(host.getDefinition("session_entry_get")).toBeUndefined();
-			expect(host.getDefinition("lsp_diagnostics")).toBeUndefined();
-			expect(() => host.prepareArguments("subagent", {})).toThrow("Unknown or non-workspace tool");
+			expect(() => host.prepareArguments("job", {})).toThrow("Unknown or non-workspace tool");
 		} finally {
 			await host.dispose();
 		}
@@ -175,7 +174,7 @@ describe("WorkspaceToolHost", () => {
 		const host = new WorkspaceToolHost({ cwd, operations, toolNames: ["read"] });
 		try {
 			expect(Object.isFrozen(WORKSPACE_TOOL_NAMES)).toBe(true);
-			expect(() => (WORKSPACE_TOOL_NAMES as unknown as string[]).push("subagent")).toThrow();
+			expect(() => (WORKSPACE_TOOL_NAMES as unknown as string[]).push("job")).toThrow();
 			expect(host.getCatalog().map((entry) => entry.name)).toEqual(["read"]);
 			expect(host.getDefinition("bash")).toBeUndefined();
 			const exposedDefinitions = host.getDefinitions() as Map<string, unknown>;
@@ -325,6 +324,7 @@ describe("WorkspaceToolHost", () => {
 		await writeFile(filePath, "still available\n", "utf8");
 		const operations = new LocalToolOperations(cwd);
 		const session = createSession(cwd, operations);
+		session.setActiveToolsByName([...session.getActiveToolNames(), "read"]);
 		const previousReadDefinition = session.getToolDefinition("read");
 		const internals = session as unknown as { _refreshToolRegistry: () => void };
 		const refreshToolRegistry = internals._refreshToolRegistry.bind(session);

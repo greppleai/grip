@@ -332,7 +332,6 @@ describe("remote workspace protocol contract", () => {
 			"workspace.grep": { pattern: "x", path: "/workspace", limit: 10 },
 			"workspace.detect_image_mime": { path: "a" },
 			"workspace.exec": { command: "pwd", cwd: "/workspace" },
-			"lsp.status": {},
 			"resource.read": { path: ".grip/SYSTEM.md" },
 			"artifact.read": { path: "artifact-id" },
 			"transfer.upload": { path: "a", length: 1, sha256: "0".repeat(64), overwrite: false },
@@ -345,7 +344,6 @@ describe("remote workspace protocol contract", () => {
 				method,
 			).toThrow();
 		}
-		expect(() => parseRemoteWorkspaceResult("lsp.status", { enabled: false, servers: [] })).not.toThrow();
 		expect(() => parseRemoteWorkspaceResult("workspace.stat", statResult())).not.toThrow();
 		expect(() => parseRemoteWorkspaceResult("workspace.stat", { ...statResult(), extra: true })).toThrow();
 		expect(() =>

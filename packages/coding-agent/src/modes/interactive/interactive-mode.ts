@@ -114,6 +114,7 @@ import {
 	type HookExecutionNotice,
 	parseHookExecutionNotice,
 } from "../../core/hooks/types.ts";
+import { completeJobCommand, JOB_COMMAND_USAGE, parseJobCommand } from "../../core/job-command.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
 import { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.ts";
@@ -146,13 +147,19 @@ import { LocalSessionManager } from "../../core/session/local-session-manager.ts
 import type { Session } from "../../core/session/session.ts";
 import type { SessionContext } from "../../core/session/types.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
-import { type FullscreenExitOutput, isValidModelProfileName } from "../../core/settings-manager.ts";
+import {
+	type FullscreenExitOutput,
+	isValidModelProfileName,
+	type WebsearchSettingProvider,
+} from "../../core/settings-manager.ts";
 import type { LoadSkillsResult } from "../../core/skills.ts";
 import { BUILTIN_SLASH_COMMANDS, HIDDEN_BUILTIN_SLASH_COMMAND_NAMES } from "../../core/slash-commands.ts";
 import { getSourceBackendIcon, type SourceInfo } from "../../core/source-info.ts";
+import { parseSystemPromptCommand, SYSTEM_PROMPT_COMMAND_USAGE } from "../../core/system-prompt-command.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 import type { ToolBackendInfo } from "../../core/tools/operations.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
+import { parseWebsearchToolOptions, WEBSEARCH_AUTH_PROVIDER_IDS } from "../../core/tools/websearch.ts";
 import { getNewEntries, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
@@ -246,6 +253,7 @@ interface PendingStopHookNotification {
 type CompactionDisplayReason = "manual" | "threshold" | "overflow";
 type ProviderAuthenticationType = "oauth" | "api_key";
 type AuthenticationOperation = "login" | "logout";
+type WebsearchApiKeyProvider = Exclude<WebsearchSettingProvider, "duckduckgo">;
 type SessionPathCommand = "/cd" | "/export" | "/import";
 
 interface ProviderAuthenticationModelSelection {
@@ -871,6 +879,7 @@ export class InteractiveMode {
 		}
 		for (const [name, hint, choices] of [
 			["hooks", "<enable|disable>", ["enable", "disable"]],
+			["websearch", "<login>", ["login"]],
 			["context-compression", "[on|off]", ["on", "off"]],
 			["compress-detection", "[on|off]", ["on", "off"]],
 		] as const) {
@@ -933,6 +942,15 @@ export class InteractiveMode {
 				}));
 			};
 		}
+		const jobCommand = slashCommands.find((command) => command.name === "job")!;
+		jobCommand.argumentHint = "model <show|set --model <provider/model-id>|clear>";
+		jobCommand.getArgumentCompletions = (prefix) => {
+			const models = this.session.modelRegistry.getAvailable().map((model) => `${model.provider}/${model.id}`);
+			return completeJobCommand(prefix, models);
+		};
+		const systemPromptCommand = slashCommands.find((command) => command.name === "system-prompt")!;
+		systemPromptCommand.argumentHint = "";
+		systemPromptCommand.getArgumentCompletions = undefined;
 
 		const profileCommand = slashCommands.find((command) => command.name === "profile");
 		if (profileCommand) {
@@ -2207,8 +2225,6 @@ export class InteractiveMode {
 			toolOperations: this.session.getToolOperations(),
 			getToolBackendInfo: () => this.session.getToolBackendInfo(),
 			isSandbox: () => this.session.isSandbox(),
-			getLspStatus: () => this.session.getLspStatus(),
-			configureLsp: (configuration) => this.session.configureLsp(configuration),
 			execToolBackend: (command, options) => {
 				const operations = this.session.getToolOperations();
 				return executeBashWithOperations(command, options?.cwd ?? operations.cwd, operations, options);
@@ -3373,9 +3389,113 @@ export class InteractiveMode {
 		};
 		return commands[text];
 	}
+	private async handleJobCommand(text: string): Promise<void> {
+		const parsed = parseJobCommand(text.slice("/job".length));
+		if (parsed.action === "invalid") {
+			this.showWarning(JOB_COMMAND_USAGE);
+			return;
+		}
+		if (parsed.action === "show") {
+			this.handleJobModelShow();
+			return;
+		}
+		if (parsed.action === "clear") {
+			await this.handleJobModelClear();
+			return;
+		}
+		await this.handleJobModelSet(parsed.model);
+	}
+
+	private handleJobModelShow(): void {
+		const setting = this.settingsManager.getJobModel();
+		const environment = process.env.GRIP_DEFAULT_JOB_MODEL?.trim();
+		const parent = this.session.model ? `${this.session.model.provider}/${this.session.model.id}` : undefined;
+		const effective = setting ?? environment ?? parent;
+		const source = setting ? "setting" : environment ? "environment" : parent ? "parent model" : "none";
+		this.showStatus(`Job model: ${effective ?? "(unset)"} (${source})`);
+	}
+
+	private async handleJobModelClear(): Promise<void> {
+		const loadError = this.settingsManager.getLoadError("global");
+		if (loadError) {
+			this.showError(`Cannot clear job model: ${loadError.message}`);
+			return;
+		}
+		this.settingsManager.setJobModel(undefined);
+		await this.settingsManager.flush();
+		this.showStatus("Global job model cleared");
+	}
+
+	private async handleJobModelSet(model: string): Promise<void> {
+		const selected = this.session.modelRegistry
+			.getAvailable()
+			.find((available) => `${available.provider}/${available.id}`.toLowerCase() === model.toLowerCase());
+		if (!selected) {
+			this.showWarning(`Unavailable job model: ${model}. Choose an available provider/model-id.`);
+			return;
+		}
+		const loadError = this.settingsManager.getLoadError("global");
+		if (loadError) {
+			this.showError(`Cannot save job model: ${loadError.message}`);
+			return;
+		}
+		const reference = `${selected.provider}/${selected.id}`;
+		this.settingsManager.setJobModel(reference);
+		await this.settingsManager.flush();
+		this.showStatus(`Global job model set to ${reference}`);
+	}
+
+	private resolveWebsearchEditorCommand(text: string): EditorCommandAction | undefined {
+		if (!this.matchesEditorCommand(text, "/websearch")) return undefined;
+		return {
+			run: () => {
+				this.editor.setText("");
+				if (text.slice("/websearch".length).trim() !== "login") {
+					this.showWarning("Usage: /websearch login");
+					return;
+				}
+				this.showWebsearchLoginSelector();
+			},
+		};
+	}
+	private async handleSystemPromptCommand(text: string): Promise<void> {
+		const command = parseSystemPromptCommand(text.slice("/system-prompt".length));
+		if (command.action === "invalid") {
+			this.showWarning(SYSTEM_PROMPT_COMMAND_USAGE);
+			return;
+		}
+		const prompt = this.session.systemPrompt;
+		const label = "System Prompt (current session)";
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new DynamicBorder());
+		this.chatContainer.addChild(new Text(theme.fg("accent", label), 1, 0));
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(prompt, 1, 0));
+		this.chatContainer.addChild(new DynamicBorder());
+		this.ui.requestRender();
+	}
 
 	private async handleBuiltInEditorCommand(text: string): Promise<boolean> {
-		const action = this.resolveParameterizedEditorCommand(text) ?? this.resolveExactEditorCommand(text);
+		const action =
+			(this.matchesEditorCommand(text, "/system-prompt")
+				? {
+						run: async () => {
+							this.editor.setText("");
+							await this.handleSystemPromptCommand(text);
+						},
+					}
+				: undefined) ??
+			(this.matchesEditorCommand(text, "/job")
+				? {
+						run: async () => {
+							this.editor.setText("");
+							await this.handleJobCommand(text);
+						},
+					}
+				: undefined) ??
+			this.resolveWebsearchEditorCommand(text) ??
+			this.resolveParameterizedEditorCommand(text) ??
+			this.resolveExactEditorCommand(text);
 		if (!action) return false;
 		await action.run();
 		return true;
@@ -4873,7 +4993,7 @@ export class InteractiveMode {
 					autoResizeImages: this.settingsManager.getImageAutoResize(),
 					blockImages: this.settingsManager.getBlockImages(),
 					enableSkillCommands: this.settingsManager.getEnableSkillCommands(),
-					enableSubagents: this.session.subagentsEnabled,
+					enableJobs: this.session.jobsEnabled,
 					steeringMode: this.session.steeringMode,
 					followUpMode: this.session.followUpMode,
 					transport: this.settingsManager.getTransport(),
@@ -4931,8 +5051,8 @@ export class InteractiveMode {
 						this.settingsManager.setEnableSkillCommands(enabled);
 						this.setupAutocompleteProvider();
 					},
-					onEnableSubagentsChange: (enabled) => {
-						this.session.setSubagentsEnabled(enabled);
+					onEnableJobsChange: (enabled) => {
+						this.session.setJobsEnabled(enabled);
 					},
 					onSteeringModeChange: (mode) => {
 						this.session.setSteeringMode(mode);
@@ -5607,7 +5727,12 @@ export class InteractiveMode {
 			}
 			options.push({
 				id: providerId,
-				name: this.session.modelRegistry.getProviderDisplayName(providerId),
+				name:
+					providerId === WEBSEARCH_AUTH_PROVIDER_IDS.brave
+						? "Brave Search (web search)"
+						: providerId === WEBSEARCH_AUTH_PROVIDER_IDS.firecrawl
+							? "Firecrawl (web search)"
+							: this.session.modelRegistry.getProviderDisplayName(providerId),
 				authType: credential.type,
 			});
 		}
@@ -5825,6 +5950,83 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private showWebsearchLoginSelector(): void {
+		const choices = ["DuckDuckGo (no API key)", "Brave Search", "Firecrawl"];
+		this.showSelector((done) => {
+			const selector = new ExtensionSelectorComponent(
+				"Choose a web search engine:",
+				choices,
+				async (choice) => {
+					done();
+					if (choice === choices[0]) {
+						await this.activateWebsearchProvider("duckduckgo", "DuckDuckGo");
+					} else if (choice === choices[1]) {
+						await this.showWebsearchApiKeyDialog("brave", "Brave Search");
+					} else if (choice === choices[2]) {
+						await this.showWebsearchApiKeyDialog("firecrawl", "Firecrawl");
+					}
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector };
+		});
+	}
+
+	private async activateWebsearchProvider(provider: WebsearchSettingProvider, name: string): Promise<void> {
+		try {
+			const loadError = this.settingsManager.getLoadError("global");
+			if (loadError) throw new Error(`Cannot save global settings: ${loadError.message}`);
+			this.settingsManager.setWebsearchProvider(provider);
+			await this.settingsManager.flush();
+			const writeError = this.settingsManager.drainErrors().find((entry) => entry.scope === "global");
+			if (writeError) throw writeError.error;
+			const effective = parseWebsearchToolOptions(this.settingsManager.getToolSettings("websearch"));
+			if (effective?.provider !== provider) {
+				this.showWarning(`Saved ${name}, but a project or runtime setting overrides the websearch provider.`);
+			} else {
+				this.showStatus(`Web search engine: ${name}`);
+			}
+		} catch (error) {
+			this.showError(`Failed to configure web search: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	private hasWebsearchApiKey(provider: WebsearchApiKeyProvider): boolean {
+		const credential = this.session.modelRegistry.authStorage.get(WEBSEARCH_AUTH_PROVIDER_IDS[provider]);
+		if (credential?.type === "api_key" && credential.key.trim()) return true;
+		const config = parseWebsearchToolOptions(this.settingsManager.getToolSettings("websearch"));
+		if ((config?.provider === provider || config?.provider === `${provider}-search`) && config.apiKey) return true;
+		return provider === "brave"
+			? Boolean(process.env.GRIP_WEBSEARCH_BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY)
+			: Boolean(process.env.GRIP_WEBSEARCH_FIRECRAWL_API_KEY || process.env.FIRECRAWL_API_KEY);
+	}
+
+	private async showWebsearchApiKeyDialog(provider: WebsearchApiKeyProvider, name: string): Promise<void> {
+		const authId = WEBSEARCH_AUTH_PROVIDER_IDS[provider];
+		const dialog = new LoginDialogComponent(this.ui, authId, () => {}, name, `Configure ${name} web search`);
+		this.editorContainer.clear();
+		this.editorContainer.addChild(dialog);
+		this.ui.setFocus(dialog);
+		this.ui.requestRender();
+		try {
+			const apiKey = (await dialog.showPrompt("Enter API key (or leave blank to use an existing key):")).trim();
+			if (!apiKey && !this.hasWebsearchApiKey(provider)) throw new Error(`${name} requires an API key`);
+			if (apiKey) this.session.modelRegistry.authStorage.set(authId, { type: "api_key", key: apiKey });
+			await this.activateWebsearchProvider(provider, name);
+		} catch (error) {
+			if (!(error instanceof Error && error.message === "Login cancelled")) {
+				this.showError(`Failed to configure ${name}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		} finally {
+			this.editorContainer.clear();
+			this.editorContainer.addChild(this.editor);
+			this.ui.setFocus(this.editor);
+			this.ui.requestRender();
+		}
+	}
 	private async showApiKeyLoginDialog(providerId: string, providerName: string): Promise<void> {
 		const previousModel = this.session.model;
 

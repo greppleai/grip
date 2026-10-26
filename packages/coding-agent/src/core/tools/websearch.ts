@@ -22,6 +22,11 @@ export type WebsearchProvider =
 	| "firecrawl"
 	| "firecrawl-search";
 
+/** Credential IDs are separate from model-provider IDs and never stored in settings.json. */
+export const WEBSEARCH_AUTH_PROVIDER_IDS = {
+	brave: "websearch-brave",
+	firecrawl: "websearch-firecrawl",
+} as const;
 export interface WebsearchToolOptions {
 	provider?: WebsearchProvider;
 	apiKey?: string;
@@ -395,7 +400,8 @@ async function fetchFirecrawlResults(
 	return parseFirecrawlSearchResponse((await response.json()) as unknown, limit);
 }
 export function createWebsearchToolDefinition(
-	options?: WebsearchToolOptions,
+	options?: WebsearchToolOptions | (() => WebsearchToolOptions | undefined),
+	getStoredApiKey?: (source: WebsearchSource) => string | undefined,
 ): ToolDefinition<typeof websearchSchema, WebsearchToolDetails> {
 	return {
 		name: "websearch",
@@ -414,13 +420,18 @@ export function createWebsearchToolDefinition(
 			const onAbort = () => controller.abort();
 			signal?.addEventListener("abort", onAbort, { once: true });
 			try {
-				const source = resolveWebsearchProvider(options);
+				const currentOptions = typeof options === "function" ? options() : options;
+				const source = resolveWebsearchProvider(currentOptions);
+				const effectiveOptions = {
+					...currentOptions,
+					apiKey: getStoredApiKey?.(source) ?? currentOptions?.apiKey,
+				};
 				const results = await (async () => {
 					switch (source) {
 						case "brave-search":
-							return fetchBraveResults(trimmedQuery, effectiveLimit, controller.signal, options);
+							return fetchBraveResults(trimmedQuery, effectiveLimit, controller.signal, effectiveOptions);
 						case "firecrawl-search":
-							return fetchFirecrawlResults(trimmedQuery, effectiveLimit, controller.signal, options);
+							return fetchFirecrawlResults(trimmedQuery, effectiveLimit, controller.signal, effectiveOptions);
 						case "duckduckgo-instant-answer":
 							return fetchDuckDuckGoResults(trimmedQuery, effectiveLimit, controller.signal);
 					}

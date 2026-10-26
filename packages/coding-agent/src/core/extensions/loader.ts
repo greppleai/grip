@@ -248,6 +248,10 @@ function createExtensionAPI(
 		};
 	};
 	const api = {
+		registerJobFactory(factory: ExtensionFactory): void {
+			runtime.assertActive();
+			extension.jobFactory = factory;
+		},
 		// Registration methods - write to extension
 		on(event: string, handler: HandlerFn): void {
 			runtime.assertActive();

@@ -242,6 +242,7 @@ describe("AgentSession lazy session tool loading", () => {
 		const { resourceLoader, skills } = createMutableResourceLoader();
 		const harness = await createHarness({ resourceLoader });
 		harnesses.push(harness);
+		harness.session.setActiveToolsByName([...harness.session.getActiveToolNames(), "read"]);
 		harness.session.registerSessionTool(makeLazyTool("read_skill_tool", runs), { lazy: true });
 
 		const skillDir = join(harness.tempDir, "read-skill");
@@ -367,6 +368,7 @@ describe("AgentSession lazy session tool loading", () => {
 		const { resourceLoader, rules } = createMutableResourceLoader();
 		const harness = await createHarness({ resourceLoader });
 		harnesses.push(harness);
+		harness.session.setActiveToolsByName([...harness.session.getActiveToolNames(), "read"]);
 		harness.session.registerSessionTool(makeLazyTool("read_rule_tool", runs), { lazy: true });
 
 		const ruleDir = join(harness.tempDir, "read-rule");

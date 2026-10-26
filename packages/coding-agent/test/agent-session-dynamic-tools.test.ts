@@ -45,6 +45,21 @@ describe("AgentSession dynamic tool registration", () => {
 		return pi.createAgentSession({ session: options.sessionManager });
 	}
 
+	it("does not expose the removed composite tool", async () => {
+		const settingsManager = SettingsManager.create(tempDir, agentDir);
+		const sessionManager = new InMemorySessionManager().create();
+		const resourceLoader = new DefaultResourceLoader({ cwd: tempDir, agentDir, settingsManager });
+		await resourceLoader.reload();
+		const session = await createSession({ settingsManager, sessionManager, resourceLoader });
+		try {
+			expect(session.getAllTools().map((tool) => tool.name)).not.toContain("composite");
+			expect(session.getActiveToolNames()).not.toContain("composite");
+			expect(session.getToolDefinition("composite")).toBeUndefined();
+		} finally {
+			await session.dispose();
+		}
+	});
+
 	it("refreshes tool registry when tools are registered after initialization", async () => {
 		const settingsManager = SettingsManager.create(tempDir, agentDir);
 		const sessionManager = new InMemorySessionManager().create();
@@ -101,7 +116,8 @@ describe("AgentSession dynamic tool registration", () => {
 		expect(session.systemPrompt).toContain("- dynamic_tool: Run dynamic test behavior");
 		expect(session.systemPrompt).toContain("- Use dynamic_tool when the user asks for dynamic behavior tests.");
 		expect(session.systemPrompt).not.toContain("Inspect GRIP_* environment variables");
-		expect(session.systemPrompt).toContain("use output_mode: on_fail when only success or failure matters");
+		expect(session.systemPrompt).toContain("explicitly set output_mode: on_fail");
+		expect(session.systemPrompt).toContain("including project-required full logs");
 		session.setActiveToolsByName(["read"]);
 		expect(session.systemPrompt).not.toContain("output_mode: on_fail");
 

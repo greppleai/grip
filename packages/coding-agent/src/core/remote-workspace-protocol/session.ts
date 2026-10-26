@@ -279,7 +279,6 @@ function boundedCloseReason(reason: RemoteWorkspaceProtocolCloseReason): RemoteW
 
 function methodCapability(method: RemoteWorkspaceMethod): RemoteWorkspaceCapability | undefined {
 	if (method === "catalog.get" || method === "tool.invoke") return undefined;
-	if (method === "lsp.status") return "lsp_status";
 	if (method === "transfer.upload" || method === "transfer.download") return "file_transfer";
 	if (method === "artifact.read") return "artifacts";
 	return "primitive_operations";

@@ -25,13 +25,12 @@ import {
 	untrackDetachedChildPid,
 } from "../../utils/shell.ts";
 
-import type { PortablePathFlavor } from "../lsp/portable-path.ts";
+import type { PortablePathFlavor } from "../portable-path.ts";
 import {
 	DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
 	decodeCanonicalBase64,
 	hashRemoteWorkspaceJson,
 	parseRemoteWorkspaceToolResult,
-	type RemoteLspStatus,
 	type RemoteWorkspaceClientMessage,
 	type RemoteWorkspaceMethod,
 } from "../remote-workspace-protocol/contract.ts";
@@ -195,7 +194,6 @@ export interface ToolOperations {
 	resolveWorkspaceToolExecution?(name: string, parameterSchema: unknown): WorkspaceToolExecutionTarget;
 	executeWorkspaceTool?(name: string, invocation: WorkspaceToolRemoteInvocation): Promise<AgentToolResult<unknown>>;
 	onWorkspaceToolCatalogChanged?(listener: () => void | Promise<void>): () => void;
-	getRemoteLspStatus?(): RemoteLspStatus;
 	dispose?(): Promise<void>;
 }
 
@@ -562,10 +560,6 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 		});
 	}
 
-	getRemoteLspStatus(): RemoteLspStatus {
-		return this.operations?.getRemoteLspStatus() ?? { enabled: false, servers: [] };
-	}
-
 	onWorkspaceToolCatalogChanged(listener: () => void | Promise<void>): () => void {
 		this.catalogListeners.add(listener);
 		return () => this.catalogListeners.delete(listener);
@@ -662,7 +656,6 @@ export class RemoteToolOperations implements ToolOperations {
 	private readonly client: RemoteWorkspaceClientProtocol;
 	private readonly localToolSchemas = new Map<string, string>();
 	private readonly catalogListeners = new Set<() => void | Promise<void>>();
-	private remoteLspStatus: RemoteLspStatus = { enabled: false, servers: [] };
 	private disconnected = false;
 	private disposePromise: Promise<void> | undefined;
 
@@ -703,8 +696,8 @@ export class RemoteToolOperations implements ToolOperations {
 		this.client = new RemoteWorkspaceClientProtocol(transport, {
 			requiredCapabilities: ["primitive_operations", "tool_updates"],
 			optionalCapabilities: this.isShared
-				? ["catalog_refresh", "artifacts", "lsp_status"]
-				: ["catalog_refresh", "file_transfer", "artifacts", "lsp_status"],
+				? ["catalog_refresh", "artifacts"]
+				: ["catalog_refresh", "file_transfer", "artifacts"],
 			receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
 			localToolSchemas: this.localToolSchemas,
 			handshakeTimeoutMs: options.handshakeTimeoutMs,
@@ -713,7 +706,6 @@ export class RemoteToolOperations implements ToolOperations {
 				options.onDisconnect?.(message);
 			},
 			onCatalogRefreshed: async () => {
-				await this.refreshRemoteLspStatus();
 				await Promise.all([...this.catalogListeners].map((listener) => listener()));
 			},
 		});
@@ -762,7 +754,6 @@ export class RemoteToolOperations implements ToolOperations {
 			operations.cwd = handshake.workspace.root;
 			operations.workspacePathFlavor = handshake.workspace.pathFlavor;
 			operations.workspaceId = handshake.workspace.id;
-			await operations.refreshRemoteLspStatus();
 			return operations;
 		} catch (error) {
 			socket.terminate();
@@ -786,7 +777,6 @@ export class RemoteToolOperations implements ToolOperations {
 			operations.cwd = handshake.workspace.root;
 			operations.workspacePathFlavor = handshake.workspace.pathFlavor;
 			operations.workspaceId = handshake.workspace.id;
-			await operations.refreshRemoteLspStatus();
 			return operations;
 		} catch (error) {
 			await socket.close({ code: "normal", message: "Shared guest attach failed" });
@@ -845,7 +835,6 @@ export class RemoteToolOperations implements ToolOperations {
 			);
 			const toolResult = result;
 			if (!Array.isArray(toolResult.content)) throw new Error("Invalid remote workspace tool result content");
-			if (name.startsWith("lsp_")) await this.refreshRemoteLspStatus().catch(() => undefined);
 			return {
 				content: toolResult.content as AgentToolResult<unknown>["content"],
 				details: toolResult.details,
@@ -866,21 +855,9 @@ export class RemoteToolOperations implements ToolOperations {
 		}
 	}
 
-	getRemoteLspStatus(): RemoteLspStatus {
-		return structuredClone(this.remoteLspStatus);
-	}
-
 	onWorkspaceToolCatalogChanged(listener: () => void | Promise<void>): () => void {
 		this.catalogListeners.add(listener);
 		return () => this.catalogListeners.delete(listener);
-	}
-
-	private async refreshRemoteLspStatus(): Promise<void> {
-		if (!this.client.handshake?.catalog.operations.includes("lsp.status")) {
-			this.remoteLspStatus = { enabled: false, servers: [] };
-			return;
-		}
-		this.remoteLspStatus = (await this.client.request("lsp.status", {})) as RemoteLspStatus;
 	}
 
 	private request(method: RemoteWorkspaceMethod, params: unknown) {

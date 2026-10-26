@@ -35,7 +35,6 @@ For the full first-run flow, see [Quickstart](quickstart.md). Upgrading from the
 - [Using Grip](usage.md) - interactive mode, slash commands, context files, and CLI reference.
 - [Providers](providers.md) - subscription and API-key setup for built-in providers.
 - [Settings](settings.md) - global and project settings.
-- [Language Server Protocol](lsp.md) - configure spawned servers, attached endpoints, host connections, and remote-backend path mappings.
 - [Remote Daemon](daemon.md) - run `grip --daemon` as a confined remote workspace runtime.
 - [Lima Sandbox](sandbox.md) - hidden user-only `/sandbox` command for Lima VM workspace execution.
 - [Keybindings](keybindings.md) - default shortcuts and custom keybindings.

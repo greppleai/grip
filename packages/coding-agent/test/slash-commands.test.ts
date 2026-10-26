@@ -12,6 +12,7 @@ describe("built-in slash commands", () => {
 	it("includes directory switching", () => {
 		const names = BUILTIN_SLASH_COMMANDS.map((command) => command.name);
 		expect(names).toContain("cd");
+		expect(names).toContain("settings");
 	});
 
 	it("includes user-only hook control without exposing it to model command catalogs", () => {

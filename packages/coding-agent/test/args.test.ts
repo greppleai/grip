@@ -173,45 +173,6 @@ describe("parseArgs", () => {
 		});
 	});
 
-	describe("LSP flags", () => {
-		test("parses LSP configuration, runtime disable, and tool enablement separately", () => {
-			expect(parseArgs([]).enableLspTools).toBeUndefined();
-			const result = parseArgs(["--lsp-config", "./lsp.json", "--enable-lsp-tools", "--no-lsp"]);
-			expect(result.lspConfig).toBe("./lsp.json");
-			expect(result.enableLspTools).toBe(true);
-			expect(result.noLsp).toBe(true);
-			expect(result.unknownFlags.size).toBe(0);
-		});
-
-		test("reports a missing --lsp-config path", () => {
-			const result = parseArgs(["--lsp-config", "--no-lsp"]);
-			expect(result.noLsp).toBe(true);
-			expect(result.diagnostics).toContainEqual({ type: "error", message: "--lsp-config requires a file path" });
-		});
-	});
-
-	test("help lists every conditional LSP tool and its configuration requirement", () => {
-		const log = vi.spyOn(console, "log").mockImplementation(() => {});
-		try {
-			printHelp();
-			const help = String(log.mock.calls[0]?.[0]);
-			expect(help).toContain("Requires LSP configuration");
-			expect(help).toContain("--enable-lsp-tools");
-			for (const name of [
-				"lsp_diagnostics",
-				"lsp_hover",
-				"lsp_definition",
-				"lsp_references",
-				"lsp_rename",
-				"lsp_code_actions",
-			]) {
-				expect(help).toContain(name);
-			}
-		} finally {
-			log.mockRestore();
-		}
-	});
-
 	describe("--no-session flag", () => {
 		test("parses --no-session flag", () => {
 			const result = parseArgs(["--no-session"]);

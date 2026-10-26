@@ -3,7 +3,7 @@ import { fauxAssistantMessage, fauxToolCall } from "@greppleai/grip-ai";
 import { describe, expect, it } from "vitest";
 import { estimateContextTokens } from "../src/core/compaction/compaction.ts";
 import { convertToLlm } from "../src/core/messages.ts";
-import { createBashTool } from "../src/core/tools/bash.ts";
+import { createBashTool, createBashToolDefinition } from "../src/core/tools/bash.ts";
 import { LocalToolOperations } from "../src/core/tools/operations.ts";
 import { createHarness } from "./suite/harness.ts";
 
@@ -35,6 +35,12 @@ function projectBashResult(mode: Mode | undefined, isError: boolean, output: str
 }
 
 describe("bash output_mode", () => {
+	it("recommends on_fail for checks while keeping always as the runtime default", () => {
+		const definition = createBashToolDefinition(new LocalToolOperations(process.cwd()));
+		expect(definition.promptGuidelines?.[0]).toContain("explicitly set output_mode: on_fail");
+		expect(JSON.stringify(definition.parameters.properties.output_mode)).toContain("always (runtime default)");
+	});
+
 	it("preserves the previous output behavior by default and for always", () => {
 		for (const mode of [undefined, "always"] as const) {
 			const { result, projected } = projectBashResult(mode, false, "IMPORTANT: complete output");
