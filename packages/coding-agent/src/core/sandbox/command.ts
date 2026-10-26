@@ -6,6 +6,7 @@ export interface SandboxStartUserCommand {
 	template?: string;
 	update?: boolean;
 	setDefault?: boolean;
+	workspace?: string;
 }
 
 export interface SandboxDefaultUserCommand {
@@ -37,15 +38,16 @@ function splitCommandLine(input: string): string[] {
 function parseSandboxStartValue(
 	option: string | undefined,
 	value: string | undefined,
-): Pick<SandboxStartUserCommand, "name" | "template"> {
-	if (option !== "--name" && option !== "--template") {
+): Pick<SandboxStartUserCommand, "name" | "template" | "workspace"> {
+	if (option !== "--name" && option !== "--template" && option !== "--workspace") {
 		throw new Error(`Unsupported /sandbox start argument: ${option}`);
 	}
 	if (!value || value.startsWith("--")) {
 		throw new Error(
-			"Usage: /sandbox start [--name <lima-instance>] [--template <lima-template>] [--update] [--set-default]",
+			"Usage: /sandbox start [--name <lima-instance>] [--workspace <host-folder>] [--template <lima-template>] [--update] [--set-default]",
 		);
 	}
+	if (option === "--workspace") return { workspace: value };
 	return option === "--name" ? { name: value } : { template: value };
 }
 
@@ -69,7 +71,7 @@ function parseSandboxStartFlag(option: string | undefined, flags: SandboxStartFl
 }
 
 function parseSandboxStartCommand(tokens: string[]): SandboxUserCommand {
-	const fields: Pick<SandboxStartUserCommand, "name" | "template"> = {};
+	const fields: Pick<SandboxStartUserCommand, "name" | "template" | "workspace"> = {};
 	const flags: SandboxStartFlags = { update: false, setDefault: false };
 	for (let index = 2; index < tokens.length; index++) {
 		const option = tokens[index];

@@ -3,10 +3,23 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { acquireSharedLimaOwnerLock } from "../src/core/remote-workspace-protocol/lima-owner-lock.ts";
 import type { SandboxCommandOptions, SandboxCommandResult, SandboxRunner } from "../src/core/sandbox/config.ts";
 import { LimaSandboxService } from "../src/core/sandbox/lima.ts";
+
+let fixtureRoot: string;
+let hostProject: string;
+let hostOther: string;
+beforeAll(async () => {
+	fixtureRoot = await mkdtemp(join(tmpdir(), "grip-lima-core-"));
+	hostProject = join(fixtureRoot, "project");
+	hostOther = join(fixtureRoot, "other");
+	await Promise.all([mkdir(hostProject), mkdir(hostOther)]);
+});
+afterAll(async () => {
+	await rm(fixtureRoot, { recursive: true, force: true });
+});
 
 interface RunnerCall {
 	command: string;
@@ -35,20 +48,135 @@ function ok(stdout = ""): SandboxCommandResult {
 	return { exitCode: 0, stdout, stderr: "" };
 }
 
-function limaRecord(name: string, status = "Running"): string {
+function limaRecord(
+	name: string,
+	status = "Running",
+	workspaceRoot = hostProject,
+	guestMountPath = "/workspace",
+): string {
 	return JSON.stringify({
 		name,
 		status,
 		arch: "x86_64",
 		vmType: "qemu",
 		config: {
-			mounts: [{ location: "/host/project", mountPoint: "/workspace", writable: true }],
+			mounts: [{ location: workspaceRoot, mountPoint: guestMountPath, writable: true }],
 			portForwards: [{ guestPort: 8787, hostPort: 8787, hostIP: "127.0.0.1" }],
 		},
 	});
 }
 
 describe("Lima sandbox core", () => {
+	it.each(["Running", "Stopped"])(
+		"selects a nested workspace in a %s legacy VM without remounting",
+		async (status) => {
+			const base = await mkdtemp(join(tmpdir(), "grip-lima-nested-"));
+			try {
+				const parent = join(base, "mounted parent");
+				const child = join(parent, "nested", "project's files");
+				await mkdir(child, { recursive: true });
+				const alias = join(parent, "alias");
+				await symlink(child, alias);
+				const listing = limaRecord("nested-vm", status, parent, "/mnt/projects");
+				const runner = new FakeLimaRunner([
+					ok(listing),
+					...(status === "Stopped" ? [ok()] : []),
+					ok(),
+					ok("/usr/bin/grip\n"),
+					ok("GRIP_SANDBOX_TOKEN=nested-token\n"),
+					ok(limaRecord("nested-vm", "Running", parent, "/mnt/projects")),
+					ok(limaRecord("nested-vm", "Running", parent, "/mnt/projects")),
+					ok(limaRecord("nested-vm", "Running", parent, "/mnt/projects")),
+					ok(),
+					ok(),
+				]);
+				const service = new LimaSandboxService({
+					runner,
+					env: { GRIP_SANDBOX_WORKSPACE_MOUNT: "/mnt/projects" },
+					readinessWaiter: async () => {},
+				});
+				const result = await service.start({
+					workspaceRoot: status === "Running" ? child : alias,
+					name: "nested-vm",
+				});
+				expect(result).toMatchObject({
+					workspaceRoot: child,
+					workspaceMountPath: "/mnt/projects/nested/project's files",
+					token: "nested-token",
+				});
+				const daemonArgs = runner.calls.at(-1)?.args ?? [];
+				expect(daemonArgs.slice(0, 5)).toEqual([
+					"shell",
+					"--tty=false",
+					"--workdir",
+					"/mnt/projects/nested/project's files",
+					"nested-vm",
+				]);
+				expect(daemonArgs.at(-1)).toContain("--daemon-cwd '/mnt/projects/nested/project'\"'\"'s files'");
+				expect(runner.calls.filter((call) => call.args[0] === "start").map((call) => call.args)).toEqual(
+					status === "Stopped" ? [["start", "--tty=false", "nested-vm"]] : [],
+				);
+				expect(await service.list({ workspaceRoot: child })).toMatchObject([{ workspaceRoot: parent }]);
+				await expect(service.stop({ workspaceRoot: child, target: "nested-vm" })).resolves.toMatchObject({
+					status: "stopped",
+				});
+				expect(runner.calls.at(-1)?.args.at(-1)).toContain('kill "$pid"');
+				expect(
+					runner.calls.some(
+						(call) => call.args.includes("--mount-none") || call.args[0] === "delete" || call.args[0] === "stop",
+					),
+				).toBe(false);
+			} finally {
+				await rm(base, { recursive: true, force: true });
+			}
+		},
+	);
+
+	it.each(["Running", "Stopped"])(
+		"rejects unsafe workspace selections in a %s legacy VM before startup",
+		async (status) => {
+			const base = await mkdtemp(join(tmpdir(), "grip-lima-containment-"));
+			try {
+				const parent = join(base, "workspace");
+				const outside = join(base, "workspace-other");
+				await Promise.all([mkdir(parent), mkdir(outside)]);
+				await symlink(outside, join(parent, "escape"));
+				await writeFile(join(parent, "file"), "not a directory");
+				for (const workspaceRoot of [
+					outside,
+					join(parent, "..", "workspace-other"),
+					join(parent, "escape"),
+					join(parent, "missing"),
+					join(parent, "file"),
+				]) {
+					const runner = new FakeLimaRunner([ok(limaRecord("unsafe-vm", status, parent))]);
+					const service = new LimaSandboxService({ runner });
+					await expect(service.start({ workspaceRoot, name: "unsafe-vm" })).rejects.toThrow();
+					expect(runner.calls).toHaveLength(status === "Running" ? 2 : 1);
+					expect(runner.calls[0]?.args).toEqual(["list", "--json", "unsafe-vm"]);
+					if (status === "Running") expect(runner.calls[1]?.args.at(-1)).toContain("GRIP_LEGACY_GUEST");
+				}
+			} finally {
+				await rm(base, { recursive: true, force: true });
+			}
+		},
+	);
+
+	it.each(["missing", "read-only", "duplicate"])("rejects a %s workspace mount before resuming a VM", async (kind) => {
+		const mount = { location: hostProject, mountPoint: "/workspace", writable: kind !== "read-only" };
+		const record = {
+			name: "invalid-mount",
+			status: "Stopped",
+			config: { mounts: kind === "missing" ? [] : kind === "duplicate" ? [mount, mount] : [mount] },
+		};
+		const runner = new FakeLimaRunner([ok(JSON.stringify(record))]);
+		const service = new LimaSandboxService({ runner });
+		await expect(service.start({ workspaceRoot: hostProject, name: "invalid-mount" })).rejects.toThrow(
+			"one writable workspace mount",
+		);
+		expect(runner.calls.map((call) => call.args[0])).toEqual(["list"]);
+	});
+
 	it("creates a managed VM with a writable workspace mount and starts the daemon", async () => {
 		const runner = new FakeLimaRunner([ok(), ok("/usr/local/bin/grip\n"), ok("GRIP_SANDBOX_TOKEN=vm-token\n")]);
 		const service = new LimaSandboxService({
@@ -57,10 +185,10 @@ describe("Lima sandbox core", () => {
 			readinessWaiter: async () => {},
 		});
 
-		const result = await service.start({ workspaceRoot: "/host/project", sessionId: "session-a" });
+		const result = await service.start({ workspaceRoot: hostProject, sessionId: "session-a" });
 
 		expect(result).toMatchObject({
-			workspaceRoot: "/host/project",
+			workspaceRoot: hostProject,
 			workspaceMountPath: "/workspace",
 			daemonUrl: "ws://127.0.0.1:8787/grip/workspace",
 			token: "vm-token",
@@ -70,7 +198,7 @@ describe("Lima sandbox core", () => {
 			expect.arrayContaining(["start", "--name", result.containerName, "--mount-none", "template:docker-rootful"]),
 		);
 		expect(runner.calls[0]?.args.join(" ")).toContain('"mountPoint":"/workspace"');
-		expect(runner.calls[0]?.args.join(" ")).toContain('"location":"/host/project"');
+		expect(runner.calls[0]?.args.join(" ")).toContain(`"location":${JSON.stringify(hostProject)}`);
 		const daemonScript = runner.calls[2]?.args.at(-1) ?? "";
 		expect(daemonScript).toContain("--daemon --daemon-host");
 		expect(daemonScript).toContain("--daemon-allow-full-filesystem");
@@ -100,7 +228,7 @@ describe("Lima sandbox core", () => {
 			});
 
 			const result = await service.start({
-				workspaceRoot: "/host/project",
+				workspaceRoot: hostProject,
 				name,
 				limaTemplate: "template:ubuntu",
 			});
@@ -110,7 +238,7 @@ describe("Lima sandbox core", () => {
 			expect(runner.calls[1]?.args).toEqual(
 				expect.arrayContaining(["start", "--name", name, "--mount-none", "template:ubuntu"]),
 			);
-			expect(runner.calls[1]?.args.join(" ")).toContain('"location":"/host/project"');
+			expect(runner.calls[1]?.args.join(" ")).toContain(`"location":${JSON.stringify(hostProject)}`);
 			expect(runner.calls[1]?.args.join(" ")).toContain('"writable":true');
 			expect(runner.calls[3]?.args.at(-1)).toContain("GRIP_VERSION=");
 			await service.stopManagedInstances();
@@ -132,7 +260,7 @@ describe("Lima sandbox core", () => {
 			readinessWaiter: async () => {},
 		});
 
-		await expect(service.start({ workspaceRoot: "/host/project", name: "my-dev" })).resolves.toMatchObject({
+		await expect(service.start({ workspaceRoot: hostProject, name: "my-dev" })).resolves.toMatchObject({
 			containerName: "my-dev",
 		});
 		expect(runner.calls[1]?.args).toContain("--name");
@@ -142,9 +270,7 @@ describe("Lima sandbox core", () => {
 		const runner = new FakeLimaRunner([{ exitCode: 1, stdout: "", stderr: "permission denied" }]);
 		const service = new LimaSandboxService({ runner });
 
-		await expect(service.start({ workspaceRoot: "/host/project", name: "my-dev" })).rejects.toThrow(
-			"permission denied",
-		);
+		await expect(service.start({ workspaceRoot: hostProject, name: "my-dev" })).rejects.toThrow("permission denied");
 		expect(runner.calls).toHaveLength(1);
 	});
 
@@ -154,9 +280,7 @@ describe("Lima sandbox core", () => {
 	])("refuses a %s named Lima lookup before mutating any VM", async (_case, listing) => {
 		const runner = new FakeLimaRunner([ok(listing)]);
 		const service = new LimaSandboxService({ runner });
-		await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).rejects.toThrow(
-			"one exact name",
-		);
+		await expect(service.start({ workspaceRoot: hostProject, name: "existing" })).rejects.toThrow("one exact name");
 		expect(runner.calls.map((call) => call.args)).toEqual([["list", "--json", "existing"]]);
 	});
 
@@ -165,7 +289,7 @@ describe("Lima sandbox core", () => {
 		async (status) => {
 			const runner = new FakeLimaRunner([ok(limaRecord("existing", status))]);
 			const service = new LimaSandboxService({ runner });
-			await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).rejects.toThrow(
+			await expect(service.start({ workspaceRoot: hostProject, name: "existing" })).rejects.toThrow(
 				"uncertain state",
 			);
 			expect(runner.calls.map((call) => call.args)).toEqual([["list", "--json", "existing"]]);
@@ -184,7 +308,7 @@ describe("Lima sandbox core", () => {
 			]);
 			const service = new LimaSandboxService({ runner, readinessWaiter: async () => {} });
 
-			const result = await service.start({ workspaceRoot: "/host/project", name: "existing" });
+			const result = await service.start({ workspaceRoot: hostProject, name: "existing" });
 
 			expect(result.containerName).toBe("existing");
 			if (status === "Stopped") expect(runner.calls[1]?.args).toEqual(["start", "--tty=false", "existing"]);
@@ -202,7 +326,7 @@ describe("Lima sandbox core", () => {
 			ok("GRIP_SANDBOX_TOKEN=installed-token\n"),
 		]);
 		const service = new LimaSandboxService({ runner, readinessWaiter: async () => {} });
-		await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).resolves.toMatchObject({
+		await expect(service.start({ workspaceRoot: hostProject, name: "existing" })).resolves.toMatchObject({
 			containerName: "existing",
 			token: "installed-token",
 		});
@@ -223,7 +347,7 @@ describe("Lima sandbox core", () => {
 			{ exitCode: 1, stdout: "", stderr: "download failed" },
 		]);
 		const service = new LimaSandboxService({ runner });
-		await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).rejects.toThrow();
+		await expect(service.start({ workspaceRoot: hostProject, name: "existing" })).rejects.toThrow();
 		expect(runner.calls).toHaveLength(5); // Includes the named guest-mode probe.
 		expect(runner.calls.some((call) => call.args.at(-1)?.includes("--daemon --daemon-host"))).toBe(false);
 	});
@@ -253,7 +377,7 @@ describe("Lima sandbox core", () => {
 				env: { GRIP_SANDBOX_GUEST_BINARY: binary },
 				readinessWaiter: async () => {},
 			});
-			await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).resolves.toMatchObject({
+			await expect(service.start({ workspaceRoot: hostProject, name: "existing" })).resolves.toMatchObject({
 				token: "dev-token",
 			});
 			expect(runner.calls.find((call) => call.args[0] === "copy")?.args[1]).toBe(binary);
@@ -269,9 +393,7 @@ describe("Lima sandbox core", () => {
 			try {
 				const runner = new FakeLimaRunner([ok(limaRecord("existing", status))]);
 				const service = new LimaSandboxService({ runner });
-				await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).rejects.toThrow(
-					"occupied",
-				);
+				await expect(service.start({ workspaceRoot: hostProject, name: "existing" })).rejects.toThrow("occupied");
 				expect(runner.calls).toHaveLength(0); // Even a stopped VM cannot be resumed.
 			} finally {
 				await owner.release();
@@ -285,7 +407,7 @@ describe("Lima sandbox core", () => {
 			{ exitCode: 52, stdout: "secret-must-not-leak", stderr: "secret-must-not-leak" },
 		]);
 		const service = new LimaSandboxService({ runner, readinessWaiter: async () => {} });
-		await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).rejects.toThrow(
+		await expect(service.start({ workspaceRoot: hostProject, name: "existing" })).rejects.toThrow(
 			"legacy attach refused; reconcile manually",
 		);
 		const probe = runner.calls.at(-1)?.args;
@@ -301,7 +423,7 @@ describe("Lima sandbox core", () => {
 	])("refuses a running named VM with $label before legacy startup", async ({ probe }) => {
 		const runner = new FakeLimaRunner([ok(limaRecord("existing"))], probe);
 		const service = new LimaSandboxService({ runner });
-		await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).rejects.toThrow(
+		await expect(service.start({ workspaceRoot: hostProject, name: "existing" })).rejects.toThrow(
 			"guest daemon mode is uncertain",
 		);
 		expect(runner.calls.map((call) => call.args[0])).toEqual(["list", "shell"]);
@@ -310,7 +432,7 @@ describe("Lima sandbox core", () => {
 	it("distinguishes shared, absent, and symlinked guest state with a POSIX shell", async () => {
 		const runner = new FakeLimaRunner([ok(limaRecord("existing"))], { exitCode: 42, stdout: "", stderr: "" });
 		const service = new LimaSandboxService({ runner });
-		await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).rejects.toThrow(
+		await expect(service.start({ workspaceRoot: hostProject, name: "existing" })).rejects.toThrow(
 			"guest daemon mode is uncertain",
 		);
 		const script = runner.calls[1]?.args.at(-1) ?? "";
@@ -332,7 +454,7 @@ describe("Lima sandbox core", () => {
 	it("checks the guest-state probe with an actual POSIX shell", async () => {
 		const runner = new FakeLimaRunner([ok(limaRecord("existing")), { exitCode: 52, stdout: "", stderr: "" }]);
 		const service = new LimaSandboxService({ runner });
-		await expect(service.start({ workspaceRoot: "/host/project", name: "existing" })).rejects.toThrow(
+		await expect(service.start({ workspaceRoot: hostProject, name: "existing" })).rejects.toThrow(
 			"legacy attach refused",
 		);
 		const script =
@@ -361,7 +483,7 @@ describe("Lima sandbox core", () => {
 			ok("GRIP_SANDBOX_TOKEN=placeholder\n"),
 		]);
 		const service = new LimaSandboxService({ runner, readinessWaiter: async () => {} });
-		await service.start({ workspaceRoot: "/host/project", name: "existing" });
+		await service.start({ workspaceRoot: hostProject, name: "existing" });
 		const script = runner.calls.at(-1)?.args.at(-1) ?? "";
 		const home = await mkdtemp(join(tmpdir(), "grip-legacy-mode-lock-"));
 		try {
@@ -381,28 +503,28 @@ describe("Lima sandbox core", () => {
 		}
 	});
 	it("rejects a named instance whose workspace mount does not match", async () => {
-		const mismatched = limaRecord("wrong").replace("/host/project", "/host/other");
+		const mismatched = limaRecord("wrong").replace(hostProject, hostOther);
 		const service = new LimaSandboxService({ runner: new FakeLimaRunner([ok(mismatched)]) });
 
-		await expect(service.start({ workspaceRoot: "/host/project", name: "wrong" })).rejects.toThrow(
-			"must mount /host/project read-write at /workspace",
+		await expect(service.start({ workspaceRoot: hostProject, name: "wrong" })).rejects.toThrow(
+			"escapes the fixed parent mount",
 		);
 	});
 
 	it("lists Lima instances with a matching workspace mount", async () => {
 		const runner = new FakeLimaRunner([
-			ok(`${limaRecord("matching")}\n${limaRecord("other").replace("/host/project", "/host/other")}\n`),
+			ok(`${limaRecord("matching")}\n${limaRecord("other").replace(hostProject, hostOther)}\n`),
 		]);
 		const service = new LimaSandboxService({ runner });
 
-		const instances = await service.list({ workspaceRoot: "/host/project" });
+		const instances = await service.list({ workspaceRoot: hostProject });
 
 		expect(instances).toHaveLength(1);
 		expect(instances[0]).toMatchObject({
 			id: "matching",
 			name: "matching",
 			state: "running",
-			workspaceRoot: "/host/project",
+			workspaceRoot: hostProject,
 			daemonEndpoint: "ws://127.0.0.1:8787/grip/workspace",
 		});
 		expect(runner.calls[0]?.args).toEqual(["list", "--json"]);
@@ -420,9 +542,9 @@ describe("Lima sandbox core", () => {
 			ok(), // Stop only the legacy daemon; leave the user-owned VM running.
 		]);
 		const service = new LimaSandboxService({ runner, readinessWaiter: async () => {} });
-		await service.start({ workspaceRoot: "/host/project", name: "existing" });
+		await service.start({ workspaceRoot: hostProject, name: "existing" });
 
-		await expect(service.stop({ workspaceRoot: "/host/project", target: "existing" })).resolves.toMatchObject({
+		await expect(service.stop({ workspaceRoot: hostProject, target: "existing" })).resolves.toMatchObject({
 			status: "stopped",
 		});
 		expect(runner.calls.at(-1)?.args[0]).toBe("shell");
@@ -435,7 +557,7 @@ describe("Lima sandbox core", () => {
 			for (const name of ["grip-sandbox-shared-parent", "user-managed"]) {
 				const runner = new FakeLimaRunner([ok(limaRecord(name, status))]);
 				const service = new LimaSandboxService({ runner, env: { GRIP_SANDBOX_CLEANUP: "remove" } });
-				await expect(service.stop({ workspaceRoot: "/host/project", target: name })).rejects.toThrow(
+				await expect(service.stop({ workspaceRoot: hostProject, target: name })).rejects.toThrow(
 					"ownership is unknown",
 				);
 				expect(runner.calls.map((call) => call.args)).toEqual([["list", "--json"]]);
@@ -449,9 +571,9 @@ describe("Lima sandbox core", () => {
 		const service = new LimaSandboxService({
 			runner,
 			env: { GRIP_SANDBOX_CLEANUP: "remove" },
-			managedInstances: new Map([[name, { workspaceRoot: "/host/project", daemonPort: 8787, managed: true }]]),
+			managedInstances: new Map([[name, { workspaceRoot: hostProject, daemonPort: 8787, managed: true }]]),
 		});
-		await expect(service.stop({ workspaceRoot: "/host/project", target: name })).resolves.toMatchObject({
+		await expect(service.stop({ workspaceRoot: hostProject, target: name })).resolves.toMatchObject({
 			status: "removed",
 		});
 		expect(runner.calls.at(-1)?.args).toEqual(["delete", "--force", name]);
@@ -463,9 +585,9 @@ describe("Lima sandbox core", () => {
 			const runner = new FakeLimaRunner([ok(limaRecord(name))]);
 			const service = new LimaSandboxService({
 				runner,
-				managedInstances: new Map([[name, { workspaceRoot: "/host/project", daemonPort: 8787, managed: true }]]),
+				managedInstances: new Map([[name, { workspaceRoot: hostProject, daemonPort: 8787, managed: true }]]),
 			});
-			await expect(service.stop({ workspaceRoot: "/host/project", target: name })).rejects.toThrow("occupied");
+			await expect(service.stop({ workspaceRoot: hostProject, target: name })).rejects.toThrow("occupied");
 			expect(runner.calls.map((call) => call.args)).toEqual([["list", "--json"]]);
 		} finally {
 			await owner.release();
@@ -477,9 +599,9 @@ describe("Lima sandbox core", () => {
 		const runner = new FakeLimaRunner([ok(limaRecord(name)), ok(limaRecord(name, "Stopped"))]);
 		const service = new LimaSandboxService({
 			runner,
-			managedInstances: new Map([[name, { workspaceRoot: "/host/project", daemonPort: 8787, managed: true }]]),
+			managedInstances: new Map([[name, { workspaceRoot: hostProject, daemonPort: 8787, managed: true }]]),
 		});
-		await expect(service.stop({ workspaceRoot: "/host/project", target: name })).rejects.toThrow("identity changed");
+		await expect(service.stop({ workspaceRoot: hostProject, target: name })).rejects.toThrow("identity changed");
 		expect(runner.calls.map((call) => call.args)).toEqual([
 			["list", "--json"],
 			["list", "--json"],
@@ -496,11 +618,9 @@ describe("Lima sandbox core", () => {
 		const service = new LimaSandboxService({
 			runner,
 			env: { GRIP_SANDBOX_CLEANUP: "remove" },
-			managedInstances: new Map([[name, { workspaceRoot: "/host/project", daemonPort: 8787, managed: true }]]),
+			managedInstances: new Map([[name, { workspaceRoot: hostProject, daemonPort: 8787, managed: true }]]),
 		});
-		await expect(service.stop({ workspaceRoot: "/host/project", target: name })).rejects.toThrow(
-			"legacy stop refused",
-		);
+		await expect(service.stop({ workspaceRoot: hostProject, target: name })).rejects.toThrow("legacy stop refused");
 		expect(runner.calls.map((call) => call.args[0])).toEqual(["list", "list", "shell"]);
 		expect(runner.calls[2]?.args.at(-1)).toContain("shared-lima");
 	});
@@ -511,9 +631,9 @@ describe("Lima sandbox core", () => {
 		const service = new LimaSandboxService({
 			runner,
 			env: { GRIP_SANDBOX_CLEANUP: "remove" },
-			managedInstances: new Map([[name, { workspaceRoot: "/host/project", daemonPort: 8787, managed: true }]]),
+			managedInstances: new Map([[name, { workspaceRoot: hostProject, daemonPort: 8787, managed: true }]]),
 		});
-		await expect(service.stop({ workspaceRoot: "/host/project", target: name })).rejects.toThrow("unverifiable VM");
+		await expect(service.stop({ workspaceRoot: hostProject, target: name })).rejects.toThrow("unverifiable VM");
 		expect(runner.calls.map((call) => call.args[0])).toEqual(["list", "list"]);
 	});
 
@@ -522,11 +642,9 @@ describe("Lima sandbox core", () => {
 		const runner = new FakeLimaRunner([ok(limaRecord(name))]);
 		const service = new LimaSandboxService({
 			runner,
-			managedInstances: new Map([[name, { workspaceRoot: "/host/project", daemonPort: 9999, managed: true }]]),
+			managedInstances: new Map([[name, { workspaceRoot: hostProject, daemonPort: 9999, managed: true }]]),
 		});
-		await expect(service.stop({ workspaceRoot: "/host/project", target: name })).rejects.toThrow(
-			"daemon port changed",
-		);
+		await expect(service.stop({ workspaceRoot: hostProject, target: name })).rejects.toThrow("daemon port changed");
 		expect(runner.calls.map((call) => call.args[0])).toEqual(["list"]);
 	});
 
@@ -540,9 +658,9 @@ describe("Lima sandbox core", () => {
 		]);
 		const service = new LimaSandboxService({
 			runner,
-			managedInstances: new Map([[name, { workspaceRoot: "/host/project", daemonPort: 8787, managed: true }]]),
+			managedInstances: new Map([[name, { workspaceRoot: hostProject, daemonPort: 8787, managed: true }]]),
 		});
-		await expect(service.stop({ workspaceRoot: "/host/project", target: name })).rejects.toThrow(
+		await expect(service.stop({ workspaceRoot: hostProject, target: name })).rejects.toThrow(
 			phase === "initial" ? "ambiguous" : "identity changed",
 		);
 		expect(runner.calls.map((call) => call.args[0])).toEqual(phase === "initial" ? ["list"] : ["list", "list"]);
@@ -565,11 +683,9 @@ describe("Lima sandbox core", () => {
 				throw new Error("readiness uncertain");
 			},
 		});
-		await expect(service.start({ workspaceRoot: "/host/project", name })).rejects.toThrow("readiness uncertain");
+		await expect(service.start({ workspaceRoot: hostProject, name })).rejects.toThrow("readiness uncertain");
 		expect(tracked.size).toBe(0);
-		await expect(service.stop({ workspaceRoot: "/host/project", target: name })).rejects.toThrow(
-			"ownership is unknown",
-		);
+		await expect(service.stop({ workspaceRoot: hostProject, target: name })).rejects.toThrow("ownership is unknown");
 		expect(runner.calls.map((call) => call.args[0])).toEqual(["list", "shell", "shell", "shell", "shell", "list"]);
 	});
 
@@ -587,7 +703,7 @@ describe("Lima sandbox core", () => {
 			readinessWaiter: async () => {},
 		});
 
-		await expect(service.start({ workspaceRoot: "/host/project", name: "my-dev" })).rejects.toThrow("install failed");
+		await expect(service.start({ workspaceRoot: hostProject, name: "my-dev" })).rejects.toThrow("install failed");
 		expect(runner.calls.some((call) => call.args[0] === "delete")).toBe(false);
 	});
 
@@ -604,6 +720,6 @@ describe("Lima sandbox core", () => {
 			readinessWaiter: vi.fn(),
 		});
 
-		await expect(service.start({ workspaceRoot: "/host/project" })).rejects.toThrow("Lima command failed");
+		await expect(service.start({ workspaceRoot: hostProject })).rejects.toThrow("Lima command failed");
 	});
 });

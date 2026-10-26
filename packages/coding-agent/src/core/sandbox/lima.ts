@@ -624,20 +624,25 @@ export class LimaSandboxService {
 		record: LimaListRecord,
 		name: string,
 		workspaceRoot: string,
-	): Promise<void> {
-		const mount = findWorkspaceMount(record, config.workspaceMountPath);
-		if (!mount || resolve(mount.location ?? "") !== workspaceRoot || !mount.writable) {
-			throw new Error(
-				`Lima instance ${name} must mount ${workspaceRoot} read-write at ${config.workspaceMountPath}`,
-			);
+	): Promise<SharedLimaWorkspaceBinding> {
+		const mounts = record.config?.mounts?.filter((mount) => mount.mountPoint === config.workspaceMountPath) ?? [];
+		const mount = mounts[0];
+		if (mounts.length !== 1 || !mount?.location || !mount.writable) {
+			throw new Error(`Lima instance ${name} requires one writable workspace mount at ${config.workspaceMountPath}`);
 		}
+		const binding = await resolveSharedLimaWorkspace(
+			resolve(mount.location),
+			config.workspaceMountPath,
+			workspaceRoot,
+		);
 		const status = record.status?.toLowerCase();
-		if (status === "running") return;
+		if (status === "running") return binding;
 		if (status !== "stopped") {
 			throw new Error(`Lima instance ${name} is in an uncertain state; refusing to resume`);
 		}
 		const args = ["start", "--tty=false", name];
 		ensureLimaSuccessful(config.limaBinary, await this.runner.run(config.limaBinary, args), args);
+		return binding;
 	}
 
 	private async findExactLegacyInstance(config: SandboxConfig, name?: string): Promise<LimaListRecord | undefined> {
@@ -726,7 +731,14 @@ export class LimaSandboxService {
 		const requestedName = options.name?.trim();
 		const managed = !requestedName;
 		const existing = known ? known.record : await this.findExactLegacyInstance(config, requestedName);
-		if (existing) await this.prepareExistingInstance(config, existing, requestedName!, workspaceRoot);
+		const binding: SharedLimaWorkspaceBinding = existing
+			? await this.prepareExistingInstance(config, existing, requestedName!, workspaceRoot)
+			: {
+					hostParent: workspaceRoot,
+					hostRoot: workspaceRoot,
+					guestParent: config.workspaceMountPath,
+					guestRoot: config.workspaceMountPath,
+				};
 		const configuredForward = existing ? findDaemonForward(existing, config.daemonPort) : undefined;
 		if (configuredForward && configuredForward.guestPort !== configuredForward.hostPort) {
 			throw new Error(
@@ -742,17 +754,26 @@ export class LimaSandboxService {
 		// A failed guest install/start can have changed state; never delete an uncertain VM.
 		if (existing) await this.assertNoSharedGuestState(effectiveConfig, name);
 		await this.ensureGrip(effectiveConfig, name, !!existing, local);
-		const token = await this.startDaemon(effectiveConfig, name);
+		const token = await this.startDaemon({ ...effectiveConfig, workspaceMountPath: binding.guestRoot }, name);
 		await this.readinessWaiter(config.daemonHostBind, daemonPort);
 		// A failed readiness check is not proof that this daemon is ours to stop.
 		// Leave uncertain guest state for explicit operator reconciliation.
-		this.managedInstances.set(name, { workspaceRoot, daemonPort, ownerId: options.sessionId, managed });
+		// Track the fixed mount source for lifecycle checks, not this client's selected subdirectory.
+		const mountedWorkspaceRoot = existing
+			? resolve(findWorkspaceMount(existing, config.workspaceMountPath)!.location!)
+			: workspaceRoot;
+		this.managedInstances.set(name, {
+			workspaceRoot: mountedWorkspaceRoot,
+			daemonPort,
+			ownerId: options.sessionId,
+			managed,
+		});
 		const daemonUrl = `ws://${urlHost(daemonConnectionHost(config.daemonHostBind))}:${daemonPort}${DAEMON_WEBSOCKET_PATH}`;
 		return {
 			containerId: name,
 			containerName: name,
-			workspaceRoot,
-			workspaceMountPath: config.workspaceMountPath,
+			workspaceRoot: binding.hostRoot,
+			workspaceMountPath: binding.guestRoot,
 			daemonUrl,
 			daemonUrlRedacted: daemonUrl,
 			token,
@@ -763,11 +784,22 @@ export class LimaSandboxService {
 	async list(options: SandboxListOptions): Promise<SandboxContainer[]> {
 		const config = this.resolveConfig();
 		const workspaceRoot = resolve(options.workspaceRoot);
-		return (await this.listRecords(config))
-			.map((record) => toSandboxContainer(record, config.workspaceMountPath))
-			.filter(
-				(instance) => instance.workspaceRoot && (options.allWorkspaces || instance.workspaceRoot === workspaceRoot),
-			);
+		const instances: SandboxContainer[] = [];
+		for (const record of await this.listRecords(config)) {
+			const instance = toSandboxContainer(record, config.workspaceMountPath);
+			if (!instance.workspaceRoot) continue;
+			if (options.allWorkspaces || instance.workspaceRoot === workspaceRoot) {
+				instances.push(instance);
+				continue;
+			}
+			try {
+				await resolveSharedLimaWorkspace(instance.workspaceRoot, config.workspaceMountPath, workspaceRoot);
+				instances.push(instance);
+			} catch {
+				// Unrelated, missing or inaccessible directories are not matching workspaces.
+			}
+		}
+		return instances;
 	}
 
 	private async stopDaemon(config: SandboxConfig, name: string, daemonPort: number): Promise<void> {
