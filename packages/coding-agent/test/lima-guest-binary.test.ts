@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { expect, it } from "vitest";
 import { VERSION } from "../src/config.ts";
 import { acquireSharedLimaOwnerLock } from "../src/core/remote-workspace-protocol/lima-owner-lock.ts";
@@ -120,6 +120,8 @@ it("detects Linux ARM64 rather than relying on the macOS host architecture", asy
 
 it("uses the local binary on an existing named legacy VM before launching its daemon", async () => {
 	await withBinary(async (path) => {
+		const workspaceRoot = join(dirname(path), "workspace");
+		await mkdir(workspaceRoot);
 		const runner = new Runner();
 		runner.run = async (_binary, args) => {
 			runner.calls.push(args);
@@ -131,7 +133,7 @@ it("uses the local binary on an existing named legacy VM before launching its da
 						name: "dev-binary-test",
 						status: "Running",
 						config: {
-							mounts: [{ location: "/host/project", mountPoint: "/workspace", writable: true }],
+							mounts: [{ location: workspaceRoot, mountPoint: "/workspace", writable: true }],
 							portForwards: [{ guestPort: 8787, hostPort: 8787, hostIP: "127.0.0.1" }],
 						},
 					}),
@@ -152,7 +154,7 @@ it("uses the local binary on an existing named legacy VM before launching its da
 			env: { GRIP_SANDBOX_GUEST_BINARY: path },
 			readinessWaiter: async () => {},
 		});
-		await expect(service.start({ workspaceRoot: "/host/project", name: "dev-binary-test" })).resolves.toMatchObject({
+		await expect(service.start({ workspaceRoot, name: "dev-binary-test" })).resolves.toMatchObject({
 			token: "dev-token",
 		});
 		const copyIndex = runner.calls.findIndex((args) => args[0] === "copy");
