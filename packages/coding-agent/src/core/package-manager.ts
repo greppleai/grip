@@ -40,7 +40,13 @@ import ignore from "ignore";
 import { minimatch } from "minimatch";
 import { CONFIG_DIR_NAME } from "../config.ts";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.ts";
-import { type GitSource, isSafeGitInstallPath, parseGitUrl } from "../utils/git.ts";
+import {
+	type GitSource,
+	getGitSourceIdentity,
+	isSafeGitInstallPath,
+	isSafeGitSubdirectory,
+	parseGitUrl,
+} from "../utils/git.ts";
 import { canonicalizePath, isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
 import { type GripManifest, readGripManifest } from "./grip-manifest.ts";
 import { isStdoutTakenOver } from "./output-guard.ts";
@@ -989,8 +995,10 @@ export class DefaultPackageManager implements PackageManager {
 			return existsSync(path) ? path : undefined;
 		}
 		if (parsed.type === "git") {
-			const path = this.getGitInstallPath(parsed, scope);
-			return existsSync(path) ? path : undefined;
+			const checkout = this.getGitInstallPath(parsed, scope);
+			if (!existsSync(checkout)) return undefined;
+			const candidate = parsed.subdirectory === null ? checkout : join(checkout, parsed.subdirectory);
+			return existsSync(candidate) ? this.getGitPackageRoot(parsed, scope) : undefined;
 		}
 		if (parsed.type === "local") {
 			const baseDir = this.getBaseDirForScope(scope);
@@ -1416,8 +1424,9 @@ export class DefaultPackageManager implements PackageManager {
 		} else if (context.scope === "temporary" && !source.pinned && !isOfflineModeEnabled()) {
 			await this.refreshTemporaryGitSource(source, context.source);
 		}
-		context.metadata.baseDir = installedPath;
-		this.collectManagedGitPackageResources(installedPath, context.accumulator, context.filter, context.metadata);
+		const packageRoot = this.getGitPackageRoot(source, context.scope);
+		context.metadata.baseDir = packageRoot;
+		this.collectManagedGitPackageResources(packageRoot, context.accumulator, context.filter, context.metadata);
 	}
 
 	private resolveLocalExtensionSource(
@@ -1472,7 +1481,7 @@ export class DefaultPackageManager implements PackageManager {
 			return `npm:${parsed.name}`;
 		}
 		if (parsed.type === "git") {
-			return `git:${parsed.host}/${parsed.path}`;
+			return `git:${getGitSourceIdentity(parsed)}`;
 		}
 		return `local:${this.resolvePath(parsed.path)}`;
 	}
@@ -1483,7 +1492,7 @@ export class DefaultPackageManager implements PackageManager {
 			return `npm:${parsed.name}`;
 		}
 		if (parsed.type === "git") {
-			return `git:${parsed.host}/${parsed.path}`;
+			return `git:${getGitSourceIdentity(parsed)}`;
 		}
 		const baseDir = this.getBaseDirForScope(scope);
 		return `local:${this.resolvePathFromBase(parsed.path, baseDir)}`;
@@ -1501,7 +1510,13 @@ export class DefaultPackageManager implements PackageManager {
 		if (parsed.type === "npm") return [parsed.name, parsed.spec];
 		if (parsed.type !== "git") return [];
 		const shorthand = `${parsed.host}/${parsed.path}`;
-		return parsed.ref ? [shorthand, `${shorthand}@${parsed.ref}`] : [shorthand];
+		const selector =
+			parsed.subdirectory === null
+				? ""
+				: `#path=${parsed.subdirectory.split("/").map(encodeURIComponent).join("/")}`;
+		return parsed.ref
+			? [`${shorthand}${selector}`, `${shorthand}@${parsed.ref}${selector}`]
+			: [`${shorthand}${selector}`];
 	}
 
 	private findSuggestedConfiguredSource(source: string, configuredPackages: PackageSource[]): string | undefined {
@@ -1777,7 +1792,7 @@ export class DefaultPackageManager implements PackageManager {
 		}
 		if (parsed.type === "git") {
 			// Use host/path for identity to normalize SSH and HTTPS
-			return `git:${parsed.host}/${parsed.path}`;
+			return `git:${getGitSourceIdentity(parsed)}`;
 		}
 		if (scope) {
 			const baseDir = this.getBaseDirForScope(scope);
@@ -1846,7 +1861,34 @@ export class DefaultPackageManager implements PackageManager {
 		await this.runCommand(npmCommand.command, [...npmCommand.args, ...args], options);
 	}
 
-	private getGitDependencyInstallArgs(): string[] {
+	private getGitDependencyInstallArgs(source: GitSource, packageRoot: string): string[] {
+		if (source.subdirectory !== null) {
+			const manager = this.getPackageManagerName();
+			if (manager === "bun") {
+				return ["install", "--production", "--omit=peer", "--ignore-scripts", "--cwd", packageRoot];
+			}
+			if (manager === "pnpm") {
+				return [
+					"install",
+					"--prod",
+					"--ignore-scripts",
+					"--ignore-workspace",
+					"--dir",
+					packageRoot,
+					"--config.auto-install-peers=false",
+					"--config.strict-peer-dependencies=false",
+				];
+			}
+			return [
+				"install",
+				"--omit=dev",
+				"--legacy-peer-deps",
+				"--ignore-scripts",
+				"--workspaces=false",
+				"--prefix",
+				packageRoot,
+			];
+		}
 		const configuredCommand = this.settingsManager.getNpmCommand();
 		if (configuredCommand && configuredCommand.length > 0) {
 			return ["install"];
@@ -1913,7 +1955,7 @@ export class DefaultPackageManager implements PackageManager {
 			await this.ensureGitRef(targetDir, target.fetchArgs, target.ref, source, scope);
 			return;
 		}
-		const gitRoot = this.getGitInstallRoot(scope);
+		const gitRoot = this.getGitInstallRoot(scope, source);
 		this.assertGitTarget(source, scope, targetDir);
 		if (gitRoot) {
 			this.ensureGitIgnore(gitRoot, true);
@@ -1928,10 +1970,53 @@ export class DefaultPackageManager implements PackageManager {
 			await this.runCommand("git", ["checkout", source.ref], { cwd: targetDir });
 			this.assertGitTarget(source, scope, targetDir);
 		}
-		const packageJsonPath = join(targetDir, "package.json");
+		await this.installGitDependencies(source, scope, targetDir);
+	}
+
+	private getGitPackageRoot(source: GitSource, scope: SourceScope): string {
+		const checkout = this.getGitInstallPath(source, scope);
+		if (source.subdirectory === null) return checkout;
+		let current = checkout;
+		for (const part of source.subdirectory.split("/")) {
+			current = join(current, part);
+			const stats = lstatSync(current);
+			if (stats.isSymbolicLink() || !stats.isDirectory()) {
+				throw new Error(`Refusing non-directory or symbolic link in Git package subdirectory: ${current}`);
+			}
+		}
+		this.assertConfinedResourcePath(current, checkout);
+		const manifest = join(current, "package.json");
+		if (!existsSync(manifest)) throw new Error(`Git package subdirectory requires package.json: ${current}`);
+		this.assertConfinedResourcePath(manifest, current);
+		return current;
+	}
+
+	private async installGitDependencies(source: GitSource, scope: SourceScope, targetDir: string): Promise<void> {
+		this.assertGitTarget(source, scope, targetDir);
+		if (source.subdirectory !== null) {
+			this.getGitPackageRoot(source, scope);
+			await this.runCommand("git", ["sparse-checkout", "set", "--no-cone", "--", `/${source.subdirectory}/`], {
+				cwd: targetDir,
+			});
+			this.assertGitTarget(source, scope, targetDir);
+		}
+		const packageRoot = this.getGitPackageRoot(source, scope);
+		const packageJsonPath = join(packageRoot, "package.json");
 		if (existsSync(packageJsonPath)) {
-			this.assertConfinedResourcePath(packageJsonPath, targetDir);
-			await this.runNpmCommand(this.getGitDependencyInstallArgs(), { cwd: targetDir });
+			this.assertConfinedResourcePath(packageJsonPath, packageRoot);
+			if (source.subdirectory !== null) {
+				this.validateManagedGitResourceInputs(packageRoot);
+				for (const name of [
+					"package-lock.json",
+					"npm-shrinkwrap.json",
+					".npmrc",
+					"bunfig.toml",
+					"pnpm-workspace.yaml",
+				]) {
+					this.validateOptionalConfinedResourcePath(join(packageRoot, name), packageRoot);
+				}
+			}
+			await this.runNpmCommand(this.getGitDependencyInstallArgs(source, packageRoot), { cwd: packageRoot });
 		}
 	}
 
@@ -1976,6 +2061,7 @@ export class DefaultPackageManager implements PackageManager {
 			timeoutMs: NETWORK_TIMEOUT_MS,
 		});
 		if (localHead.trim() === targetHead.trim()) {
+			if (source.subdirectory !== null) await this.installGitDependencies(source, scope, targetDir);
 			return;
 		}
 
@@ -1987,11 +2073,7 @@ export class DefaultPackageManager implements PackageManager {
 		await this.runCommand("git", ["clean", "-fdx"], { cwd: targetDir });
 		this.assertGitTarget(source, scope, targetDir);
 
-		const packageJsonPath = join(targetDir, "package.json");
-		if (existsSync(packageJsonPath)) {
-			this.assertConfinedResourcePath(packageJsonPath, targetDir);
-			await this.runNpmCommand(this.getGitDependencyInstallArgs(), { cwd: targetDir });
-		}
+		await this.installGitDependencies(source, scope, targetDir);
 	}
 
 	private async refreshTemporaryGitSource(source: GitSource, sourceStr: string): Promise<void> {
@@ -2012,7 +2094,7 @@ export class DefaultPackageManager implements PackageManager {
 		if (!existsSync(targetDir)) return;
 		this.assertGitTarget(source, scope, targetDir);
 		rmSync(targetDir, { recursive: true, force: true });
-		this.pruneEmptyGitParents(targetDir, this.getGitInstallRoot(scope), source, scope);
+		this.pruneEmptyGitParents(targetDir, this.getGitInstallRoot(scope, source), source, scope);
 	}
 
 	private isSafeGitParentForPruning(
@@ -2165,37 +2247,40 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private getGitInstallPath(source: GitSource, scope: SourceScope): string {
-		if (!isSafeGitInstallPath(source)) {
-			throw new Error(`Refusing unsafe Git package path: ${source.host}/${source.path}`);
+		if (
+			!isSafeGitInstallPath(source) ||
+			(source.subdirectory !== null && !isSafeGitSubdirectory(source.subdirectory))
+		) {
+			throw new Error(`Refusing unsafe Git package path: ${getGitSourceIdentity(source)}`);
 		}
-
+		const key =
+			source.subdirectory === null ? null : createHash("sha256").update(getGitSourceIdentity(source)).digest("hex");
 		let targetDir: string;
 		if (scope === "temporary") {
-			targetDir = this.getTemporaryDir(`git-${source.host}`, source.path);
+			targetDir =
+				key === null
+					? this.getTemporaryDir(`git-${source.host}`, source.path)
+					: this.getTemporaryDir("git-subdirectory", key);
 		} else {
-			const installRoot = this.getGitInstallRoot(scope);
-			if (!installRoot) {
-				throw new Error("Missing Git install root");
-			}
-			targetDir = this.resolveManagedPath(installRoot, source.host, source.path);
+			const installRoot = this.getGitInstallRoot(scope, source);
+			if (!installRoot) throw new Error("Missing Git install root");
+			targetDir =
+				key === null
+					? this.resolveManagedPath(installRoot, source.host, source.path)
+					: this.resolveManagedPath(installRoot, key);
 		}
-
 		this.assertManagedGitPath(source, scope, targetDir);
 		return targetDir;
 	}
 
-	private getGitInstallRoot(scope: SourceScope): string | undefined {
-		if (scope === "temporary") {
-			return undefined;
-		}
-		if (scope === "project") {
-			return join(this.cwd, CONFIG_DIR_NAME, "git");
-		}
-		return join(this.agentDir, "git");
+	private getGitInstallRoot(scope: SourceScope, source: GitSource): string | undefined {
+		if (scope === "temporary") return undefined;
+		const base = scope === "project" ? join(this.cwd, CONFIG_DIR_NAME) : this.agentDir;
+		return join(base, source.subdirectory === null ? "git" : "git-subdirectories");
 	}
 
-	private getGitConfinementRoot(scope: SourceScope): string {
-		return scope === "temporary" ? join(tmpdir(), "grip-extensions") : (this.getGitInstallRoot(scope) ?? "");
+	private getGitConfinementRoot(scope: SourceScope, source: GitSource): string {
+		return scope === "temporary" ? join(tmpdir(), "grip-extensions") : (this.getGitInstallRoot(scope, source) ?? "");
 	}
 
 	private getGitScopeAnchor(scope: SourceScope): string {
@@ -2249,7 +2334,7 @@ export class DefaultPackageManager implements PackageManager {
 		}
 
 		const anchor = resolve(this.getGitScopeAnchor(scope));
-		const root = resolve(this.getGitConfinementRoot(scope));
+		const root = resolve(this.getGitConfinementRoot(scope, source));
 		const target = resolve(targetDir);
 		if (!isPathWithin(anchor, root) || !isPathWithin(root, target)) {
 			throw new Error(`Refusing to use path outside package install root: ${target}`);

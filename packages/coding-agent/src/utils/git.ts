@@ -12,6 +12,8 @@ export type GitSource = {
 	host: string;
 	/** Repository path (e.g., "user/repo") */
 	path: string;
+	/** Selected package directory relative to the checkout, or null for the repository root. */
+	subdirectory: string | null;
 	/** Git ref (branch, tag, commit) if specified */
 	ref?: string;
 	/** True if ref was specified (package won't be auto-updated) */
@@ -147,6 +149,31 @@ export function isSafeGitInstallPath(source: Pick<GitSource, "host" | "path">): 
 	);
 }
 
+/** Portable, literal POSIX directory paths only; never Git metadata or glob patterns. */
+export function isSafeGitSubdirectory(path: string): boolean {
+	return (
+		path.length > 0 &&
+		!hasUnsafeGitInstallPart(path, true) &&
+		!/[\u0080-\u009f:*?<>|"#%[\]]/.test(path) &&
+		path.split("/").every((part) => part.trim() === part && !part.endsWith(".") && part.toLowerCase() !== ".git")
+	);
+}
+
+function decodeGitSubdirectory(raw: string): string | null {
+	const decoded = decodeForValidation(raw);
+	if (hasUnsafeGitInstallPart(raw, true) || decoded === null || !isSafeGitSubdirectory(decoded)) return null;
+	return decoded;
+}
+
+/** Package identity excludes the ref, but includes the canonical selected directory. */
+export function getGitSourceIdentity(source: Pick<GitSource, "host" | "path" | "subdirectory">): string {
+	const host = source.host.toLowerCase();
+	const path = host === "github.com" ? source.path.toLowerCase() : source.path;
+	const selector =
+		source.subdirectory === null ? "" : `#path=${source.subdirectory.split("/").map(encodeURIComponent).join("/")}`;
+	return `${host}/${path}${selector}`;
+}
+
 function hasUnsafeRawGitSource(url: string): boolean {
 	if (CONTROL_CHARACTER_PATTERN.test(url) || url.includes("\\")) {
 		return true;
@@ -194,6 +221,7 @@ function buildGitSource(args: GitSourceComponents): GitSource | null {
 		repo: args.repo,
 		host: source.host,
 		path: source.path,
+		subdirectory: null,
 		ref: args.ref,
 		pinned: Boolean(args.ref),
 	};
@@ -272,9 +300,17 @@ function findHostedGitSource(candidates: string[], split: SplitGitUrl, forceHttp
  * - Without git: prefix, only accept explicit protocol URLs.
  */
 export function parseGitUrl(source: string): GitSource | null {
+	if (CONTROL_CHARACTER_PATTERN.test(source)) return null;
 	const trimmed = source.trim();
-	const hasGitPrefix = /^git:/i.test(trimmed);
-	const url = hasGitPrefix ? trimmed.slice(4).trim() : trimmed;
+	const hasGitPrefix = /^git:(?!\/\/)/i.test(trimmed);
+	let url = hasGitPrefix ? trimmed.slice(4).trim() : trimmed;
+	let subdirectory: string | null = null;
+	const selector = url.indexOf("#path=");
+	if (selector >= 0) {
+		subdirectory = decodeGitSubdirectory(url.slice(selector + "#path=".length));
+		if (subdirectory === null) return null;
+		url = url.slice(0, selector);
+	}
 	if (hasUnsafeRawGitSource(url)) {
 		return null;
 	}
@@ -289,13 +325,14 @@ export function parseGitUrl(source: string): GitSource | null {
 		(value): value is string => Boolean(value),
 	);
 	const hostedMatch = findHostedGitSource(hostedCandidates, split, false);
-	if (hostedMatch.matched) return hostedMatch.source;
-
-	const httpsCandidates = [split.ref ? `https://${split.repo}#${split.ref}` : undefined, `https://${url}`].filter(
-		(value): value is string => Boolean(value),
-	);
-	const httpsMatch = findHostedGitSource(httpsCandidates, split, true);
-	if (httpsMatch.matched) return httpsMatch.source;
-
-	return parseGenericGitUrl(url);
+	let parsed = hostedMatch.source;
+	if (!hostedMatch.matched) {
+		const httpsCandidates = [split.ref ? `https://${split.repo}#${split.ref}` : undefined, `https://${url}`].filter(
+			(value): value is string => Boolean(value),
+		);
+		const httpsMatch = findHostedGitSource(httpsCandidates, split, true);
+		parsed = httpsMatch.matched ? httpsMatch.source : parseGenericGitUrl(url);
+	}
+	if (parsed) parsed.subdirectory = subdirectory;
+	return parsed;
 }

@@ -698,12 +698,13 @@ Content`,
 	});
 
 	describe("Git package path confinement", () => {
-		function gitSource(host: string, path: string, ref?: string) {
+		function gitSource(host: string, path: string, ref?: string): GitSource {
 			return {
 				type: "git" as const,
 				repo: `git@${host}:${path}`,
 				host,
 				path,
+				subdirectory: null,
 				ref,
 				pinned: Boolean(ref),
 			};
