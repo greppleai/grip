@@ -69,6 +69,7 @@ import { spawn, spawnSync } from "child_process";
 import {
 	APP_NAME,
 	APP_TITLE,
+	CONFIG_DIR_NAME,
 	getAgentDir,
 	getAuthPath,
 	getChangelogPath,
@@ -172,6 +173,7 @@ import { CountdownTimer } from "./components/countdown-timer.ts";
 import { CustomEditor } from "./components/custom-editor.ts";
 import { CustomMessageComponent } from "./components/custom-message.ts";
 import { DynamicBorder } from "./components/dynamic-border.ts";
+import { type ExtensionCatalogChoice, ExtensionCatalogComponent } from "./components/extension-catalog.ts";
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
@@ -190,6 +192,12 @@ import { ToolExecutionComponent } from "./components/tool-execution.ts";
 import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
+import {
+	catalogConfigurationKey,
+	catalogRuntimeOwners,
+	OfficialExtensionCatalog,
+	runCatalogPackageOperation,
+} from "./extension-catalog.ts";
 import {
 	getAvailableThemes,
 	getAvailableThemesWithPaths,
@@ -668,6 +676,9 @@ export class InteractiveMode {
 	private shutdownRequested = false;
 
 	// Extension UI state
+	private catalogOpen = false;
+	private catalogEpoch = 0;
+	private catalogDialogCancel: (() => void) | undefined;
 	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
@@ -833,6 +844,7 @@ export class InteractiveMode {
 			"login",
 			"logout",
 			"new",
+			"extensions",
 			"reload",
 			"resume",
 			"quit",
@@ -2452,6 +2464,8 @@ export class InteractiveMode {
 	}
 
 	private resetExtensionUI(): void {
+		this.catalogEpoch++;
+		this.catalogDialogCancel?.();
 		if (this.extensionSelector) {
 			this.hideExtensionSelector();
 		}
@@ -3317,6 +3331,12 @@ export class InteractiveMode {
 				run: async () => {
 					this.editor.setText("");
 					await this.handleClearCommand();
+				},
+			},
+			"/extensions": {
+				run: async () => {
+					this.editor.setText("");
+					await this.handleExtensionsCommand();
 				},
 			},
 			"/reload": {
@@ -4231,6 +4251,7 @@ export class InteractiveMode {
 	private async shutdown(options?: ShutdownOptions): Promise<void> {
 		if (this.isShuttingDown) return;
 		this.isShuttingDown = true;
+		this.catalogDialogCancel?.();
 		this.unregisterSignalHandlers();
 
 		if (options?.fromSignal) {
@@ -4802,6 +4823,115 @@ export class InteractiveMode {
 	// =========================================================================
 	// Selectors
 	// =========================================================================
+
+	private async handleExtensionsCommand(): Promise<void> {
+		if (this.catalogOpen) {
+			this.showError("The extension catalog is already open.");
+			return;
+		}
+		if (this.isShuttingDown || this.shutdownRequested || !this.isInitialized) return;
+		this.catalogOpen = true;
+		const session = this.session;
+		const services = this.runtimeHost.services;
+		const epoch = this.catalogEpoch;
+		const settings = session.settingsManager;
+		const current = () =>
+			this.catalogEpoch === epoch && this.session === session && this.runtimeHost.services === services;
+		const closing = () => this.isShuttingDown || this.shutdownRequested || !this.isInitialized;
+		try {
+			const packages = new DefaultPackageManager({
+				cwd: services.cwd,
+				agentDir: services.agentDir,
+				settingsManager: settings,
+			});
+			const pathsMatch =
+				settings.getFilePath("global") === path.join(path.resolve(services.agentDir), "settings.json") &&
+				settings.getFilePath("project") === path.join(path.resolve(services.cwd), CONFIG_DIR_NAME, "settings.json");
+			const catalog = new OfficialExtensionCatalog({
+				packages,
+				hostCwd: services.cwd,
+				settingsPath: (scope) =>
+					settings.getFilePath(scope === "user" ? "global" : "project") ?? "custom storage (location unavailable)",
+				runtimeOwners: () => catalogRuntimeOwners(session.resourceLoader.getExtensions().extensions),
+				isIdle: () => current() && !closing() && session.isIdle,
+				// Only verified host services/settings determine scope, never the tool backend's cwd.
+				projectAvailable: () =>
+					current() && pathsMatch && fs.statSync(services.cwd, { throwIfNoEntry: false })?.isDirectory() === true,
+				contextKey: () =>
+					JSON.stringify([this.catalogEpoch, current(), session.session.getCwd(), session.getToolBackendInfo()]),
+				configurationKey: () => {
+					if (!pathsMatch)
+						throw new Error("Catalog actions require file-backed settings for this extension host.");
+					return catalogConfigurationKey(settings);
+				},
+				choose: (title, choices) => this.chooseCatalogExtension(title, choices, () => current() && !closing()),
+				notify: (message, error) => {
+					if (!current() || closing()) return;
+					if (error) this.showError(message);
+					else this.showStatus(message);
+				},
+				reload: () => this.handleReloadCommand(),
+				runOperation: (operation) =>
+					runCatalogPackageOperation(
+						{
+							stop: () => this.ui.stop({ preserveScreen: true }),
+							start: () => this.ui.start(),
+							requestRender: () => this.ui.requestRender(true),
+							isShuttingDown: closing,
+						},
+						async () => {
+							try {
+								await operation();
+							} finally {
+								await settings.flush();
+							}
+							// Persistence failures are queued by SettingsManager rather than thrown.
+							catalogConfigurationKey(settings);
+						},
+					),
+			});
+			await catalog.show();
+		} finally {
+			this.catalogOpen = false;
+		}
+	}
+
+	private async chooseCatalogExtension(
+		title: string,
+		choices: readonly ExtensionCatalogChoice[],
+		isCurrent: () => boolean,
+	): Promise<string | undefined> {
+		if (!isCurrent()) return undefined;
+		let cancel: (() => void) | undefined;
+		try {
+			return await new Promise<string | undefined>((resolve) => {
+				this.showSelector((done) => {
+					let settled = false;
+					const finish = (value: string | undefined, restore: boolean) => {
+						if (settled) return;
+						settled = true;
+						if (this.catalogDialogCancel === cancel) this.catalogDialogCancel = undefined;
+						if (restore && isCurrent()) {
+							done();
+							this.ui.requestRender();
+						}
+						resolve(value);
+					};
+					const component = new ExtensionCatalogComponent({
+						title,
+						choices,
+						onSelect: (value) => finish(value, true),
+						onCancel: () => finish(undefined, true),
+					});
+					cancel = () => finish(undefined, false);
+					this.catalogDialogCancel = cancel;
+					return { component, focus: component };
+				});
+			});
+		} finally {
+			if (this.catalogDialogCancel === cancel) this.catalogDialogCancel = undefined;
+		}
+	}
 
 	/**
 	 * Shows a selector component in place of the editor.
@@ -7076,6 +7206,8 @@ export class InteractiveMode {
 	}
 
 	stop(fullscreenExitOutput = this.settingsManager.getFullscreenExitOutput()): void {
+		this.catalogEpoch++;
+		this.catalogDialogCancel?.();
 		this.unregisterSignalHandlers();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);

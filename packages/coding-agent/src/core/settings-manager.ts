@@ -289,6 +289,10 @@ export class FileSettingsStorage implements SettingsStorage {
 		this.projectSettingsPath = join(resolvedCwd, CONFIG_DIR_NAME, "settings.json");
 	}
 
+	getFilePath(scope: SettingsScope): string {
+		return scope === "global" ? this.globalSettingsPath : this.projectSettingsPath;
+	}
+
 	private acquireLockSyncWithRetry(path: string): () => void {
 		const maxAttempts = 10;
 		const delayMs = 20;
@@ -317,7 +321,7 @@ export class FileSettingsStorage implements SettingsStorage {
 	}
 
 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void {
-		const path = scope === "global" ? this.globalSettingsPath : this.projectSettingsPath;
+		const path = this.getFilePath(scope);
 		const dir = dirname(path);
 
 		let release: (() => void) | undefined;
@@ -509,6 +513,11 @@ export class SettingsManager {
 		migrateLegacySkillsSetting(settings);
 		migrateLegacyRetryDelaySetting(settings);
 		return settings as Settings;
+	}
+
+	/** Actual file location, or null for custom/in-memory storage. Does not perform I/O. */
+	getFilePath(scope: SettingsScope): string | null {
+		return this.storage instanceof FileSettingsStorage ? this.storage.getFilePath(scope) : null;
 	}
 
 	getGlobalSettings(): Settings {
