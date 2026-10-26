@@ -11,7 +11,24 @@ It is not a root workspace, built or published by Grip's release commands,
 embedded in the CLI, or loaded by default. Its package manifest and skills
 remain independently loadable through Grip's existing package workflow.
 
-To opt in from a source checkout, use the absolute path to this directory:
+In an interactive Grip version that supports `/extensions` and Git `#path=`
+selectors, open `/extensions`, select Planner, choose Install and a user or host
+project scope, review the exact source and confirm. Reload explicitly to load
+`/planner`, its six tools and its skill. The catalog's reviewed source is:
+
+```text
+git:github.com/greppleai/grip@961291825e61a44b9075ef3bf9a53f54a903998d#path=extensions/planner
+```
+
+The SDK peer minimum (0.1.5) is not a claim that released 0.1.5 supports this new
+catalog/selector syntax. The selected package is installed separately, without
+the monorepo root or sibling workspaces. Dependency lifecycle scripts, development
+dependencies and automatic peer installation are skipped for this Git selection;
+Grip supplies its SDK peers. Review the source: runtime extension code still has
+full host access. See [official extensions](../../packages/coding-agent/docs/official-extensions.md)
+for update/removal, existing-install handling and source policy.
+
+To opt in from a source checkout instead, use the absolute path to this directory:
 
 ```sh
 # Current run only; substitute the path to your Grip checkout.
@@ -23,9 +40,15 @@ grip install /absolute/path/to/grip/extensions/planner
 # grip install -l /absolute/path/to/grip/extensions/planner
 ```
 
-These are local-checkout instructions, not a published npm package or reviewed
-remote install pin. No installation is performed by building Grip. Review the
-extension before loading it: it runs with the same access as other extensions.
+Local-path loading does not copy the package or hydrate its dependencies; make its
+declared runtime dependencies available before loading. The examples above do not
+assert npm publication. Building Grip performs no planner installation.
+
+Existing legacy, numeric and mixed plans need no migration. Existing planner
+packages are recognized conservatively, never replaced automatically. Stop an
+active planner workflow before managing its package; loaded owners block catalog
+mutation. Removal leaves saved `.planner` data intact. Package resources and
+settings stay on the extension host; plan mutations use the active tool backend.
 
 ## Commands
 

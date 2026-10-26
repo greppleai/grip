@@ -2,6 +2,13 @@
 
 All notable changes to Grip are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Added `/extensions`, a curated optional-extension catalog with explicit scope, exact-source confirmation, reload and conservative ownership checks. Planner is installed separately; nothing is enabled by default.
+- Added Git package subdirectory selectors (`git:host/owner/repo@ref#path=relative/package`) with isolated sparse checkouts, package-relative resource filters and script-free production dependency installation without automatic peer installation.
+
 ## [0.1.5](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.4...@greppleai/grip-v0.1.5) (2026-10-22)
 
 

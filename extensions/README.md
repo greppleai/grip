@@ -7,7 +7,12 @@ installing, or starting Grip does not install or load them automatically.
 
 - [Planner](planner/README.md): local Markdown plans and iterative build loops.
 
-Use Grip's existing package workflow to opt in to an individual package and
-choose its installation scope. A local path requires a source checkout on the
-host; the CLI does not ship a copy. Remote/catalog delivery requires its own
-reviewed exact target and is not implied by source being present here.
+Use `/extensions` in an interactive Grip version with catalog support to review
+an exact source and explicitly choose an installation scope. Planner's catalog
+target selects only `extensions/planner` from an immutable Git commit; no npm
+publication or monorepo-root installation is required. See the
+[official extension guide](../packages/coding-agent/docs/official-extensions.md).
+
+Local paths remain supported, but require a source checkout on the extension
+host; the CLI does not ship a copy. Existing configured packages can still be
+loaded or restored at startup through the normal package workflow.

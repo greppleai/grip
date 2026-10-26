@@ -7,6 +7,7 @@ Grip packages bundle extensions, skills, rules, prompt templates, and themes so 
 ## Table of Contents
 
 - [Install and Manage](#install-and-manage)
+- [Official Extensions](#official-extensions)
 - [Package Sources](#package-sources)
 - [Creating a Grip Package](#creating-a-grip-package)
 - [Package Structure](#package-structure)
@@ -46,6 +47,15 @@ To try a package without installing it, use `--extension` or `-e`. This installs
 grip -e npm:@foo/bar
 grip -e git:github.com/user/repo
 ```
+
+## Official Extensions
+
+In interactive mode, `/extensions` opens the curated optional extension catalog.
+Browsing requires no network access and installs nothing. Each action shows its
+exact reviewed source, scope and host settings before confirmation; loading new
+resources requires an explicit reload. Planner is the first optional entry, not
+a built-in workflow or a default installation. See [Official Extensions](official-extensions.md)
+for ownership safeguards, existing installations and remote-backend boundaries.
 
 ## Package Sources
 
@@ -101,6 +111,35 @@ grip install ssh://git@github.com/user/repo
 # With version ref
 grip install git:git@github.com:user/repo@v1.0.0
 ```
+
+**Select a package inside a Git repository:**
+
+```bash
+grip install 'git:github.com/user/monorepo@v1#path=packages/my-extension'
+# Project scope:
+grip install -l 'git:github.com/user/monorepo@v1#path=packages/my-extension'
+```
+
+The literal `#path=` selector follows the ref and must name a relative POSIX
+directory containing `package.json`. Absolute paths, `.`/`..` segments, symlinked
+directory components, Git metadata paths, glob characters and ambiguous encodings
+are refused. Percent-encoded spaces are supported; encoded path separators are not.
+Quote the source to keep it one shell argument.
+
+Selected packages use separate hashed checkouts under `~/.grip/agent/git-subdirectories/`
+or `.grip/git-subdirectories/`. Root and sibling selections never share a checkout.
+Changing only the ref updates the same selected package in that scope. Temporary
+`-e` selections have their own cache namespace. Git sparse checkout excludes the
+repository-root manifest and sibling packages: the selected package must be
+self-contained, with no sibling workspace dependencies or resource paths escaping
+its root. Resource filters are relative to that selected package.
+
+Dependencies are installed in the selected directory through the configured
+npm/Bun/pnpm command, omitting development dependencies, disabling automatic peer
+installation and passing `--ignore-scripts`. Packages requiring lifecycle scripts
+are not supported by this install mode; inspect failures rather than assuming
+setup ran. These rules do not change existing repository-root installs, whose
+dependency lifecycle scripts may execute. Neither mode sandboxes runtime code.
 
 ### Local Paths
 
@@ -224,5 +263,5 @@ Use `grip config` to enable or disable extensions, skills, rules, prompt templat
 Packages can appear in both global and project settings. If the same package appears in both, the project entry wins. Identity is determined by:
 
 - npm: package name
-- git: repository URL without ref
+- git: repository identity plus selected subdirectory, without ref (root is a distinct identity)
 - local: resolved absolute path
