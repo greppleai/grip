@@ -94,6 +94,7 @@ function portableToolResult(result: AgentToolResult<unknown>): AgentToolResult<u
 function operationKind(name: string): RemoteWorkspaceOperationKind {
 	switch (name) {
 		case "read":
+		case "read_image":
 		case "grep":
 		case "find":
 		case "ls":
@@ -680,8 +681,8 @@ async function dispatchDaemonWorkspaceRequest(
 
 export function createDaemonWorkspaceRuntime(configuration: DaemonConfiguration): DaemonWorkspaceRuntime {
 	const operations = new ConfinedDaemonToolOperations(configuration);
-	const toolNames: WorkspaceToolName[] = ["read", "edit", "write", "grep", "find", "ls"];
-	if (configuration.allowProcessExec) toolNames.splice(1, 0, "bash");
+	const toolNames: WorkspaceToolName[] = ["read", "read_image", "edit", "write", "grep", "find", "ls"];
+	if (configuration.allowProcessExec) toolNames.splice(2, 0, "bash");
 	const host = new WorkspaceToolHost({
 		cwd: configuration.workspaceRoot,
 		operations,

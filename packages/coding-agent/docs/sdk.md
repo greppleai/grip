@@ -247,13 +247,13 @@ const pi = await GripAgent.create({
 await pi.createAgentSession();
 ```
 
-Built-in tool names include `read`, `bash`, `edit`, `write`, `websearch`, `session_search`, `session_entry_get`, `compress_context`, `grep`, `find`, `ls`, and `subagent`. Subagent delegation is enabled by default for bounded jobs; set `enableSubagents: false` in settings to disable it. It inherits the parent model unless the host sets `GRIP_DEFAULT_SUBAGENT_MODEL=provider/model-id` or configures a named preset; the child cannot widen a parent tool allowlist. An explicit `tools` option selects any subset regardless of these defaults; `noTools: "all"` and `noTools: "builtin"` remain authoritative.
+Built-in tool names include `read`, `bash`, `edit`, `write`, `websearch`, `session_search`, `session_entry_get`, `compress_context`, `grep`, `find`, `ls`, and `job`. Job delegation is enabled by default for bounded tasks; set `enableJobs: false` in settings to disable it. A job inherits the parent model unless `jobModel` or `GRIP_DEFAULT_JOB_MODEL=provider/model-id` is set (in that order); the child cannot widen a parent tool allowlist. An explicit `tools` option selects any subset regardless of these defaults; `noTools: "all"` and `noTools: "builtin"` remain authoritative.
 
 ### Settings
 
 ```typescript
 const settingsManager = SettingsManager.inMemory({
-  enableSubagents: false, // Opt out of built-in delegation
+  enableJobs: false, // Opt out of built-in delegation
   compaction: { enabled: false },
   retry: { enabled: true, maxRetries: 2 },
 });
@@ -262,7 +262,7 @@ const pi = await GripAgent.create({ settingsManager });
 await pi.createAgentSession();
 ```
 
-For a live session, `session.setSubagentsEnabled(enabled)` persists the setting and immediately refreshes active tools and orchestration guidance. `session.reload()` applies settings-file changes.
+For a live session, `session.setJobsEnabled(enabled)` persists the setting and immediately refreshes active tools and job guidance. `session.reload()` applies settings-file changes.
 
 ## Run Modes
 
@@ -314,8 +314,8 @@ createEventBus
 createCodingTools
 createReadOnlyTools
 createReadTool, createBashTool, createEditTool, createWriteTool
-createGrepTool, createFindTool, createLsTool, createSubagentTool
+createGrepTool, createFindTool, createLsTool, createJobTool
 ```
 
-`createSubagentTool` requires a `SubagentRunner` in its options. `GripAgent` configures the embedded runner automatically; standalone tool construction must provide its own in-process runner.
+`createJobTool` requires a `JobRunner` in its options. `GripAgent` configures the embedded runner automatically; standalone tool construction must provide its own in-process runner.
 For extension types, see [extensions.md](extensions.md).

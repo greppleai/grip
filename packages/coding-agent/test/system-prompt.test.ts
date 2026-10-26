@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { createSyntheticSourceInfo } from "../src/core/source-info.ts";
 import { buildSystemPrompt } from "../src/core/system-prompt.ts";
 
 describe("buildSystemPrompt", () => {
@@ -26,7 +27,7 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("## Guidelines");
 			expect(prompt).not.toContain("## Skills");
 			expect(prompt).not.toContain("<available_skills>");
-			expect(prompt).not.toContain("## Subagents");
+			expect(prompt).not.toContain("## Jobs");
 		});
 	});
 
@@ -38,16 +39,18 @@ describe("buildSystemPrompt", () => {
 					bash: "Execute bash commands",
 					edit: "Make surgical edits",
 					write: "Create or overwrite files",
+					websearch: "Search the web",
 				},
 				contextFiles: [],
 				skills: [],
 				cwd: process.cwd(),
 			});
 
-			expect(prompt).toContain("- read:");
+			expect(prompt).not.toContain("- read:");
 			expect(prompt).toContain("- bash:");
-			expect(prompt).toContain("- edit:");
+			expect(prompt).not.toContain("- edit:");
 			expect(prompt).toContain("- write:");
+			expect(prompt).toContain("- websearch:");
 			expect(prompt).toContain(
 				"Use bash for shell commands; follow project-specific instructions for repository file operations",
 			);
@@ -68,6 +71,23 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("adding models (docs/models.md), grip packages (docs/packages.md)");
 			expect(prompt).not.toContain("operating inside pi");
 			expect(prompt).toMatch(/Current date: \d{4}-\d{2}-\d{2}/);
+		});
+		test("keeps rules visible when bash replaces read as the default file access tool", () => {
+			const filePath = "/example/RULES.md";
+			const rules = [
+				{
+					name: "example-rule",
+					description: "Required rule",
+					filePath,
+					baseDir: "/example",
+					sourceInfo: createSyntheticSourceInfo(filePath, { source: "test" }),
+					disableModelInvocation: false,
+				},
+			];
+			const prompt = buildSystemPrompt({ cwd: process.cwd(), rules });
+			expect(prompt).toContain("<name>example-rule</name>");
+			expect(prompt).toContain("Load a rule's file with an available workspace tool");
+			expect(buildSystemPrompt({ cwd: process.cwd(), selectedTools: [], rules })).not.toContain("<available_rules>");
 		});
 	});
 
@@ -94,43 +114,38 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).not.toContain("<location>");
 		});
 
-		test("keeps default prompt sections in order around visible skills and active subagents", () => {
+		test("keeps visible skills and brief parent job guidance in order without a preset catalog", () => {
+			const guidance =
+				"Delegate a bounded outcome; verify its evidence and remain responsible for the final answer.";
 			const prompt = buildSystemPrompt({
-				selectedTools: ["read", "load_skill", "subagent"],
+				selectedTools: ["read", "load_skill", "job"],
 				skills: [skill],
-				subagentPrompt: {
-					catalog: '<available_subagents><subagent name="worker" /></available_subagents>',
-					guidance: "Use a subagent for bounded work.",
-				},
+				jobGuidance: guidance,
 				cwd: process.cwd(),
 			});
 			const positions = [
 				prompt.indexOf("## Guidelines"),
 				prompt.indexOf("## Skills"),
-				prompt.indexOf("## Subagents"),
+				prompt.indexOf("## Jobs"),
 				prompt.indexOf("## Grip documentation"),
 			];
 			expect(positions.every((position) => position >= 0)).toBe(true);
 			expect(positions).toEqual([...positions].sort((a, b) => a - b));
-			expect(prompt.indexOf("<available_skills>")).toBeLessThan(prompt.indexOf("<available_subagents>"));
-			expect(prompt.indexOf("<available_subagents>")).toBeLessThan(prompt.indexOf("## Subagents"));
-			expect(prompt).toContain("## Subagents\nUse a subagent for bounded work.");
+			expect(prompt).toContain(`## Jobs\n${guidance}`);
+			expect(prompt).not.toContain("<available_jobs>");
 		});
 
-		test("custom prompts omit default sections but retain active built-in subagent guidance", () => {
-			const prompt = buildSystemPrompt({
+		test("keeps short job guidance for a custom prompt only when job is enabled", () => {
+			const options = {
 				customPrompt: "Custom system instructions.",
-				subagentPrompt: {
-					catalog: '<available_subagents><subagent name="worker" /></available_subagents>',
-					guidance: "Use a subagent for bounded work.",
-				},
-				selectedTools: ["read", "subagent"],
+				jobGuidance: "Use job for a bounded outcome.",
 				cwd: process.cwd(),
-			});
-			expect(prompt).not.toContain("## Guidelines");
-			expect(prompt).not.toContain("## Grip documentation");
-			expect(prompt).toContain("## Subagents");
-			expect(prompt).toContain('<subagent name="worker" />');
+			};
+			const withJob = buildSystemPrompt({ ...options, selectedTools: ["read", "job"] });
+			expect(withJob).toContain("## Jobs\nUse job for a bounded outcome.");
+			expect(withJob).not.toContain("<available_jobs>");
+			const withoutJob = buildSystemPrompt({ ...options, selectedTools: ["read"] });
+			expect(withoutJob).not.toContain("## Jobs");
 		});
 
 		test("does not list skills if load_skill is unavailable", () => {
@@ -162,33 +177,6 @@ describe("buildSystemPrompt", () => {
 			});
 
 			expect(prompt).not.toContain("dynamic_tool");
-		});
-	});
-
-	describe("subagent catalog", () => {
-		test("does not hardcode preset names or guidance into the generic prompt", () => {
-			const prompt = buildSystemPrompt({
-				selectedTools: ["read", "subagent"],
-				toolSnippets: { subagent: "Delegate focused tasks" },
-				contextFiles: [],
-				skills: [],
-				cwd: process.cwd(),
-			});
-
-			expect(prompt).not.toContain("## Orchestration");
-			expect(prompt).not.toContain("<available_subagents>");
-			expect(prompt).not.toContain("Choose explore for focused codebase investigation");
-		});
-
-		test("omits a subagent catalog when the tool is unavailable", () => {
-			const prompt = buildSystemPrompt({
-				selectedTools: ["read"],
-				contextFiles: [],
-				skills: [],
-				cwd: process.cwd(),
-			});
-
-			expect(prompt).not.toContain("<available_subagents>");
 		});
 	});
 

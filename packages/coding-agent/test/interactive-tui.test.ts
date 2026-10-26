@@ -339,7 +339,7 @@ function createRootContext(ui: TUI, fullscreenScrollbar: ScrollViewScrollbar = "
 	};
 	const headerContainer = withText("header");
 	const loadedResourcesContainer = withText("resources");
-	const chatContainer = withText("message tool subagent");
+	const chatContainer = withText("message tool job");
 	const documentContainer = new Container();
 	documentContainer.addChild(headerContainer);
 	documentContainer.addChild(loadedResourcesContainer);
@@ -900,7 +900,7 @@ describe("createInteractiveTui", () => {
 				.map((line) => stripTerminalSequences(line).trimEnd())
 				.join("\n"),
 		).toBe(
-			"header\nresources\nmessage tool subagent\npending\nstatus sandbox\nwidget above\neditor\nwidget below\nfooter daemon status",
+			"header\nresources\nmessage tool job\npending\nstatus sandbox\nwidget above\neditor\nwidget below\nfooter daemon status",
 		);
 	});
 
@@ -1035,7 +1035,7 @@ describe("createInteractiveTui", () => {
 		ui.start();
 		await terminal.waitForRender();
 		expect(terminal.getViewport().map((line) => line.trimEnd())).toEqual([
-			"message tool subagent",
+			"message tool job",
 			"pending",
 			"status sandbox",
 			"widget above",
@@ -1050,9 +1050,9 @@ describe("createInteractiveTui", () => {
 			(markdown) => markdown.replace("source", "transformed"),
 		]);
 		const tool = new ToolExecutionComponent(
-			"subagent",
+			"job",
 			"tool-1",
-			{ agent: "worker" },
+			{ task: "Review the changes" },
 			{ showImages: false },
 			undefined,
 			ui,
@@ -1086,7 +1086,7 @@ describe("createInteractiveTui", () => {
 		context.chatContainer.addChild(imageTool);
 		const fullDocument = stripTerminalSequences(context.documentContainer.render(80).join("\n"));
 		expect(fullDocument).toContain("transformed markdown");
-		expect(fullDocument).toContain("subagent");
+		expect(fullDocument).toContain("job");
 		expect(fullDocument).toContain("child output");
 		expect(fullDocument).toContain("Image:");
 

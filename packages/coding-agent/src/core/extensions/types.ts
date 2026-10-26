@@ -64,10 +64,10 @@ import type { BashToolDetails, BashToolInput } from "../tools/bash.ts";
 import type { EditToolDetails, EditToolInput } from "../tools/edit.ts";
 import type { FindToolDetails, FindToolInput } from "../tools/find.ts";
 import type { GrepToolDetails, GrepToolInput } from "../tools/grep.ts";
+import type { JobDetails, JobToolInput } from "../tools/job.ts";
 import type { LsToolDetails, LsToolInput } from "../tools/ls.ts";
 import type { BorrowedToolOperations, ToolBackendInfo, ToolOperations } from "../tools/operations.ts";
-import type { ReadToolDetails, ReadToolInput } from "../tools/read.ts";
-import type { SubagentDetails, SubagentToolInput } from "../tools/subagent.ts";
+import type { ReadImageToolInput, ReadToolDetails, ReadToolInput } from "../tools/read.ts";
 import type { WebsearchToolDetails, WebsearchToolInput } from "../tools/websearch.ts";
 import type { WriteToolInput } from "../tools/write.ts";
 
@@ -912,6 +912,11 @@ export interface ReadToolCallEvent extends ToolCallEventBase {
 	input: ReadToolInput;
 }
 
+export interface ReadImageToolCallEvent extends ToolCallEventBase {
+	toolName: "read_image";
+	input: ReadImageToolInput;
+}
+
 export interface EditToolCallEvent extends ToolCallEventBase {
 	toolName: "edit";
 	input: EditToolInput;
@@ -937,9 +942,9 @@ export interface LsToolCallEvent extends ToolCallEventBase {
 	input: LsToolInput;
 }
 
-export interface SubagentToolCallEvent extends ToolCallEventBase {
-	toolName: "subagent";
-	input: SubagentToolInput;
+export interface JobToolCallEvent extends ToolCallEventBase {
+	toolName: "job";
+	input: JobToolInput;
 }
 
 export interface WebsearchToolCallEvent extends ToolCallEventBase {
@@ -961,12 +966,13 @@ export interface CustomToolCallEvent extends ToolCallEventBase {
 export type ToolCallEvent =
 	| BashToolCallEvent
 	| ReadToolCallEvent
+	| ReadImageToolCallEvent
 	| EditToolCallEvent
 	| WriteToolCallEvent
 	| GrepToolCallEvent
 	| FindToolCallEvent
 	| LsToolCallEvent
-	| SubagentToolCallEvent
+	| JobToolCallEvent
 	| WebsearchToolCallEvent
 	| CustomToolCallEvent;
 
@@ -985,6 +991,11 @@ export interface BashToolResultEvent extends ToolResultEventBase {
 
 export interface ReadToolResultEvent extends ToolResultEventBase {
 	toolName: "read";
+	details: ReadToolDetails | undefined;
+}
+
+export interface ReadImageToolResultEvent extends ToolResultEventBase {
+	toolName: "read_image";
 	details: ReadToolDetails | undefined;
 }
 
@@ -1013,9 +1024,9 @@ export interface LsToolResultEvent extends ToolResultEventBase {
 	details: LsToolDetails | undefined;
 }
 
-export interface SubagentToolResultEvent extends ToolResultEventBase {
-	toolName: "subagent";
-	details: SubagentDetails | undefined;
+export interface JobToolResultEvent extends ToolResultEventBase {
+	toolName: "job";
+	details: JobDetails | undefined;
 }
 
 export interface WebsearchToolResultEvent extends ToolResultEventBase {
@@ -1032,12 +1043,13 @@ export interface CustomToolResultEvent extends ToolResultEventBase {
 export type ToolResultEvent =
 	| BashToolResultEvent
 	| ReadToolResultEvent
+	| ReadImageToolResultEvent
 	| EditToolResultEvent
 	| WriteToolResultEvent
 	| GrepToolResultEvent
 	| FindToolResultEvent
 	| LsToolResultEvent
-	| SubagentToolResultEvent
+	| JobToolResultEvent
 	| WebsearchToolResultEvent
 	| CustomToolResultEvent;
 
@@ -1047,6 +1059,9 @@ export function isBashToolResult(e: ToolResultEvent): e is BashToolResultEvent {
 }
 export function isReadToolResult(e: ToolResultEvent): e is ReadToolResultEvent {
 	return e.toolName === "read";
+}
+export function isReadImageToolResult(e: ToolResultEvent): e is ReadImageToolResultEvent {
+	return e.toolName === "read_image";
 }
 export function isEditToolResult(e: ToolResultEvent): e is EditToolResultEvent {
 	return e.toolName === "edit";
@@ -1063,8 +1078,8 @@ export function isFindToolResult(e: ToolResultEvent): e is FindToolResultEvent {
 export function isLsToolResult(e: ToolResultEvent): e is LsToolResultEvent {
 	return e.toolName === "ls";
 }
-export function isSubagentToolResult(e: ToolResultEvent): e is SubagentToolResultEvent {
-	return e.toolName === "subagent";
+export function isJobToolResult(e: ToolResultEvent): e is JobToolResultEvent {
+	return e.toolName === "job";
 }
 
 export function isWebsearchToolResult(e: ToolResultEvent): e is WebsearchToolResultEvent {
@@ -1098,12 +1113,13 @@ export type NamedToolCallEvent<TName extends string, TInput extends Record<strin
 
 export function isToolCallEventType(toolName: "bash", event: ToolCallEvent): event is BashToolCallEvent;
 export function isToolCallEventType(toolName: "read", event: ToolCallEvent): event is ReadToolCallEvent;
+export function isToolCallEventType(toolName: "read_image", event: ToolCallEvent): event is ReadImageToolCallEvent;
 export function isToolCallEventType(toolName: "edit", event: ToolCallEvent): event is EditToolCallEvent;
 export function isToolCallEventType(toolName: "write", event: ToolCallEvent): event is WriteToolCallEvent;
 export function isToolCallEventType(toolName: "grep", event: ToolCallEvent): event is GrepToolCallEvent;
 export function isToolCallEventType(toolName: "find", event: ToolCallEvent): event is FindToolCallEvent;
 export function isToolCallEventType(toolName: "ls", event: ToolCallEvent): event is LsToolCallEvent;
-export function isToolCallEventType(toolName: "subagent", event: ToolCallEvent): event is SubagentToolCallEvent;
+export function isToolCallEventType(toolName: "job", event: ToolCallEvent): event is JobToolCallEvent;
 export function isToolCallEventType(toolName: "websearch", event: ToolCallEvent): event is WebsearchToolCallEvent;
 export function isToolCallEventType<TName extends string, TInput extends Record<string, unknown>>(
 	toolName: TName,
@@ -1371,8 +1387,8 @@ export interface ExtensionAPI {
 	// Command, Shortcut, Flag Registration
 	// =========================================================================
 
-	/** Register a child-only extension factory for fresh built-in subagents. Other extensions remain isolated. */
-	registerSubagentFactory(factory: ExtensionFactory): void;
+	/** Register a child-only extension factory for fresh built-in jobs. Other extensions remain isolated. */
+	registerJobFactory(factory: ExtensionFactory): void;
 	/** Register a custom command. */
 	registerCommand(name: string, options: Omit<RegisteredCommand, "name" | "sourceInfo">): void;
 
@@ -1804,7 +1820,7 @@ export interface Extension {
 	resolvedPath: string;
 	sourceInfo: SourceInfo;
 	/** Fresh child-specific factory, explicitly opted in by this extension. */
-	subagentFactory?: ExtensionFactory;
+	jobFactory?: ExtensionFactory;
 	handlers: ExtensionHandlers;
 	tools: Map<string, RegisteredTool>;
 	messageRenderers: Map<string, MessageRenderer>;

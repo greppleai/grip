@@ -1016,7 +1016,7 @@ pi.on("tool_result", async (event, ctx) => {
 
 ### ctx.isIdle() / ctx.abort() / ctx.hasPendingMessages()
 
-`ctx.isIdle()` is true only after Agent work, retries, compaction, queued continuations, pending bash, awaited remote operations, and blocking child subagent calls have settled. It remains false while settled callbacks are being delivered.
+`ctx.isIdle()` is true only after Agent work, retries, compaction, queued continuations, pending bash, awaited remote operations, and blocking child job calls have settled. It remains false while settled callbacks are being delivered.
 
 ### ctx.shutdown()
 
@@ -1479,17 +1479,19 @@ const label = ctx.session.getLabel(entryId);
 
 Labels persist in the session and survive restarts. Use them to mark important points (turns, checkpoints) in the conversation tree.
 
-### pi.registerSubagentFactory(factory)
+### pi.registerJobFactory(factory)
 
-Opt in to built-in subagents with a **fresh, child-only** extension factory. Other parent extensions are not loaded in children. Register only the tools and event hooks the child needs; parent commands, UI, and state are not shared. The child uses the parent's active workspace backend and remains subject to its tool allowlist and exclusions. This factory also runs when constructing a disposable child for `/system-prompt --subagent`; avoid side effects during registration and `session_start`.
+Opt in to built-in jobs with a **fresh, child-only** extension factory. Other parent extensions are not loaded in children. Register only the tools and event hooks the child needs; parent commands, UI, and state are not shared. The child uses the parent's active workspace backend and remains subject to its tool allowlist and exclusions.
 
 ```typescript
 export default function (pi: ExtensionAPI) {
-  pi.registerSubagentFactory((child) => {
+  pi.registerJobFactory((child) => {
     child.on("before_agent_start", (event) => ({
       systemPrompt: `${event.systemPrompt}\n\nFollow the repository workflow.`,
     }));
   });
+}
+```
 }
 ```
 
@@ -2004,7 +2006,7 @@ pi.registerTool({
 
 ### Overriding Built-in Tools
 
-Extensions can override built-in tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `websearch`, `session_search`, `session_entry_get`, and `subagent`) by registering a tool with the same name. Interactive mode displays a warning when this happens.
+Extensions can override built-in tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `websearch`, `session_search`, `session_entry_get`, and `job`) by registering a tool with the same name. Interactive mode displays a warning when this happens.
 
 ```bash
 # Extension's read tool replaces built-in read
@@ -2745,7 +2747,6 @@ All examples in [examples/extensions/](../examples/extensions/).
 | **Remote & Sandbox** |||
 | `interactive-shell.ts` | Persistent shell session | `on("user_bash")` |
 | `sandbox/` | Sandboxed tool execution | Tool operations |
-| `subagent/` | Optional subprocess-based alternative to the built-in in-process subagent tool (overrides it if loaded) | `registerTool`, `exec` |
 | **Games** |||
 | `snake.ts` | Snake game | `registerCommand`, `ui.custom`, keyboard handling |
 | `space-invaders.ts` | Space Invaders game | `registerCommand`, `ui.custom` |

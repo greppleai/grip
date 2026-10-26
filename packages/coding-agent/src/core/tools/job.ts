@@ -1,33 +1,20 @@
 /**
- * Subagent Tool - Delegate tasks to specialized agents
+ * Job Tool - Delegate bounded tasks to isolated sessions
  *
  * Runs each task in a fresh embedded AgentSession using an injected runner.
- *
- * Supports three modes:
- *   - Single: { task: "...", responseFormat: "...", systemPrompt: "..." }
- *   - Parallel: { tasks: [{ task: "...", model: "..." }, ...] }
- *   - Chain: { chain: [{ task: "... {previous} ..." }, ...] }
+ * Supports single, parallel, and sequential chain modes.
  */
 
 import * as os from "node:os";
 import type { AgentTool, AgentToolResult } from "@greppleai/grip-agent-core";
 import type { Api, AssistantMessage, Message, Model } from "@greppleai/grip-ai";
-import { StringEnum } from "@greppleai/grip-ai";
 import { Container, Markdown, Spacer, Text } from "@greppleai/grip-tui";
 import { type Static, Type } from "typebox";
 import { getMarkdownTheme, type Theme, type ThemeColor } from "../../modes/interactive/theme/theme.ts";
-import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
+import type { ToolDefinition } from "../extensions/types.ts";
 import type { ToolOperations } from "./operations.ts";
-import {
-	type AgentConfig,
-	type AgentScope,
-	type AgentSource,
-	discoverAgentsWithOperations,
-} from "./subagent-agents.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
-const GENERIC_SYSTEM_PROMPT =
-	"You are an isolated subagent. Complete the delegated task autonomously and return only the information requested by the parent agent.";
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CHAIN_STEPS = 16;
 const MAX_CONCURRENCY = 4;
@@ -45,10 +32,9 @@ function formatTokens(count: number): string {
 	return `${(count / 1000000).toFixed(1)}M`;
 }
 
-type SubagentUsageDisplayMetrics = Omit<SubagentUsageStats, "contextTokens" | "turns"> &
-	Partial<Pick<SubagentUsageStats, "contextTokens" | "turns">>;
+type JobUsageDisplayMetrics = Omit<JobUsageStats, "contextTokens" | "turns"> & Partial<Pick<JobUsageStats, "turns">>;
 
-function formatUsageStats(usage: SubagentUsageDisplayMetrics, model?: string): string {
+function formatUsageStats(usage: JobUsageDisplayMetrics): string {
 	const parts: string[] = [];
 	if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
 	if (usage.input) parts.push(`in:${formatTokens(usage.input)}`);
@@ -56,29 +42,25 @@ function formatUsageStats(usage: SubagentUsageDisplayMetrics, model?: string): s
 	if (usage.cacheRead) parts.push(`R${formatTokens(usage.cacheRead)}`);
 	if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
 	if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
-	if (usage.contextTokens && usage.contextTokens > 0) {
-		parts.push(`ctx:${formatTokens(usage.contextTokens)}`);
-	}
-	if (model) parts.push(model);
 	return parts.join(" ");
 }
 
-type SubagentToolThemeForeground = (color: ThemeColor, text: string) => string;
+type JobToolThemeForeground = (color: ThemeColor, text: string) => string;
 
-function shortenSubagentToolPath(filePath: string): string {
+function shortenJobToolPath(filePath: string): string {
 	const home = os.homedir();
 	return filePath.startsWith(home) ? `~${filePath.slice(home.length)}` : filePath;
 }
 
-function formatBashToolCall(args: Record<string, unknown>, themeFg: SubagentToolThemeForeground): string {
+function formatBashToolCall(args: Record<string, unknown>, themeFg: JobToolThemeForeground): string {
 	const command = (args.command as string) || "...";
 	const preview = command.length > 60 ? `${command.slice(0, 60)}...` : command;
 	return themeFg("muted", "$ ") + themeFg("toolOutput", preview);
 }
 
-function formatReadToolCall(args: Record<string, unknown>, themeFg: SubagentToolThemeForeground): string {
+function formatReadToolCall(args: Record<string, unknown>, themeFg: JobToolThemeForeground): string {
 	const rawPath = (args.file_path || args.path || "...") as string;
-	const filePath = shortenSubagentToolPath(rawPath);
+	const filePath = shortenJobToolPath(rawPath);
 	const offset = args.offset as number | undefined;
 	const limit = args.limit as number | undefined;
 	let text = themeFg("accent", filePath);
@@ -90,9 +72,9 @@ function formatReadToolCall(args: Record<string, unknown>, themeFg: SubagentTool
 	return themeFg("muted", "read ") + text;
 }
 
-function formatWriteToolCall(args: Record<string, unknown>, themeFg: SubagentToolThemeForeground): string {
+function formatWriteToolCall(args: Record<string, unknown>, themeFg: JobToolThemeForeground): string {
 	const rawPath = (args.file_path || args.path || "...") as string;
-	const filePath = shortenSubagentToolPath(rawPath);
+	const filePath = shortenJobToolPath(rawPath);
 	const content = (args.content || "") as string;
 	const lines = content.split("\n").length;
 	let text = themeFg("muted", "write ") + themeFg("accent", filePath);
@@ -100,7 +82,7 @@ function formatWriteToolCall(args: Record<string, unknown>, themeFg: SubagentToo
 	return text;
 }
 
-function formatToolCall(toolName: string, args: Record<string, unknown>, themeFg: SubagentToolThemeForeground): string {
+function formatToolCall(toolName: string, args: Record<string, unknown>, themeFg: JobToolThemeForeground): string {
 	switch (toolName) {
 		case "bash":
 			return formatBashToolCall(args, themeFg);
@@ -110,11 +92,11 @@ function formatToolCall(toolName: string, args: Record<string, unknown>, themeFg
 			return formatWriteToolCall(args, themeFg);
 		case "edit": {
 			const rawPath = (args.file_path || args.path || "...") as string;
-			return themeFg("muted", "edit ") + themeFg("accent", shortenSubagentToolPath(rawPath));
+			return themeFg("muted", "edit ") + themeFg("accent", shortenJobToolPath(rawPath));
 		}
 		case "ls": {
 			const rawPath = (args.path || ".") as string;
-			return themeFg("muted", "ls ") + themeFg("accent", shortenSubagentToolPath(rawPath));
+			return themeFg("muted", "ls ") + themeFg("accent", shortenJobToolPath(rawPath));
 		}
 		case "find": {
 			const pattern = (args.pattern || "*") as string;
@@ -122,7 +104,7 @@ function formatToolCall(toolName: string, args: Record<string, unknown>, themeFg
 			return (
 				themeFg("muted", "find ") +
 				themeFg("accent", pattern) +
-				themeFg("dim", ` in ${shortenSubagentToolPath(rawPath)}`)
+				themeFg("dim", ` in ${shortenJobToolPath(rawPath)}`)
 			);
 		}
 		case "grep": {
@@ -131,7 +113,7 @@ function formatToolCall(toolName: string, args: Record<string, unknown>, themeFg
 			return (
 				themeFg("muted", "grep ") +
 				themeFg("accent", `/${pattern}/`) +
-				themeFg("dim", ` in ${shortenSubagentToolPath(rawPath)}`)
+				themeFg("dim", ` in ${shortenJobToolPath(rawPath)}`)
 			);
 		}
 		default: {
@@ -142,7 +124,7 @@ function formatToolCall(toolName: string, args: Record<string, unknown>, themeFg
 	}
 }
 
-export interface SubagentUsageStats {
+export interface JobUsageStats {
 	input: number;
 	output: number;
 	cacheRead: number;
@@ -152,30 +134,37 @@ export interface SubagentUsageStats {
 	turns: number;
 }
 
-export type SubagentStatus = "queued" | "running" | "completed" | "failed";
-export type SubagentMode = "single" | "parallel" | "chain";
-export type SubagentAgentSource = AgentSource | "ad-hoc" | "unknown";
+export type JobStatus = "queued" | "running" | "completed" | "failed";
+export type JobMode = "single" | "parallel" | "chain";
 
-export interface SubagentResult {
-	status: SubagentStatus;
-	agent: string;
-	agentSource: SubagentAgentSource;
+export type JobExecutionBackend = "local" | "remote" | "unknown";
+
+export interface JobExecutionContext {
+	cwd: string;
+	backend: JobExecutionBackend;
+	model?: string;
+	tools: string[];
+	preloadedSkills: string[];
+}
+
+export interface JobResult {
+	status: JobStatus;
 	task: string;
 	exitCode: number;
 	messages: Message[];
 	stderr: string;
-	usage: SubagentUsageStats;
+	usage: JobUsageStats;
 	model?: string;
+	/** Recorded from the child after its session and tools have been initialized. */
+	execution?: JobExecutionContext;
 	stopReason?: string;
 	errorMessage?: string;
 	responseFormat?: string;
 	step?: number;
 }
-export interface SubagentDetails {
-	mode: SubagentMode;
-	agentScope: AgentScope;
-	projectAgentsDir: string | null;
-	results: SubagentResult[];
+export interface JobDetails {
+	mode: JobMode;
+	results: JobResult[];
 }
 
 interface PresentationSegment {
@@ -183,21 +172,21 @@ interface PresentationSegment {
 	assistantOutput?: string;
 }
 
-interface SubagentPresentationState {
+interface JobPresentationState {
 	displayItems: DisplayItem[];
 	assistantOutputs: string[];
 	segments: PresentationSegment[];
 }
 
-interface RetainedSubagentMessageState {
-	presentation: SubagentPresentationState;
+interface RetainedJobMessageState {
+	presentation: JobPresentationState;
 	retainedChars: number;
 	retainedSizes: number[];
 }
 
-const presentationCache = new WeakMap<Message[], SubagentPresentationState>();
+const presentationCache = new WeakMap<Message[], JobPresentationState>();
 
-function appendPresentationMessage(state: SubagentPresentationState, message: Message): void {
+function appendPresentationMessage(state: JobPresentationState, message: Message): void {
 	const segment: PresentationSegment = { displayItemCount: 0 };
 	if (message.role === "assistant") {
 		const textParts: string[] = [];
@@ -219,17 +208,17 @@ function appendPresentationMessage(state: SubagentPresentationState, message: Me
 	state.segments.push(segment);
 }
 
-function removeOldestPresentationMessage(state: SubagentPresentationState): void {
+function removeOldestPresentationMessage(state: JobPresentationState): void {
 	const segment = state.segments.shift();
 	if (!segment) return;
 	if (segment.displayItemCount > 0) state.displayItems.splice(0, segment.displayItemCount);
 	if (segment.assistantOutput !== undefined) state.assistantOutputs.shift();
 }
 
-function getPresentationState(messages: Message[]): SubagentPresentationState {
+function getPresentationState(messages: Message[]): JobPresentationState {
 	const cached = presentationCache.get(messages);
 	if (cached) return cached;
-	const state: SubagentPresentationState = { displayItems: [], assistantOutputs: [], segments: [] };
+	const state: JobPresentationState = { displayItems: [], assistantOutputs: [], segments: [] };
 	for (const message of messages) appendPresentationMessage(state, message);
 	presentationCache.set(messages, state);
 	return state;
@@ -239,17 +228,36 @@ function getFinalOutput(messages: Message[]): string {
 	return getPresentationState(messages).assistantOutputs.at(-1) ?? "";
 }
 
-function isFailedResult(result: SubagentResult): boolean {
+function isFailedResult(result: JobResult): boolean {
 	return result.status === "failed";
 }
 
-function getResultOutput(result: SubagentResult): string {
+function getResultOutput(result: JobResult): string {
 	if (isFailedResult(result)) {
 		return result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
 	}
 	return getFinalOutput(result.messages) || "(no output)";
 }
 
+function formatJobExecution(result: JobResult): string | undefined {
+	if (!result.execution) return undefined;
+	return `Execution: ${JSON.stringify({ ...result.execution, model: result.execution.model ?? "unavailable" })}`;
+}
+
+function prependJobExecution(result: JobResult, output: string): string {
+	const execution = formatJobExecution(result);
+	return execution ? `${execution}\n\n${output}` : output;
+}
+
+function formatChainExecution(results: JobResult[]): string {
+	return results
+		.map((result) => {
+			const execution = formatJobExecution(result);
+			return execution ? `Step ${result.step}: ${execution}` : undefined;
+		})
+		.filter((execution) => execution !== undefined)
+		.join("\n");
+}
 function truncateParallelOutput(output: string): string {
 	const byteLength = Buffer.byteLength(output, "utf8");
 	if (byteLength <= PER_TASK_OUTPUT_CAP) return output;
@@ -324,7 +332,7 @@ function compactRetainedMessage(message: Message): Message | undefined {
 	}
 	return undefined;
 }
-function retainSubagentMessage(result: SubagentResult, state: RetainedSubagentMessageState, message: Message): void {
+function retainJobMessage(result: JobResult, state: RetainedJobMessageState, message: Message): void {
 	const retainedMessage = compactRetainedMessage(message);
 	if (!retainedMessage) return;
 
@@ -343,7 +351,7 @@ function retainSubagentMessage(result: SubagentResult, state: RetainedSubagentMe
 	}
 }
 
-function recordSubagentAssistantMessage(result: SubagentResult, message: AssistantMessage): void {
+function recordJobAssistantMessage(result: JobResult, message: AssistantMessage): void {
 	result.usage.turns++;
 	const usage = message.usage;
 	if (usage) {
@@ -359,51 +367,49 @@ function recordSubagentAssistantMessage(result: SubagentResult, message: Assista
 	result.errorMessage = message.errorMessage;
 }
 
-type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
+type OnUpdateCallback = (partial: AgentToolResult<JobDetails>) => void;
 
-export interface SubagentRunRequest {
+export interface JobRunRequest {
 	cwd: string;
 	toolOperations?: ToolOperations;
 	prompt: string;
 	/** Human-readable delegated task, without wrapper markup. */
 	task: string;
-	agent: string;
-	agentSource: SubagentAgentSource;
-	systemPrompt: string;
 	model?: string;
 	tools?: string[];
 	skills?: string[];
-	/** Include load_skill with preset/default tools; explicit per-task tool lists remain authoritative. */
+	/** Include load_skill with default tools; explicit per-task tool lists remain authoritative. */
 	includeDefaultSkillTool?: boolean;
 	signal?: AbortSignal;
 	onMessage: (message: Message) => void;
 }
 
-export interface SubagentRunOutcome {
+export interface JobRunOutcome {
 	exitCode: number;
 	stderr: string;
+	execution?: JobExecutionContext;
 }
 
-export type SubagentRunner = (request: SubagentRunRequest) => Promise<SubagentRunOutcome>;
+export type JobRunner = (request: JobRunRequest) => Promise<JobRunOutcome>;
 
-interface SubagentTaskSpec {
-	agent?: string;
+interface JobTaskSpec {
 	task: string;
 	responseFormat?: string;
-	systemPrompt?: string;
 	tools?: string[];
 	skills?: string[];
 	cwd?: string;
 	toolOperations?: ToolOperations;
 }
 
-function finalizeSubagentRun(result: SubagentResult, outcome: SubagentRunOutcome, aborted: boolean): SubagentResult {
+function finalizeJobRun(result: JobResult, outcome: JobRunOutcome, aborted: boolean): JobResult {
 	result.exitCode = outcome.exitCode;
 	result.stderr = outcome.stderr;
+	result.execution = outcome.execution;
+	if (outcome.execution?.model) result.model = outcome.execution.model;
 	if (aborted) {
 		result.status = "failed";
 		result.stopReason = "aborted";
-		result.errorMessage ??= outcome.stderr || "Subagent was aborted";
+		result.errorMessage ??= outcome.stderr || "Job was aborted";
 		return result;
 	}
 	result.status =
@@ -412,7 +418,7 @@ function finalizeSubagentRun(result: SubagentResult, outcome: SubagentRunOutcome
 			: "completed";
 	return result;
 }
-async function invokeSubagentRunner(runner: SubagentRunner, request: SubagentRunRequest): Promise<SubagentRunOutcome> {
+async function invokeJobRunner(runner: JobRunner, request: JobRunRequest): Promise<JobRunOutcome> {
 	try {
 		return await runner(request);
 	} catch (error) {
@@ -421,7 +427,7 @@ async function invokeSubagentRunner(runner: SubagentRunner, request: SubagentRun
 	}
 }
 
-export function formatSubagentTaskPrompt(task: string, responseFormat?: string): string {
+export function formatJobTaskPrompt(task: string, responseFormat?: string): string {
 	const sections = [`<task>\n${task}\n</task>`];
 	if (responseFormat?.trim()) {
 		sections.push(`<response-format>\n${responseFormat}\n</response-format>`);
@@ -429,63 +435,36 @@ export function formatSubagentTaskPrompt(task: string, responseFormat?: string):
 	return sections.join("\n\n");
 }
 
-async function runSingleAgent(
+async function runSingleJob(
 	defaultCwd: string,
-	agents: AgentConfig[],
-	spec: SubagentTaskSpec,
-	inheritedModel: string | undefined,
-	getConfiguredModel: ((name: string) => string | undefined) | undefined,
-	runner: SubagentRunner,
+	spec: JobTaskSpec,
+	model: string | undefined,
+	runner: JobRunner,
 	step: number | undefined,
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
-	makeDetails: (results: SubagentResult[]) => SubagentDetails,
-): Promise<SubagentResult> {
-	const preset = spec.agent ? agents.find((agent) => agent.name === spec.agent) : undefined;
-	const agentName = spec.agent ?? "ad-hoc";
-	if (spec.agent && !preset) {
-		const available = agents.map((agent) => `"${agent.name}"`).join(", ") || "none";
-		return {
-			status: "failed",
-			agent: agentName,
-			agentSource: "unknown",
-			task: truncateRetainedTask(spec.task),
-			responseFormat: spec.responseFormat,
-			exitCode: 1,
-			messages: [],
-			stderr: `Unknown agent: "${agentName}". Available agents: ${available}.`,
-			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-			step,
-		};
-	}
-
-	const currentResult: SubagentResult = {
+	makeDetails: (results: JobResult[]) => JobDetails,
+): Promise<JobResult> {
+	const currentResult: JobResult = {
 		status: "running",
-		agent: agentName,
-		agentSource: preset?.source ?? "ad-hoc",
 		task: truncateRetainedTask(spec.task),
 		responseFormat: spec.responseFormat,
 		exitCode: -1,
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+		model,
 		step,
 	};
-	const effectiveTools = spec.tools ?? preset?.tools;
-	const effectiveSkills = spec.skills ?? preset?.skills;
-	const effectiveCwd = spec.cwd ?? preset?.cwd ?? defaultCwd;
-	const effectiveSystemPrompt = spec.systemPrompt ?? preset?.systemPrompt ?? GENERIC_SYSTEM_PROMPT;
-	const selectedModel = (preset ? getConfiguredModel?.(agentName) : undefined) ?? inheritedModel;
-	currentResult.model = selectedModel;
 	if (signal?.aborted) {
 		currentResult.status = "failed";
 		currentResult.exitCode = 1;
-		currentResult.stderr = "Subagent was aborted";
+		currentResult.stderr = "Job was aborted";
 		currentResult.stopReason = "aborted";
-		currentResult.errorMessage = "Subagent was aborted";
+		currentResult.errorMessage = "Job was aborted";
 		return currentResult;
 	}
-	const retainedMessageState: RetainedSubagentMessageState = {
+	const retainedMessageState: RetainedJobMessageState = {
 		presentation: getPresentationState(currentResult.messages),
 		retainedChars: 0,
 		retainedSizes: [],
@@ -497,102 +476,87 @@ async function runSingleAgent(
 		});
 	};
 	const onMessage = (message: Message): void => {
-		retainSubagentMessage(currentResult, retainedMessageState, message);
-		if (message.role === "assistant") recordSubagentAssistantMessage(currentResult, message);
+		retainJobMessage(currentResult, retainedMessageState, message);
+		if (message.role === "assistant") recordJobAssistantMessage(currentResult, message);
 		emitUpdate();
 	};
 
 	emitUpdate();
-	const outcome = await invokeSubagentRunner(runner, {
-		cwd: effectiveCwd,
+	const outcome = await invokeJobRunner(runner, {
+		cwd: spec.cwd ?? defaultCwd,
 		toolOperations: spec.toolOperations,
-		prompt: formatSubagentTaskPrompt(spec.task, spec.responseFormat),
+		prompt: formatJobTaskPrompt(spec.task, spec.responseFormat),
 		task: spec.task,
-		agent: agentName,
-		agentSource: preset?.source ?? "ad-hoc",
-		systemPrompt: effectiveSystemPrompt,
-		model: selectedModel,
-		tools: effectiveTools,
-		skills: effectiveSkills,
+		model,
+		tools: spec.tools,
+		skills: spec.skills,
 		includeDefaultSkillTool: spec.tools === undefined,
 		signal,
 		onMessage,
 	});
-	return finalizeSubagentRun(currentResult, outcome, signal?.aborted === true);
+	return finalizeJobRun(currentResult, outcome, signal?.aborted === true);
 }
 
 const TaskItem = Type.Object({
-	agent: Type.Optional(Type.String({ description: "Optional named agent preset" })),
 	task: Type.String({ description: "A bounded job with a concrete deliverable" }),
 	responseFormat: Type.Optional(Type.String({ description: "Requested response content and structure" })),
-	systemPrompt: Type.Optional(Type.String({ description: "Instructions overriding the preset system prompt" })),
-	tools: Type.Optional(Type.Array(Type.String(), { description: "Tool allowlist overriding preset defaults" })),
+	tools: Type.Optional(Type.Array(Type.String(), { description: "Tool allowlist for this job" })),
 	skills: Type.Optional(
 		Type.Array(Type.String(), {
 			description:
-				"Skills to force-preload from the parent catalog before the first subagent turn; unknown names fail the job",
+				"Skills to force-preload from the parent catalog before the first job turn; unknown names fail the job",
 		}),
 	),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the agent session" })),
+	cwd: Type.Optional(Type.String({ description: "Working directory for the job session" })),
 });
 const ChainItem = Type.Object({
 	...TaskItem.properties,
 	task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
 });
-export const subagentParamsSchema = Type.Object({
+export const jobParamsSchema = Type.Object({
 	...TaskItem.properties,
 	task: Type.Optional(Type.String({ description: "A bounded job to delegate (single mode)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Independent jobs for parallel execution" })),
 	chain: Type.Optional(Type.Array(ChainItem, { description: "Sequential jobs", maxItems: MAX_CHAIN_STEPS })),
-	agentScope: Type.Optional(
-		StringEnum(["user", "project", "both"] as const, {
-			description: 'Agent definitions to use. Default: "user". Project presets require approval.',
-		}),
-	),
 });
+export type JobToolInput = Static<typeof jobParamsSchema>;
 
-export type SubagentToolInput = Static<typeof subagentParamsSchema>;
-
-export interface SubagentToolOptions {
-	runner?: SubagentRunner;
-	/** Host-controlled trust grant for project-local agent presets. */
-	trustProjectAgents?: boolean;
-	/** Host-controlled model override for a named preset; not exposed to the delegated model. */
-	getConfiguredModel?: (name: string) => string | undefined;
+export interface JobToolOptions {
+	runner?: JobRunner;
+	/** Host-controlled globally selected job model; not exposed to the delegated model. */
+	getConfiguredModel?: () => string | undefined;
 }
 
-interface SubagentModeSelection {
-	mode: SubagentMode;
+interface JobModeSelection {
+	mode: JobMode;
 	hasChain: boolean;
 	hasTasks: boolean;
 	hasSingle: boolean;
 	modeCount: number;
 }
 
-type SubagentDetailsBuilder = (results: SubagentResult[]) => SubagentDetails;
-type SubagentDetailsFactory = (mode: SubagentMode) => SubagentDetailsBuilder;
+type JobDetailsBuilder = (results: JobResult[]) => JobDetails;
+type JobDetailsFactory = (mode: JobMode) => JobDetailsBuilder;
 
-interface SubagentExecutionEnvironment {
-	agents: AgentConfig[];
+interface JobExecutionEnvironment {
 	workspaceCwd: string;
 	workspaceOperations: ToolOperations;
-	inheritedModel: string | undefined;
-	getConfiguredModel: ((name: string) => string | undefined) | undefined;
-	runner: SubagentRunner;
+	model: string | undefined;
+	runner: JobRunner;
 	signal: AbortSignal | undefined;
 	onUpdate: OnUpdateCallback | undefined;
-	makeDetails: SubagentDetailsFactory;
+	makeDetails: JobDetailsFactory;
 }
 
-interface SubagentToolExecutionResult extends AgentToolResult<SubagentDetails> {
+interface JobToolExecutionResult extends AgentToolResult<JobDetails> {
 	isError?: boolean;
 }
 
-function inheritedSubagentModelName(model: Model<Api> | undefined): string | undefined {
+function inheritedJobModelName(model: Model<Api> | undefined): string | undefined {
 	return model ? `${model.provider}/${model.id}` : undefined;
 }
 
-function selectSubagentMode(params: SubagentToolInput): SubagentModeSelection {
+function selectJobMode(params: JobToolInput): JobModeSelection {
 	const hasChain = (params.chain?.length ?? 0) > 0;
 	const hasTasks = (params.tasks?.length ?? 0) > 0;
 	const hasSingle = Boolean(params.task);
@@ -605,21 +569,17 @@ function selectSubagentMode(params: SubagentToolInput): SubagentModeSelection {
 	};
 }
 
-function createSubagentDetailsFactory(agentScope: AgentScope, projectAgentsDir: string | null): SubagentDetailsFactory {
-	return (mode) => (results) => ({ mode, agentScope, projectAgentsDir, results });
+function createJobDetailsFactory(): JobDetailsFactory {
+	return (mode) => (results) => ({ mode, results });
 }
 
-function validateSubagentRequest(
-	selection: SubagentModeSelection,
-	agents: AgentConfig[],
-	makeDetails: SubagentDetailsFactory,
-): SubagentToolExecutionResult | undefined {
+function validateJobRequest(
+	selection: JobModeSelection,
+	makeDetails: JobDetailsFactory,
+): JobToolExecutionResult | undefined {
 	if (selection.modeCount !== 1) {
-		const available = agents.map((agent) => `${agent.name} (${agent.source})`).join(", ") || "none";
 		return {
-			content: [
-				{ type: "text", text: `Invalid parameters. Provide exactly one mode.\nAvailable agents: ${available}` },
-			],
+			content: [{ type: "text", text: "Invalid parameters. Provide exactly one mode." }],
 			details: makeDetails("single")([]),
 			isError: true,
 		};
@@ -627,65 +587,10 @@ function validateSubagentRequest(
 	return undefined;
 }
 
-function collectRequestedAgentNames(params: SubagentToolInput): Set<string> {
-	const names = new Set<string>();
-	for (const step of params.chain ?? []) if (step.agent) names.add(step.agent);
-	for (const task of params.tasks ?? []) if (task.agent) names.add(task.agent);
-	if (params.agent) names.add(params.agent);
-	return names;
-}
-
-async function authorizeProjectAgents(
-	params: SubagentToolInput,
-	agentScope: AgentScope,
-	agents: AgentConfig[],
-	projectAgentsDir: string | null,
-	trustProjectAgents: boolean | undefined,
-	ctx: ExtensionContext,
-	makeDetails: SubagentDetailsFactory,
-	mode: SubagentMode,
-): Promise<SubagentToolExecutionResult | undefined> {
-	if (agentScope === "user") return undefined;
-	const agentsByName = new Map<string, AgentConfig>();
-	for (const agent of agents) {
-		if (!agentsByName.has(agent.name)) agentsByName.set(agent.name, agent);
-	}
-	const projectAgents: AgentConfig[] = [];
-	for (const name of collectRequestedAgentNames(params)) {
-		const agent = agentsByName.get(name);
-		if (agent?.source === "project") projectAgents.push(agent);
-	}
-	if (projectAgents.length === 0 || trustProjectAgents) return undefined;
-	const names = projectAgents.map((agent) => agent.name).join(", ");
-	const dir = projectAgentsDir ?? "(unknown)";
-	if (!ctx.hasUI) {
-		return {
-			content: [
-				{
-					type: "text",
-					text: `Project-local agents require host approval, but no interactive UI is available. Agents: ${names}. Source: ${dir}.`,
-				},
-			],
-			details: makeDetails(mode)([]),
-			isError: true,
-		};
-	}
-	const approved = await ctx.ui.confirm(
-		"Run project-local agents?",
-		`Agents: ${names}\nSource: ${dir}\n\nProject agents are repo-controlled. Only continue for trusted repositories.`,
-	);
-	if (approved) return undefined;
-	return {
-		content: [{ type: "text", text: "Canceled: project-local agents not approved." }],
-		details: makeDetails(mode)([]),
-		isError: true,
-	};
-}
-
 function createChainUpdate(
 	onUpdate: OnUpdateCallback | undefined,
-	results: SubagentResult[],
-	makeDetails: SubagentDetailsFactory,
+	results: JobResult[],
+	makeDetails: JobDetailsFactory,
 ): OnUpdateCallback | undefined {
 	if (!onUpdate) return undefined;
 	return (partial) => {
@@ -698,10 +603,10 @@ function createChainUpdate(
 	};
 }
 
-async function executeSubagentChain(
-	params: SubagentToolInput,
-	environment: SubagentExecutionEnvironment,
-): Promise<SubagentToolExecutionResult> {
+async function executeJobChain(
+	params: JobToolInput,
+	environment: JobExecutionEnvironment,
+): Promise<JobToolExecutionResult> {
 	const chain = params.chain ?? [];
 	if (chain.length > MAX_CHAIN_STEPS) {
 		return {
@@ -709,20 +614,18 @@ async function executeSubagentChain(
 			details: environment.makeDetails("chain")([]),
 		};
 	}
-	const results: SubagentResult[] = [];
+	const results: JobResult[] = [];
 	let previousOutput = "";
 	for (let index = 0; index < chain.length; index++) {
 		const step = chain[index];
-		const result = await runSingleAgent(
+		const result = await runSingleJob(
 			environment.workspaceCwd,
-			environment.agents,
 			{
 				...step,
 				task: step.task.replace(/\{previous\}/g, previousOutput),
 				toolOperations: environment.workspaceOperations,
 			},
-			environment.inheritedModel,
-			environment.getConfiguredModel,
+			environment.model,
 			environment.runner,
 			index + 1,
 			environment.signal,
@@ -731,44 +634,41 @@ async function executeSubagentChain(
 		);
 		results.push(result);
 		if (isFailedResult(result)) {
+			const message = `Chain stopped at step ${index + 1}: ${getResultOutput(result)}`;
+			const execution = formatChainExecution(results);
 			return {
-				content: [
-					{
-						type: "text",
-						text: `Chain stopped at step ${index + 1} (${result.agent}): ${getResultOutput(result)}`,
-					},
-				],
+				content: [{ type: "text", text: execution ? `${execution}\n\n${message}` : message }],
 				details: environment.makeDetails("chain")(results),
 				isError: true,
 			};
 		}
 		previousOutput = getFinalOutput(result.messages);
 	}
+	const execution = formatChainExecution(results);
+	const output = getFinalOutput(results[results.length - 1].messages) || "(no output)";
 	return {
-		content: [{ type: "text", text: getFinalOutput(results[results.length - 1].messages) || "(no output)" }],
+		content: [{ type: "text", text: execution ? `${execution}\n\n${output}` : output }],
 		details: environment.makeDetails("chain")(results),
 	};
 }
 
-function createQueuedSubagentResult(task: SubagentTaskSpec, inheritedModel: string | undefined): SubagentResult {
+function createQueuedJobResult(task: JobTaskSpec, model: string | undefined): JobResult {
 	return {
 		status: "queued",
-		agent: task.agent ?? "ad-hoc",
-		agentSource: task.agent ? "unknown" : "ad-hoc",
 		task: truncateRetainedTask(task.task),
 		responseFormat: task.responseFormat,
 		exitCode: -1,
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-		model: inheritedModel,
+		model,
 	};
 }
 
-function emitParallelSubagentUpdate(
+function emitParallelJobUpdate(
 	onUpdate: OnUpdateCallback | undefined,
-	results: SubagentResult[],
-	makeDetails: SubagentDetailsFactory,
+	results: JobResult[],
+	makeDetails: JobDetailsFactory,
 ): void {
 	if (!onUpdate) return;
 	const running = results.filter((result) => result.status === "running" || result.status === "queued").length;
@@ -779,18 +679,18 @@ function emitParallelSubagentUpdate(
 	});
 }
 
-function formatParallelSubagentSummary(result: SubagentResult): string {
-	const output = truncateParallelOutput(getResultOutput(result));
+function formatParallelJobSummary(result: JobResult, index: number): string {
+	const output = prependJobExecution(result, truncateParallelOutput(getResultOutput(result)));
 	const status = isFailedResult(result)
 		? `failed${result.stopReason && result.stopReason !== "end" ? ` (${result.stopReason})` : ""}`
 		: "completed";
-	return `### [${result.agent}] ${status}\n\n${output}`;
+	return `### Job ${index + 1} ${status}\n\n${output}`;
 }
 
-async function executeParallelSubagents(
-	params: SubagentToolInput,
-	environment: SubagentExecutionEnvironment,
-): Promise<SubagentToolExecutionResult> {
+async function executeParallelJobs(
+	params: JobToolInput,
+	environment: JobExecutionEnvironment,
+): Promise<JobToolExecutionResult> {
 	const tasks = params.tasks ?? [];
 	if (tasks.length > MAX_PARALLEL_TASKS) {
 		return {
@@ -798,21 +698,12 @@ async function executeParallelSubagents(
 			details: environment.makeDetails("parallel")([]),
 		};
 	}
-	const currentResults = tasks.map((task) =>
-		createQueuedSubagentResult(
-			task,
-			task.agent
-				? (environment.getConfiguredModel?.(task.agent) ?? environment.inheritedModel)
-				: environment.inheritedModel,
-		),
-	);
+	const currentResults = tasks.map((task) => createQueuedJobResult(task, environment.model));
 	const results = await mapWithConcurrencyLimit(tasks, MAX_CONCURRENCY, async (task, index) => {
-		const result = await runSingleAgent(
+		const result = await runSingleJob(
 			environment.workspaceCwd,
-			environment.agents,
 			{ ...task, toolOperations: environment.workspaceOperations },
-			environment.inheritedModel,
-			environment.getConfiguredModel,
+			environment.model,
 			environment.runner,
 			undefined,
 			environment.signal,
@@ -820,16 +711,16 @@ async function executeParallelSubagents(
 				const currentResult = partial.details?.results[0];
 				if (!currentResult) return;
 				currentResults[index] = currentResult;
-				emitParallelSubagentUpdate(environment.onUpdate, currentResults, environment.makeDetails);
+				emitParallelJobUpdate(environment.onUpdate, currentResults, environment.makeDetails);
 			},
 			environment.makeDetails("parallel"),
 		);
 		currentResults[index] = result;
-		emitParallelSubagentUpdate(environment.onUpdate, currentResults, environment.makeDetails);
+		emitParallelJobUpdate(environment.onUpdate, currentResults, environment.makeDetails);
 		return result;
 	});
 	const successCount = results.filter((result) => !isFailedResult(result)).length;
-	const summaries = results.map(formatParallelSubagentSummary);
+	const summaries = results.map(formatParallelJobSummary);
 	return {
 		content: [
 			{
@@ -841,25 +732,21 @@ async function executeParallelSubagents(
 	};
 }
 
-async function executeSingleSubagent(
-	params: SubagentToolInput,
-	environment: SubagentExecutionEnvironment,
-): Promise<SubagentToolExecutionResult> {
-	const result = await runSingleAgent(
+async function executeSingleJob(
+	params: JobToolInput,
+	environment: JobExecutionEnvironment,
+): Promise<JobToolExecutionResult> {
+	const result = await runSingleJob(
 		environment.workspaceCwd,
-		environment.agents,
 		{
-			agent: params.agent,
 			task: params.task ?? "",
 			responseFormat: params.responseFormat,
-			systemPrompt: params.systemPrompt,
 			tools: params.tools,
 			skills: params.skills,
 			cwd: params.cwd,
 			toolOperations: environment.workspaceOperations,
 		},
-		environment.inheritedModel,
-		environment.getConfiguredModel,
+		environment.model,
 		environment.runner,
 		undefined,
 		environment.signal,
@@ -868,93 +755,95 @@ async function executeSingleSubagent(
 	);
 	if (isFailedResult(result)) {
 		return {
-			content: [{ type: "text", text: `Agent ${result.stopReason || "failed"}: ${getResultOutput(result)}` }],
+			content: [
+				{
+					type: "text",
+					text: prependJobExecution(result, `Job ${result.stopReason || "failed"}: ${getResultOutput(result)}`),
+				},
+			],
 			details: environment.makeDetails("single")([result]),
 			isError: true,
 		};
 	}
 	return {
-		content: [{ type: "text", text: getFinalOutput(result.messages) || "(no output)" }],
+		content: [{ type: "text", text: prependJobExecution(result, getFinalOutput(result.messages) || "(no output)") }],
 		details: environment.makeDetails("single")([result]),
 	};
 }
 
-function executeSelectedSubagentMode(
-	params: SubagentToolInput,
-	selection: SubagentModeSelection,
-	environment: SubagentExecutionEnvironment,
-): Promise<SubagentToolExecutionResult> {
-	if (selection.hasChain) return executeSubagentChain(params, environment);
-	if (selection.hasTasks) return executeParallelSubagents(params, environment);
-	return executeSingleSubagent(params, environment);
+function executeSelectedJobMode(
+	params: JobToolInput,
+	selection: JobModeSelection,
+	environment: JobExecutionEnvironment,
+): Promise<JobToolExecutionResult> {
+	if (selection.hasChain) return executeJobChain(params, environment);
+	if (selection.hasTasks) return executeParallelJobs(params, environment);
+	return executeSingleJob(params, environment);
 }
 
-function truncateSubagentCallTask(task: string, maxCharacters: number): string {
+function truncateJobCallTask(task: string, maxCharacters: number): string {
 	return task.length > maxCharacters ? `${task.slice(0, maxCharacters)}...` : task;
 }
 
-function renderSubagentChainCall(args: SubagentToolInput, scope: AgentScope, theme: Theme): Text {
+function renderJobChainCall(args: JobToolInput, theme: Theme): Text {
 	const chain = args.chain ?? [];
-	let text =
-		theme.fg("toolTitle", theme.bold("subagent ")) +
-		theme.fg("accent", `chain (${chain.length} steps)`) +
-		theme.fg("muted", ` [${scope}]`);
+	let text = theme.fg("toolTitle", theme.bold("job ")) + theme.fg("accent", `chain (${chain.length} steps)`);
 	for (let index = 0; index < Math.min(chain.length, 3); index++) {
 		const step = chain[index];
 		const cleanTask = step.task.replace(/\{previous\}/g, "").trim();
-		const preview = truncateSubagentCallTask(cleanTask, 40);
-		text +=
-			"\n  " +
-			theme.fg("muted", `${index + 1}.`) +
-			" " +
-			theme.fg("accent", step.agent ?? "ad-hoc") +
-			theme.fg("dim", ` ${preview}`);
+		const preview = truncateJobCallTask(cleanTask, 40);
+		text += `\n  ${theme.fg("accent", `Step ${index + 1}`)}${theme.fg("dim", ` ${preview}`)}`;
 	}
 	if (chain.length > 3) text += `\n  ${theme.fg("muted", `... +${chain.length - 3} more`)}`;
 	return new Text(text, 0, 0);
 }
 
-function renderParallelSubagentCall(args: SubagentToolInput, scope: AgentScope, theme: Theme): Text {
+function renderParallelJobCall(args: JobToolInput, theme: Theme): Text {
 	const tasks = args.tasks ?? [];
-	let text =
-		theme.fg("toolTitle", theme.bold("subagent ")) +
-		theme.fg("accent", `parallel (${tasks.length} tasks)`) +
-		theme.fg("muted", ` [${scope}]`);
-	for (const task of tasks.slice(0, 3)) {
-		const preview = truncateSubagentCallTask(task.task, 40);
-		text += `\n  ${theme.fg("accent", task.agent ?? "ad-hoc")}${theme.fg("dim", ` ${preview}`)}`;
+	let text = theme.fg("toolTitle", theme.bold("job ")) + theme.fg("accent", `parallel (${tasks.length} tasks)`);
+	for (const [index, task] of tasks.slice(0, 3).entries()) {
+		const preview = truncateJobCallTask(task.task, 40);
+		text += `\n  ${theme.fg("accent", `Job ${index + 1}`)}${theme.fg("dim", ` ${preview}`)}`;
 	}
 	if (tasks.length > 3) text += `\n  ${theme.fg("muted", `... +${tasks.length - 3} more`)}`;
 	return new Text(text, 0, 0);
 }
 
-function renderSingleSubagentCall(args: SubagentToolInput, scope: AgentScope, theme: Theme): Text {
-	const agentName = args.agent || "ad-hoc";
-	const preview = args.task ? truncateSubagentCallTask(args.task, 60) : "...";
-	let text =
-		theme.fg("toolTitle", theme.bold("subagent ")) + theme.fg("accent", agentName) + theme.fg("muted", ` [${scope}]`);
-	text += `\n  ${theme.fg("dim", preview)}`;
+function renderSingleJobCall(args: JobToolInput, theme: Theme): Text {
+	const preview = args.task ? truncateJobCallTask(args.task, 60) : "...";
+	const text = `${theme.fg("toolTitle", theme.bold("job"))}\n  ${theme.fg("dim", preview)}`;
 	return new Text(text, 0, 0);
 }
 
-interface SubagentStatusCounts {
+interface JobStatusCounts {
 	completed: number;
 	failed: number;
 	active: number;
 }
 
-function renderSubagentStatusIcon(status: SubagentStatus, theme: Theme): string {
+function renderJobStatusIcon(status: JobStatus, theme: Theme): string {
 	if (status === "queued") return theme.fg("muted", "[queued]");
 	if (status === "running") return theme.fg("warning", "[running]");
 	if (status === "failed") return theme.fg("error", "[failed]");
 	return theme.fg("success", "[done]");
 }
 
-function renderSubagentModel(model: string | undefined, theme: Theme): string {
+function renderJobModel(model: string | undefined, theme: Theme): string {
 	return theme.fg("muted", ` [${model ?? "model pending"}]`);
 }
 
-function renderSubagentDisplayItems(items: DisplayItem[], expanded: boolean, theme: Theme, limit?: number): string {
+function renderJobContextUsage(result: JobResult, theme: Theme): string {
+	const tokens = result.usage.contextTokens;
+	if (tokens <= 0 && result.status !== "running") return "";
+	return ` ${theme.fg("dim", `ctx:${tokens > 0 ? formatTokens(tokens) : "?"}`)}`;
+}
+
+function renderJobUsage(result: JobResult, theme: Theme): string {
+	const usage = formatUsageStats(result.usage);
+	return renderJobContextUsage(result, theme) + (usage ? ` ${theme.fg("dim", usage)}` : "");
+}
+
+function renderJobDisplayItems(items: DisplayItem[], expanded: boolean, theme: Theme, limit?: number): string {
 	const toShow = limit ? items.slice(-limit) : items;
 	const skipped = limit && items.length > limit ? items.length - limit : 0;
 	let text = skipped > 0 ? theme.fg("muted", `... ${skipped} earlier items\n`) : "";
@@ -969,7 +858,7 @@ function renderSubagentDisplayItems(items: DisplayItem[], expanded: boolean, the
 	return text.trimEnd();
 }
 
-function aggregateSubagentUsage(results: SubagentResult[]): SubagentUsageDisplayMetrics {
+function aggregateJobUsage(results: JobResult[]): JobUsageDisplayMetrics {
 	const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
 	for (const result of results) {
 		total.input += result.usage.input;
@@ -982,8 +871,13 @@ function aggregateSubagentUsage(results: SubagentResult[]): SubagentUsageDisplay
 	return total;
 }
 
-function countSubagentStatuses(results: SubagentResult[]): SubagentStatusCounts {
-	const counts: SubagentStatusCounts = { completed: 0, failed: 0, active: 0 };
+function renderTotalJobUsage(results: JobResult[], theme: Theme): string {
+	const usage = formatUsageStats(aggregateJobUsage(results));
+	return usage ? ` ${theme.fg("dim", `Total: ${usage}`)}` : "";
+}
+
+function countJobStatuses(results: JobResult[]): JobStatusCounts {
+	const counts: JobStatusCounts = { completed: 0, failed: 0, active: 0 };
 	for (const result of results) {
 		if (result.status === "completed") counts.completed++;
 		else if (result.status === "failed") counts.failed++;
@@ -992,7 +886,7 @@ function countSubagentStatuses(results: SubagentResult[]): SubagentStatusCounts 
 	return counts;
 }
 
-function appendSubagentToolCalls(container: Container, items: DisplayItem[], theme: Theme): void {
+function appendJobToolCalls(container: Container, items: DisplayItem[], theme: Theme): void {
 	for (const item of items) {
 		if (item.type !== "toolCall") continue;
 		container.addChild(
@@ -1001,44 +895,31 @@ function appendSubagentToolCalls(container: Container, items: DisplayItem[], the
 	}
 }
 
-function appendSubagentMarkdown(container: Container, output: string): void {
+function appendJobMarkdown(container: Container, output: string): void {
 	if (!output) return;
 	container.addChild(new Spacer(1));
 	container.addChild(new Markdown(output.trim(), 0, 0, getMarkdownTheme()));
 }
 
-function appendSubagentUsage(
-	container: Container,
-	usage: SubagentUsageDisplayMetrics,
-	theme: Theme,
-	model?: string,
-	prefix = "",
-	withSpacer = false,
-): void {
-	const text = formatUsageStats(usage, model);
-	if (!text) return;
-	if (withSpacer) container.addChild(new Spacer(1));
-	container.addChild(new Text(theme.fg("dim", `${prefix}${text}`), 0, 0));
-}
-
-function appendExpandedBatchResult(container: Container, result: SubagentResult, heading: string, theme: Theme): void {
+function appendExpandedBatchResult(container: Container, result: JobResult, heading: string, theme: Theme): void {
 	container.addChild(new Spacer(1));
-	container.addChild(new Text(heading, 0, 0));
+	container.addChild(new Text(`${heading}${renderJobUsage(result, theme)}`, 0, 0));
 	container.addChild(new Text(theme.fg("muted", "Task: ") + theme.fg("dim", result.task), 0, 0));
 	if (result.responseFormat) {
 		container.addChild(
 			new Text(theme.fg("muted", "Response format: ") + theme.fg("dim", result.responseFormat), 0, 0),
 		);
 	}
-	appendSubagentToolCalls(container, getDisplayItems(result.messages), theme);
-	appendSubagentMarkdown(container, getFinalOutput(result.messages));
-	appendSubagentUsage(container, result.usage, theme, result.model);
+	const execution = formatJobExecution(result);
+	if (execution) container.addChild(new Text(theme.fg("dim", execution), 0, 0));
+	appendJobToolCalls(container, getDisplayItems(result.messages), theme);
+	appendJobMarkdown(container, getFinalOutput(result.messages));
 }
 
-function renderExpandedSingleSubagent(result: SubagentResult, theme: Theme): Container {
+function renderExpandedSingleJob(result: JobResult, theme: Theme): Container {
 	const container = new Container();
 	const failed = isFailedResult(result);
-	let header = `${renderSubagentStatusIcon(result.status, theme)} ${theme.fg("toolTitle", theme.bold(result.agent))}${theme.fg("muted", ` (${result.agentSource})`)}${renderSubagentModel(result.model, theme)}`;
+	let header = `${renderJobStatusIcon(result.status, theme)} ${theme.fg("toolTitle", theme.bold("Job"))}${renderJobModel(result.model, theme)}${renderJobUsage(result, theme)}`;
 	if (failed && result.stopReason) header += ` ${theme.fg("error", `[${result.stopReason}]`)}`;
 	container.addChild(new Text(header, 0, 0));
 	if (failed && result.errorMessage) {
@@ -1052,6 +933,8 @@ function renderExpandedSingleSubagent(result: SubagentResult, theme: Theme): Con
 			new Text(theme.fg("muted", "Response format: ") + theme.fg("dim", result.responseFormat), 0, 0),
 		);
 	}
+	const execution = formatJobExecution(result);
+	if (execution) container.addChild(new Text(theme.fg("dim", execution), 0, 0));
 	container.addChild(new Spacer(1));
 	container.addChild(new Text(theme.fg("muted", "─── Output ───"), 0, 0));
 	const displayItems = getDisplayItems(result.messages);
@@ -1061,87 +944,73 @@ function renderExpandedSingleSubagent(result: SubagentResult, theme: Theme): Con
 			new Text(theme.fg("muted", result.status === "running" ? "(running...)" : "(no output)"), 0, 0),
 		);
 	} else {
-		appendSubagentToolCalls(container, displayItems, theme);
-		appendSubagentMarkdown(container, finalOutput);
+		appendJobToolCalls(container, displayItems, theme);
+		appendJobMarkdown(container, finalOutput);
 	}
-	appendSubagentUsage(container, result.usage, theme, result.model, "", true);
 	return container;
 }
 
-function renderCollapsedSingleSubagent(result: SubagentResult, theme: Theme): Text {
+function renderCollapsedSingleJob(result: JobResult, theme: Theme): Text {
 	const failed = isFailedResult(result);
 	const displayItems = getDisplayItems(result.messages);
-	let text = `${renderSubagentStatusIcon(result.status, theme)} ${theme.fg("toolTitle", theme.bold(result.agent))}${theme.fg("muted", ` (${result.agentSource})`)}${renderSubagentModel(result.model, theme)}`;
+	let text = `${renderJobStatusIcon(result.status, theme)} ${theme.fg("toolTitle", theme.bold("Job"))}${renderJobModel(result.model, theme)}${renderJobUsage(result, theme)}`;
 	if (failed && result.stopReason) text += ` ${theme.fg("error", `[${result.stopReason}]`)}`;
 	if (failed && result.errorMessage) text += `\n${theme.fg("error", `Error: ${result.errorMessage}`)}`;
 	else if (displayItems.length === 0) {
 		text += `\n${theme.fg("muted", result.status === "running" ? "(running...)" : "(no output)")}`;
 	} else {
-		text += `\n${renderSubagentDisplayItems(displayItems, false, theme, COLLAPSED_ITEM_COUNT)}`;
+		text += `\n${renderJobDisplayItems(displayItems, false, theme, COLLAPSED_ITEM_COUNT)}`;
 		if (displayItems.length > COLLAPSED_ITEM_COUNT) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 	}
-	const usage = formatUsageStats(result.usage, result.model);
-	if (usage) text += `\n${theme.fg("dim", usage)}`;
 	return new Text(text, 0, 0);
 }
 
-function renderSingleSubagentResult(result: SubagentResult, expanded: boolean, theme: Theme): Text | Container {
-	return expanded ? renderExpandedSingleSubagent(result, theme) : renderCollapsedSingleSubagent(result, theme);
+function renderSingleJobResult(result: JobResult, expanded: boolean, theme: Theme): Text | Container {
+	return expanded ? renderExpandedSingleJob(result, theme) : renderCollapsedSingleJob(result, theme);
 }
 
-function renderExpandedSubagentChain(
-	results: SubagentResult[],
-	counts: SubagentStatusCounts,
-	icon: string,
-	theme: Theme,
-): Container {
+function renderExpandedJobChain(results: JobResult[], counts: JobStatusCounts, icon: string, theme: Theme): Container {
 	const container = new Container();
 	container.addChild(
 		new Text(
 			icon +
 				" " +
 				theme.fg("toolTitle", theme.bold("chain ")) +
-				theme.fg("accent", `${counts.completed}/${results.length} steps`),
+				theme.fg("accent", `${counts.completed}/${results.length} steps`) +
+				renderTotalJobUsage(results, theme),
 			0,
 			0,
 		),
 	);
 	for (const result of results) {
-		const heading = `${theme.fg("muted", `─── Step ${result.step}: `) + theme.fg("accent", result.agent)}${renderSubagentModel(result.model, theme)} ${renderSubagentStatusIcon(result.status, theme)}`;
+		const heading = `${theme.fg("muted", `─── Step ${result.step}`)}${renderJobModel(result.model, theme)} ${renderJobStatusIcon(result.status, theme)}`;
 		appendExpandedBatchResult(container, result, heading, theme);
 	}
-	appendSubagentUsage(container, aggregateSubagentUsage(results), theme, undefined, "Total: ", true);
 	return container;
 }
 
-function renderCollapsedSubagentChain(
-	results: SubagentResult[],
-	counts: SubagentStatusCounts,
-	icon: string,
-	theme: Theme,
-): Text {
+function renderCollapsedJobChain(results: JobResult[], counts: JobStatusCounts, icon: string, theme: Theme): Text {
 	let text =
 		icon +
 		" " +
 		theme.fg("toolTitle", theme.bold("chain ")) +
-		theme.fg("accent", `${counts.completed}/${results.length} steps`);
+		theme.fg("accent", `${counts.completed}/${results.length} steps`) +
+		renderTotalJobUsage(results, theme);
 	for (const result of results) {
 		const items = getDisplayItems(result.messages);
-		text += `\n\n${theme.fg("muted", `─── Step ${result.step}: `)}${theme.fg("accent", result.agent)}${renderSubagentModel(result.model, theme)} ${renderSubagentStatusIcon(result.status, theme)}`;
+		text += `\n\n${theme.fg("muted", `─── Step ${result.step}`)}${renderJobModel(result.model, theme)} ${renderJobStatusIcon(result.status, theme)}${renderJobUsage(result, theme)}`;
 		if (items.length === 0) {
 			const empty =
 				result.status === "running" || result.status === "queued" ? `(${result.status}...)` : "(no output)";
 			text += `\n${theme.fg("muted", empty)}`;
-		} else text += `\n${renderSubagentDisplayItems(items, false, theme, 5)}`;
+		} else text += `\n${renderJobDisplayItems(items, false, theme, 5)}`;
 	}
-	const usage = formatUsageStats(aggregateSubagentUsage(results));
-	if (usage) text += `\n\n${theme.fg("dim", `Total: ${usage}`)}`;
 	text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 	return new Text(text, 0, 0);
 }
 
-function renderSubagentChain(results: SubagentResult[], expanded: boolean, theme: Theme): Text | Container {
-	const counts = countSubagentStatuses(results);
+function renderJobChain(results: JobResult[], expanded: boolean, theme: Theme): Text | Container {
+	const counts = countJobStatuses(results);
 	const icon =
 		counts.active > 0
 			? theme.fg("warning", "[running]")
@@ -1149,159 +1018,131 @@ function renderSubagentChain(results: SubagentResult[], expanded: boolean, theme
 				? theme.fg("error", "[failed]")
 				: theme.fg("success", "[done]");
 	return expanded
-		? renderExpandedSubagentChain(results, counts, icon, theme)
-		: renderCollapsedSubagentChain(results, counts, icon, theme);
+		? renderExpandedJobChain(results, counts, icon, theme)
+		: renderCollapsedJobChain(results, counts, icon, theme);
 }
 
-function parallelSubagentStatus(counts: SubagentStatusCounts, total: number): string {
+function parallelJobStatus(counts: JobStatusCounts, total: number): string {
 	return counts.active > 0
 		? `${counts.completed + counts.failed}/${total} done, ${counts.active} running`
 		: `${counts.completed}/${total} tasks`;
 }
 
-function renderExpandedParallelSubagents(
-	results: SubagentResult[],
-	icon: string,
-	status: string,
-	theme: Theme,
-): Container {
+function renderExpandedParallelJobs(results: JobResult[], icon: string, status: string, theme: Theme): Container {
 	const container = new Container();
 	container.addChild(
-		new Text(`${icon} ${theme.fg("toolTitle", theme.bold("parallel "))}${theme.fg("accent", status)}`, 0, 0),
+		new Text(
+			`${icon} ${theme.fg("toolTitle", theme.bold("parallel "))}${theme.fg("accent", status)}${renderTotalJobUsage(results, theme)}`,
+			0,
+			0,
+		),
 	);
-	for (const result of results) {
-		const heading = `${theme.fg("muted", "─── ") + theme.fg("accent", result.agent)}${renderSubagentModel(result.model, theme)} ${renderSubagentStatusIcon(result.status, theme)}`;
+	for (const [index, result] of results.entries()) {
+		const heading = `${theme.fg("muted", "─── ")}${theme.fg("accent", `Job ${index + 1}`)}${renderJobModel(result.model, theme)} ${renderJobStatusIcon(result.status, theme)}`;
 		appendExpandedBatchResult(container, result, heading, theme);
 	}
-	appendSubagentUsage(container, aggregateSubagentUsage(results), theme, undefined, "Total: ", true);
 	return container;
 }
 
-function renderCollapsedParallelSubagents(
-	results: SubagentResult[],
+function renderCollapsedParallelJobs(
+	results: JobResult[],
 	expanded: boolean,
-	counts: SubagentStatusCounts,
 	icon: string,
 	status: string,
 	theme: Theme,
 ): Text {
-	let text = `${icon} ${theme.fg("toolTitle", theme.bold("parallel "))}${theme.fg("accent", status)}`;
-	for (const result of results) {
+	let text = `${icon} ${theme.fg("toolTitle", theme.bold("parallel "))}${theme.fg("accent", status)}${renderTotalJobUsage(results, theme)}`;
+	for (const [index, result] of results.entries()) {
 		const items = getDisplayItems(result.messages);
-		text += `\n\n${theme.fg("muted", "─── ")}${theme.fg("accent", result.agent)}${renderSubagentModel(result.model, theme)} ${renderSubagentStatusIcon(result.status, theme)}`;
+		text += `\n\n${theme.fg("muted", "─── ")}${theme.fg("accent", `Job ${index + 1}`)}${renderJobModel(result.model, theme)} ${renderJobStatusIcon(result.status, theme)}${renderJobUsage(result, theme)}`;
 		if (items.length === 0) {
 			const empty =
 				result.status === "running" || result.status === "queued" ? `(${result.status}...)` : "(no output)";
 			text += `\n${theme.fg("muted", empty)}`;
-		} else text += `\n${renderSubagentDisplayItems(items, expanded, theme, 5)}`;
-	}
-	if (counts.active === 0) {
-		const usage = formatUsageStats(aggregateSubagentUsage(results));
-		if (usage) text += `\n\n${theme.fg("dim", `Total: ${usage}`)}`;
+		} else text += `\n${renderJobDisplayItems(items, expanded, theme, 5)}`;
 	}
 	if (!expanded) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 	return new Text(text, 0, 0);
 }
 
-function renderParallelSubagents(results: SubagentResult[], expanded: boolean, theme: Theme): Text | Container {
-	const counts = countSubagentStatuses(results);
+function renderParallelJobs(results: JobResult[], expanded: boolean, theme: Theme): Text | Container {
+	const counts = countJobStatuses(results);
 	const icon =
 		counts.active > 0
 			? theme.fg("warning", "[running]")
 			: counts.failed > 0
 				? theme.fg("warning", "[partial]")
 				: theme.fg("success", "[done]");
-	const status = parallelSubagentStatus(counts, results.length);
+	const status = parallelJobStatus(counts, results.length);
 	return expanded && counts.active === 0
-		? renderExpandedParallelSubagents(results, icon, status, theme)
-		: renderCollapsedParallelSubagents(results, expanded, counts, icon, status, theme);
+		? renderExpandedParallelJobs(results, icon, status, theme)
+		: renderCollapsedParallelJobs(results, expanded, icon, status, theme);
 }
 
-function renderSubagentFallback(result: AgentToolResult<SubagentDetails>): Text {
+function renderJobFallback(result: AgentToolResult<JobDetails>): Text {
 	const content = result.content[0];
 	return new Text(content?.type === "text" ? content.text : "(no output)", 0, 0);
 }
 
-function renderSubagentResult(
-	result: AgentToolResult<SubagentDetails>,
-	expanded: boolean,
-	theme: Theme,
-): Text | Container {
+function renderJobResult(result: AgentToolResult<JobDetails>, expanded: boolean, theme: Theme): Text | Container {
 	const details = result.details;
-	if (!details || details.results.length === 0) return renderSubagentFallback(result);
+	if (!details || details.results.length === 0) return renderJobFallback(result);
 	if (details.mode === "single" && details.results.length === 1) {
-		return renderSingleSubagentResult(details.results[0], expanded, theme);
+		return renderSingleJobResult(details.results[0], expanded, theme);
 	}
-	if (details.mode === "chain") return renderSubagentChain(details.results, expanded, theme);
-	if (details.mode === "parallel") return renderParallelSubagents(details.results, expanded, theme);
-	return renderSubagentFallback(result);
+	if (details.mode === "chain") return renderJobChain(details.results, expanded, theme);
+	if (details.mode === "parallel") return renderParallelJobs(details.results, expanded, theme);
+	return renderJobFallback(result);
 }
 
-export function createSubagentToolDefinition(
-	options: SubagentToolOptions = {},
-): ToolDefinition<typeof subagentParamsSchema, SubagentDetails> {
+export function createJobToolDefinition(
+	options: JobToolOptions = {},
+): ToolDefinition<typeof jobParamsSchema, JobDetails> {
 	const runner = options.runner;
 	return {
-		name: "subagent",
-		label: "Subagent",
-		description: [
-			"Delegate a bounded, clearly specified job to an isolated subagent; you remain responsible for the final answer.",
-			"Select a discovered preset by name or provide ad-hoc instructions with systemPrompt.",
-			"Use a task for one job, tasks for independent parallel jobs, or chain for sequential jobs with {previous} handoff. Use skills to force-preload instructions; the child may load other visible skills on demand when load_skill is permitted.",
-			"Subagents inherit the parent model unless GRIP_DEFAULT_SUBAGENT_MODEL is set by the host.",
-		].join(" "),
-		promptSnippet: "Offload a bounded job to an isolated subagent",
-		parameters: subagentParamsSchema,
+		name: "job",
+		label: "Job",
+		description:
+			"Delegate a bounded job to an isolated session. Specify the outcome; intermediate steps needn't enter the parent conversation, but its result does.",
+		promptSnippet: "Delegate a bounded job to an isolated session",
+		parameters: jobParamsSchema,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const selection = selectSubagentMode(params);
-			const agentScope: AgentScope = params.agentScope ?? "user";
+			const selection = selectJobMode(params);
 			const workspaceOperations = ctx.toolOperations;
+			const makeDetails = createJobDetailsFactory();
 			if (!workspaceOperations) {
 				return {
-					content: [{ type: "text", text: "Subagents require explicit workspace tool operations." }],
-					details: { mode: selection.mode, agentScope, projectAgentsDir: null, results: [] },
+					content: [{ type: "text", text: "Jobs require explicit workspace tool operations." }],
+					details: makeDetails(selection.mode)([]),
 					isError: true,
 				};
 			}
 			const backendInfo = workspaceOperations.getBackendInfo?.();
 			if (backendInfo?.type === "remote" && !backendInfo.configured) {
 				return {
-					content: [{ type: "text", text: "Subagents cannot run with an unconfigured remote backend." }],
-					details: { mode: selection.mode, agentScope, projectAgentsDir: null, results: [] },
-					isError: true,
-				};
-			}
-			const workspaceCwd = workspaceOperations.cwd ?? ctx.cwd;
-			const discovery = await discoverAgentsWithOperations(workspaceCwd, agentScope, workspaceOperations);
-			const agents = discovery.agents;
-			const makeDetails = createSubagentDetailsFactory(agentScope, discovery.projectAgentsDir);
-			const validationError = validateSubagentRequest(selection, agents, makeDetails);
-			if (validationError) return validationError;
-			if (!runner) {
-				return {
-					content: [{ type: "text", text: "Subagent runner is not configured for this session." }],
+					content: [{ type: "text", text: "Jobs cannot run with an unconfigured remote backend." }],
 					details: makeDetails(selection.mode)([]),
 					isError: true,
 				};
 			}
-			const authorizationError = await authorizeProjectAgents(
-				params,
-				agentScope,
-				agents,
-				discovery.projectAgentsDir,
-				options.trustProjectAgents,
-				ctx,
-				makeDetails,
-				selection.mode,
-			);
-			if (authorizationError) return authorizationError;
-			return executeSelectedSubagentMode(params, selection, {
-				agents,
-				workspaceCwd,
+			const validationError = validateJobRequest(selection, makeDetails);
+			if (validationError) return validationError;
+			if (!runner) {
+				return {
+					content: [{ type: "text", text: "Job runner is not configured for this session." }],
+					details: makeDetails(selection.mode)([]),
+					isError: true,
+				};
+			}
+			const model =
+				options.getConfiguredModel?.()?.trim() ||
+				process.env.GRIP_DEFAULT_JOB_MODEL?.trim() ||
+				inheritedJobModelName(ctx.model);
+			return executeSelectedJobMode(params, selection, {
+				workspaceCwd: workspaceOperations.cwd ?? ctx.cwd,
 				workspaceOperations,
-				inheritedModel: process.env.GRIP_DEFAULT_SUBAGENT_MODEL?.trim() || inheritedSubagentModelName(ctx.model),
-				getConfiguredModel: options.getConfiguredModel,
+				model,
 				runner,
 				signal,
 				onUpdate,
@@ -1310,19 +1151,16 @@ export function createSubagentToolDefinition(
 		},
 
 		renderCall(args, theme, _context) {
-			const scope: AgentScope = args.agentScope ?? "user";
-			if (args.chain && args.chain.length > 0) return renderSubagentChainCall(args, scope, theme);
-			if (args.tasks && args.tasks.length > 0) return renderParallelSubagentCall(args, scope, theme);
-			return renderSingleSubagentCall(args, scope, theme);
+			if (args.chain && args.chain.length > 0) return renderJobChainCall(args, theme);
+			if (args.tasks && args.tasks.length > 0) return renderParallelJobCall(args, theme);
+			return renderSingleJobCall(args, theme);
 		},
 
 		renderResult(result, { expanded }, theme, _context) {
-			return renderSubagentResult(result, expanded, theme);
+			return renderJobResult(result, expanded, theme);
 		},
 	};
 }
-export function createSubagentTool(
-	options?: SubagentToolOptions,
-): AgentTool<typeof subagentParamsSchema, SubagentDetails> {
-	return wrapToolDefinition(createSubagentToolDefinition(options));
+export function createJobTool(options?: JobToolOptions): AgentTool<typeof jobParamsSchema, JobDetails> {
+	return wrapToolDefinition(createJobToolDefinition(options));
 }

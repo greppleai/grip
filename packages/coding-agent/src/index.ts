@@ -118,6 +118,7 @@ export type {
 	InputEvent,
 	InputEventResult,
 	InputSource,
+	JobToolCallEvent,
 	KeybindingsManager,
 	LoadExtensionsResult,
 	LsToolCallEvent,
@@ -127,6 +128,7 @@ export type {
 	MessageRenderOptions,
 	ProviderConfig,
 	ProviderModelConfig,
+	ReadImageToolCallEvent,
 	ReadToolCallEvent,
 	RegisteredCommand,
 	RegisteredTool,
@@ -141,7 +143,6 @@ export type {
 	SessionShutdownReason,
 	SessionStartEvent,
 	SessionTreeEvent,
-	SubagentToolCallEvent,
 	TerminalInputHandler,
 	ToolCallEvent,
 	ToolCallEventResult,
@@ -166,9 +167,10 @@ export {
 	isEditToolResult,
 	isFindToolResult,
 	isGrepToolResult,
+	isJobToolResult,
 	isLsToolResult,
+	isReadImageToolResult,
 	isReadToolResult,
-	isSubagentToolResult,
 	isToolCallEventType,
 	isWebsearchToolResult,
 	isWriteToolResult,
@@ -339,6 +341,24 @@ export {
 } from "./core/tools/grep.ts";
 export { createCodingTools, createReadOnlyTools, type ToolsOptions } from "./core/tools/index.ts";
 export {
+	createJobTool,
+	createJobToolDefinition,
+	formatJobTaskPrompt,
+	type JobDetails,
+	type JobExecutionBackend,
+	type JobExecutionContext,
+	type JobMode,
+	type JobResult,
+	type JobRunner,
+	type JobRunOutcome,
+	type JobRunRequest,
+	type JobStatus,
+	type JobToolInput,
+	type JobToolOptions,
+	type JobUsageStats,
+	jobParamsSchema,
+} from "./core/tools/job.ts";
+export {
 	createLsTool,
 	createLsToolDefinition,
 	type LsToolDetails,
@@ -365,9 +385,14 @@ export {
 	type ToolMkdirOptions,
 	type ToolOperations,
 } from "./core/tools/operations.ts";
+
 export {
+	createReadImageTool,
+	createReadImageToolDefinition,
 	createReadTool,
 	createReadToolDefinition,
+	type ReadImageToolDefinition,
+	type ReadImageToolInput,
 	type ReadToolDetails,
 	type ReadToolInput,
 	type ReadToolOperations,
@@ -386,20 +411,7 @@ export {
 	type SessionSearchToolDetails,
 	type SessionSearchToolInput,
 } from "./core/tools/session-history.ts";
-export {
-	createSubagentTool,
-	createSubagentToolDefinition,
-	type SubagentDetails,
-	type SubagentResult,
-	type SubagentRunner,
-	type SubagentRunOutcome,
-	type SubagentRunRequest,
-	type SubagentStatus,
-	type SubagentToolInput,
-	type SubagentToolOptions,
-	type SubagentUsageStats,
-} from "./core/tools/subagent.ts";
-export type { AgentListFormatResult } from "./core/tools/subagent-agents.ts";
+
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,

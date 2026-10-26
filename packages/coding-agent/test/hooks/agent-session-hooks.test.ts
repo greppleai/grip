@@ -478,6 +478,55 @@ describe("AgentSession Claude-compatible hooks", () => {
 		expect(deniedText.match(/deny-context/g)).toHaveLength(1);
 		expect(runs).toEqual(["updated"]);
 	});
+	it("adapts read_image hook paths and reverses file_path replacements without changing read", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "grip-hook-read-image-"));
+		const hookInputs = join(cwd, "hook-inputs");
+		const executed: { name: string; path: string }[] = [];
+		type HookReadToolName = "read" | "read_image";
+		const tool = (name: HookReadToolName): AgentTool => ({
+			name,
+			label: name,
+			description: name,
+			parameters: Type.Object({ path: Type.String() }),
+			execute: async (_id, params) => {
+				const path = (params as { path: string }).path;
+				executed.push({ name, path });
+				return { content: [{ type: "text", text: `${name}:${path}` }], details: {} };
+			},
+		});
+		const script = `let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const i=JSON.parse(s);require('fs').appendFileSync(${JSON.stringify(hookInputs)},JSON.stringify(i.tool_input)+'\\n');process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PreToolUse',updatedInput:{file_path:i.tool_input.file_path.replace('original','replacement')}}}))})`;
+		const toolOperations = {
+			cwd,
+			getBackendInfo: () => ({ type: "local" as const, cwd }),
+		} as unknown as ToolOperations;
+		const harness = await createHarness({
+			toolOperations,
+			tools: [tool("read_image"), tool("read")],
+			loadedHooks: hooks([
+				{ event: "PreToolUse", matcher: "read_image", script },
+				{ event: "PreToolUse", matcher: "Read", script },
+			]),
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("read_image", { path: "images/original.png" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage(fauxToolCall("read", { path: "docs/original.txt" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("read both files");
+		expect(
+			readFileSync(hookInputs, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line)),
+		).toEqual([{ file_path: join(cwd, "images/original.png") }, { file_path: join(cwd, "docs/original.txt") }]);
+		expect(executed).toEqual([
+			{ name: "read_image", path: join(cwd, "images/replacement.png") },
+			{ name: "read", path: join(cwd, "docs/replacement.txt") },
+		]);
+		rmSync(cwd, { recursive: true, force: true });
+	});
 
 	it.each([
 		["ask", "requested permission"],

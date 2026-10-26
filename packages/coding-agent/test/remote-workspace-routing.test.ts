@@ -149,17 +149,30 @@ describe("remote canonical workspace tool routing", () => {
 		}
 	});
 
-	it("executes all seven canonical tools once through the daemon host with updates and details", async () => {
+	it("executes canonical workspace tools through the daemon host with updates and details", async () => {
 		const workspaceRoot = await createTemporaryDirectory();
+		const png = Buffer.from(
+			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jXioAAAAASUVORK5CYII=",
+			"base64",
+		);
 		const { server, address } = await createServer(workspaceRoot);
 		const operations = await createRemoteToolOperations(address.url);
 		const host = new WorkspaceToolHost({
 			cwd: operations.cwd,
 			operations,
-			tools: { bash: { commandPrefix: "printf prefix;" } },
+			tools: { bash: { commandPrefix: "printf prefix;" }, read_image: { autoResizeImages: false } },
 		});
 
-		expect([...host.getDefinitions().keys()]).toEqual(["read", "bash", "edit", "write", "grep", "find", "ls"]);
+		expect([...host.getDefinitions().keys()]).toEqual([
+			"read",
+			"read_image",
+			"bash",
+			"edit",
+			"write",
+			"grep",
+			"find",
+			"ls",
+		]);
 		await host.execute("write", {
 			toolCallId: "write-1",
 			arguments: { path: "sample.txt", content: "alpha\nbeta\n" },
@@ -175,6 +188,17 @@ describe("remote canonical workspace tool routing", () => {
 		const hashLines = readText.split("\n").filter((line) => line.includes("│"));
 		const firstHash = hashLines[0]?.slice(0, 3);
 		if (!firstHash) throw new Error("Read result did not contain a hashline anchor");
+
+		await writeFile(join(workspaceRoot, "tiny.png"), png);
+		const imageResult = await host.execute("read_image", {
+			toolCallId: "read-image-1",
+			arguments: { path: "tiny.png" },
+		});
+		expect(imageResult.content).toContainEqual({
+			type: "image",
+			data: png.toString("base64"),
+			mimeType: "image/png",
+		});
 
 		const editResult = await host.execute("edit", {
 			toolCallId: "edit-1",

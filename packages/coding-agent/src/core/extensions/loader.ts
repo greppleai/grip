@@ -248,9 +248,9 @@ function createExtensionAPI(
 		};
 	};
 	const api = {
-		registerSubagentFactory(factory: ExtensionFactory): void {
+		registerJobFactory(factory: ExtensionFactory): void {
 			runtime.assertActive();
-			extension.subagentFactory = factory;
+			extension.jobFactory = factory;
 		},
 		// Registration methods - write to extension
 		on(event: string, handler: HandlerFn): void {

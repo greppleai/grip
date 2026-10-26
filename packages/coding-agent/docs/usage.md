@@ -41,11 +41,10 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/login`, `/logout` | Manage OAuth or API-key credentials |
 | `/websearch login` | Select DuckDuckGo, Brave Search, or Firecrawl; save or update search API keys |
 | `/model [reference or query]` | Choose a provider and model, select an exact reference, or search across providers |
-| `/subagent list` | List available bundled, user, and project presets and their effective models |
-| `/subagent model get --name <name>` | Show the effective model and source for a preset |
-| `/subagent model set --name <name> --model <provider/model-id>` | Save a named model override in global settings |
+| `/job model show` | Show the effective job model and its source |
+| `/job model set --model <provider/model-id>` | Save the single global job model |
+| `/job model clear` | Clear the saved model (fall back to the environment or parent model) |
 | `/system-prompt` | Show the current main-agent system prompt in the TUI without sending a message to the model |
-| `/system-prompt --subagent <name> [--agent-scope user\|project\|both]` | Preview a named subagent's generated system prompt, including its selected tools and preloaded skills; defaults to user scope |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
@@ -60,7 +59,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/copy` | Copy last assistant message to clipboard |
 | `/export [file]` | Export session to HTML |
 | `/share` | Upload as private GitHub gist with shareable HTML link |
-`/hooks`, `/sandbox`, `/subagent`, and `/system-prompt` are user-only interactive commands hidden from model-visible command catalogs. `/system-prompt` only renders a prompt in the TUI; it neither delegates a task nor sends a message to an LLM. Quote subagent names containing spaces. Use `--agent-scope project` for project presets; previewing one does not approve it for execution. `/sandbox` shows or clears the current backend, attaches a sandbox daemon, manages Lima sandboxes, and can set a per-directory default with `/sandbox start --name <vm> --set-default` or `/sandbox default set`; see [Workspace Sandbox](sandbox.md). `/subagent` autocompletes subcommands, flags, preset names, and available models. Quote preset names containing spaces (for example, `--name "source explorer"`). Listing project presets does not approve them for execution.
+`/hooks`, `/sandbox`, `/job`, and `/system-prompt` are user-only interactive commands hidden from model-visible command catalogs. `/system-prompt` only renders the current main prompt in the TUI; it neither delegates a task nor sends a message to an LLM. `/sandbox` shows or clears the current backend, attaches a sandbox daemon, manages Lima sandboxes, and can set a per-directory default with `/sandbox start --name <vm> --set-default` or `/sandbox default set`; see [Workspace Sandbox](sandbox.md). `/job` autocompletes its model subcommands and available models.
 | `/hooks <enable|disable>` | Enable or disable subsequent hooks for the current session |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
@@ -68,7 +67,6 @@ Type `/` in the editor to open command completion. Extensions can register custo
 
 `/hooks disable` immediately prevents subsequent hook events in the current session; a hook execution already in progress is allowed to finish. `/hooks enable` resumes dispatch. Skipped events are not replayed, and a newly created or resumed session starts with hooks enabled. `/reload` preserves this enabled/disabled state while refreshing file-backed hook configuration.
 
-`/hooks`, `/sandbox`, and `/subagent` are user-only interactive commands hidden from model-visible command catalogs. `/sandbox` shows or clears the current backend, attaches a sandbox daemon, manages Lima sandboxes, and can set a per-directory default with `/sandbox start --name <vm> --set-default` or `/sandbox default set`; see [Workspace Sandbox](sandbox.md). `/subagent` autocompletes subcommands, flags, preset names, and available models. Quote preset names containing spaces (for example, `--name "source explorer"`). Listing project presets does not approve them for execution.
 
 ## Model Selection
 
@@ -178,175 +176,18 @@ grip [options] [@files...] [messages...]
 
 ### Package Commands
 
-```bash
-grip install <source> [-l]       # Install package, -l for project-local
-grip remove <source> [-l]        # Remove package
-grip uninstall <source> [-l]     # Alias for remove
-grip update [source|self|grip]   # Update Grip and packages; reconcile pinned git refs
-grip update --extensions        # Update packages only; reconcile pinned git refs
-grip update --self              # npm-managed installs only; for binary installs rerun the verified installer
-grip update --extension <src>   # Update one package
-grip list                       # List installed packages
-grip config                     # Enable/disable package resources
-```
+Built-in tools include `read_image`, `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `websearch`, `session_search`, `session_entry_get`, `compress_context`, and `job`.
 
-These commands manage Grip packages; the compiled binary itself updates by rerunning the [verified installer](quickstart.md#install), not `grip update --self`. To uninstall Grip itself, see [Quickstart](quickstart.md#uninstall).
+`read_image` is active by default and accepts image files only; it returns the image as model input and rejects text files rather than reading their contents. The separate `read` tool handles text files and remains opt-in: select it explicitly with `--tools read` or include it in an allowlist. Image processing may resize large images to fit provider limits, and image size and supported formats depend on the selected model/provider. Models without vision support cannot interpret image payloads.
 
-See [Grip Packages](packages.md) for package sources and security notes.
+The `job` tool is active by default. Disable it through `/settings` or `"enableJobs": false` in `settings.json`. An explicit `--tools` allowlist selects its own subset regardless of that setting; no-tools modes still suppress it. Parent tool allowlists and exclusions bound child tool access.
 
-### Modes
-
-| Flag | Description |
-|------|-------------|
-| default | Interactive mode |
-| `-p`, `--print` | Print response and exit |
-| `--mode json` | Output all events as JSON lines; see [JSON mode](json.md) |
-| `--mode rpc` | RPC mode over stdin/stdout; see [RPC mode](rpc.md) |
-| `--export <in> [out]` | Export a session to HTML |
-
-In print mode, Grip also reads piped stdin and merges it into the initial prompt:
-
-```bash
-cat README.md | grip -p "Summarize this text"
-```
-
-### Model Options
-
-| Option | Description |
-|--------|-------------|
-| `--provider <name>` | Provider, such as `anthropic`, `openai`, or `google` |
-| `--model <pattern>` | Model pattern or ID; supports `provider/id` and optional `:<thinking>` |
-| `--api-key <key>` | API key, overriding environment variables |
-| `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `--models <patterns>` | Comma-separated patterns for Ctrl+P cycling |
-| `--list-models [search]` | List available models |
-
-### Session Options
-
-| Option | Description |
-|--------|-------------|
-| `-c`, `--continue` | Continue the most recent session |
-| `-r`, `--resume` | Browse and select a session |
-| `--session <path\|id>` | Use a specific session file or partial UUID |
-| `--fork <path\|id>` | Fork a session file or partial UUID into a new session |
-| `--session-dir <dir>` | Custom session storage directory |
-| `--no-session` | Ephemeral mode; do not save |
-
-### Tool Options
-
-| Option | Description |
-|--------|-------------|
-| `--tools <list>`, `-t <list>` | Allowlist specific built-in, extension, and custom tools |
-| `--no-builtin-tools`, `-nbt` | Disable built-in tools but keep extension/custom tools enabled |
-| `--no-tools`, `-nt` | Disable all tools |
-| `--remote <url>` | Run built-in tools through a `grip --daemon` backend (`ws://` or `wss://`) |
-
-Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `session_search`, `session_entry_get`, and `subagent`.
-
-The `subagent` tool is active by default. When it is available, the main agent's system prompt includes an `<available_subagents>` block with the currently discovered preset names, sources, purposes, and invocation scopes. Bundled and user presets use the default `agentScope: "user"`; project presets appear separately with `agentScope: "project"` and still require approval to run unless the host explicitly grants trust. With `agentScope: "both"`, a project preset overrides a bundled or user preset with the same name. The block refreshes on `/reload` and sandbox backend changes; listing a project preset does not approve it. Disable the tool through `/settings` or `"enableSubagents": false` in `settings.json`. An explicit `--tools` allowlist selects its own subset regardless of that setting; no-tools modes still suppress it. Parent tool allowlists and exclusions also bound child tool access.
-
-The default prompt separates `## Guidelines`, `## Skills` (when visible skills and `load_skill` are available), `## Subagents` (when the built-in tool is active), and `## Grip documentation`, in that order. The discovery-only `<available_subagents>` catalog appears next to the skills list, **before** the separate Subagents guidance section. Custom system prompts replace the default Guidelines and Grip documentation, while available skill and subagent sections still follow the custom text when applicable.
-
-Use `subagent` only for a bounded job with a concrete deliverable that benefits from isolated context; work directly for trivial work and retain responsibility for the final answer. Choose `explore` to find and summarize relevant source, `reviewer` for independent review of specified changes, or `worker` for a bounded implementation slice: make the change, add or update tests, run focused checks, and return changed files, results, and remaining issues. A worker can also run a focused test or fix an isolated issue when explicitly tasked. Use `{ "agent": "explore", "task": "Find authentication entrypoints; return file paths and line ranges" }` for a single job, `tasks` for independent parallel jobs, or `chain` for sequential jobs with `{previous}` handoff. Each run is a **fresh** in-memory session; there are no resumable runs or model-selecting tool arguments. For named presets, `/subagent model set --name worker --model provider/model-id` saves a global model override that takes precedence over `GRIP_DEFAULT_SUBAGENT_MODEL`; without either, the run inherits the parent model. Set accepts only currently available models; unavailable configured models fail the delegated job. User definitions in `~/.grip/agent/agents/*.md` override bundled presets; project definitions in `.grip/agents/*.md` require `agentScope: "project"` or `"both"` and interactive confirmation by default. Agent definitions no longer select a model.
-
-Subagents inherit the parent's available skill catalog (including host-installed skills and workspace skills), and may call `load_skill` to read full instructions on demand. Pass `skills: ["skill-name"]` to **force-preload** named skills before a subagent's first turn; per-task `skills` overrides the preset's `skills` list, and unknown names fail the delegated job. `load_skill` is included with preset/default tools. An explicit per-task `tools` list suppresses this default, so include `load_skill` to load other skills on demand. Selected skills can still contribute their associated tools, subject to parent tool allowlists/exclusions. Remote children can load or force-preload parent-visible host-installed skills from the host and workspace skills from the active backend; ordinary workspace tools remain on the active backend.
-
-Extensions do not automatically run in subagents. An extension may opt in with `pi.registerSubagentFactory()` to register fresh child-specific hooks. The Grepple Grip extension opts in its workflow guidance, tool selection, and backend grep guard, but does not expose `/grepple-install` to children. Child tools still obey the parent tool ceiling and use the active workspace backend.
-Use `--remote-deferred --remote-cwd <path>` to start without a connected tool backend, then connect from interactive mode with `/sandbox --attach <ws://url>`. Connecting reloads project instruction resources from the selected daemon backend.
-
-### Resource Options
-
-| Option | Description |
-|--------|-------------|
-| `-e`, `--extension <source>` | Load an extension from path, npm, or git; repeatable |
-| `--no-extensions` | Disable extension discovery |
-| `--skill <path>` | Load a skill; repeatable |
-| `--no-skills` | Disable skill discovery |
-| `--rule <path>` | Load a rule; repeatable |
-| `--no-rules` | Disable rule discovery |
-| `--prompt-template <path>` | Load a prompt template; repeatable |
-| `--no-prompt-templates` | Disable prompt template discovery |
-| `--theme <path>` | Load a theme; repeatable |
-| `--no-themes` | Disable theme discovery |
-| `--no-context-files`, `-nc` | Disable `AGENTS.override.md`, `AGENTS.md`, and `CLAUDE.md` discovery |
-
-Combine `--no-*` with explicit flags to load exactly what you need, ignoring settings. Example:
-
-```bash
-grip --no-extensions -e ./my-extension.ts
-```
-
-With `--remote`, project instruction resources are loaded from the daemon workspace cwd: `.grip/skills`, `.grip/rules`, `.grip/prompts`, ancestor `.agents/skills` and `.agents/rules`, and per-directory `AGENTS.override.md`/`AGENTS.md`/`CLAUDE.md` context. `AGENTS.override.md` replaces the other context candidates only in its own directory. Extension loading, themes, user resources, and package resources remain local.
-
-### Other Options
-
-| Option | Description |
-|--------|-------------|
-| `--system-prompt <text>` | Replace default prompt; context files and skills are still appended |
-| `--append-system-prompt <text>` | Append to system prompt |
-| `--tui-mode <mode>` | TUI mode: `regular` (default) or experimental `fullscreen` |
-| `--verbose` | Force verbose startup |
-| `-h`, `--help` | Show help |
-| `-v`, `--version` | Show version |
-
-In `fullscreen` mode, the transcript scrolls inside the terminal viewport while queued messages, status, extension widgets, editor, and footer remain fixed at the bottom. In `regular` mode, Grip uses the terminal main screen and terminal-owned scrollback. Set **TUI mode** in `/settings` to switch immediately and choose the default for future sessions; `--tui-mode` overrides it for one startup. **Fullscreen exit output** controls whether shutdown replays the complete transcript or restores the previous main screen without replaying transcript content, leaving any shell or launcher resume affordance visible.
-
-### File Arguments
-
-Prefix files with `@` to include them in the message:
-
-```bash
-grip @prompt.md "Answer this"
-grip -p @screenshot.png "What's in this image?"
-grip @code.ts @test.ts "Review these files"
-```
-
-### Examples
-
-```bash
-# Interactive with initial prompt
-grip "List all .ts files in src/"
-
-# Non-interactive
-grip -p "Summarize this codebase"
-
-# Non-interactive with piped stdin
-cat README.md | grip -p "Summarize this text"
-
-# Different model
-grip --provider openai --model gpt-4o "Help me refactor"
-
-# Model with provider prefix
-grip --model openai/gpt-4o "Help me refactor"
-
-# Model with thinking level shorthand
-grip --model sonnet:high "Solve this complex problem"
-
-# Limit model cycling
-grip --models "claude-*,gpt-4o"
-
-# Read-only mode
-grip --tools read,grep,find,ls -p "Review the code"
-```
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `GRIP_CODING_AGENT_DIR` | Override config directory; default is `~/.grip/agent` |
-| `GRIP_CODING_AGENT_SESSION_DIR` | Override session storage directory; overridden by `--session-dir` |
-| `GRIP_PACKAGE_DIR` | Override package directory, useful for Nix/Guix store paths |
-| `GRIP_OFFLINE` | Disable startup network operations, including update checks, package update checks, and install/update telemetry |
-| `GRIP_SKIP_VERSION_CHECK` | Skip the Grip version update check at startup. This prevents the npm metadata request |
-| `GRIP_TELEMETRY` | Override install/update telemetry: `1`/`true`/`yes` or `0`/`false`/`no`. This does not disable update checks |
-| `GRIP_DEFAULT_SUBAGENT_MODEL` | Optional `provider/model-id` for built-in runs without a named override; unset inherits the parent model. Set in the Grip process environment (not the sandbox) |
-| `GRIP_CACHE_RETENTION` | Set to `long` for extended prompt cache where supported |
 | `VISUAL`, `EDITOR` | External editor for Ctrl+G |
 
 ## Design Principles
 
 Grip keeps the core small and pushes workflow-specific behavior into extensions, skills, rules, prompt templates, and packages.
 
-Grip includes a focused subagent delegation tool but keeps broader workflow-specific behavior in extensions, skills, rules, prompt templates, and packages. It intentionally does not include built-in MCP, permission popups, plan mode, to-dos, or background bash. You can build or install those workflows as extensions or packages, or use external tools such as containers and tmux.
+Grip includes a focused job delegation tool but keeps broader workflow-specific behavior in extensions, skills, rules, prompt templates, and packages. It intentionally does not include built-in MCP, permission popups, plan mode, to-dos, or background bash. You can build or install those workflows as extensions or packages, or use external tools such as containers and tmux.
 
 For the original upstream rationale, read the [Pi blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/).

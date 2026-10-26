@@ -18,17 +18,14 @@ export interface BuiltinSlashCommand {
 export const HIDDEN_BUILTIN_SLASH_COMMAND_NAMES: ReadonlySet<string> = new Set([
 	"hooks",
 	"sandbox",
-	"subagent",
+	"job",
 	"system-prompt",
 ]);
 
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "hooks", description: "Enable or disable hooks for this session" },
 	{ name: "sandbox", description: "Configure or manage the workspace tool sandbox" },
-	{ name: "cd", description: "Change the working directory" },
-	{ name: "settings", description: "Open settings menu" },
-	{ name: "model", description: "Switch models" },
-	{ name: "subagent", description: "List subagents or configure a preset model" },
+	{ name: "job", description: "Show or configure the global job model" },
 	{ name: "system-prompt", description: "View the effective system prompt without sending it to a model" },
 	{
 		name: "context-compression",

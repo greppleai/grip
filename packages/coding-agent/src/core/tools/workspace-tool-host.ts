@@ -21,19 +21,32 @@ import {
 } from "./operations.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import {
+	createReadImageToolDefinition,
 	createReadToolDefinition,
+	type ReadImageToolDefinition,
 	type ReadToolDefinition,
 	type ReadToolOperations,
 	type ReadToolOptions,
 } from "./read.ts";
+
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { createWriteToolDefinition, type WriteToolDefinition, type WriteToolOptions } from "./write.ts";
 
-export const WORKSPACE_TOOL_NAMES = Object.freeze(["read", "bash", "edit", "write", "grep", "find", "ls"] as const);
+export const WORKSPACE_TOOL_NAMES = Object.freeze([
+	"read",
+	"read_image",
+	"bash",
+	"edit",
+	"write",
+	"grep",
+	"find",
+	"ls",
+] as const);
 const WORKSPACE_TOOL_NAME_SET = new Set<string>(WORKSPACE_TOOL_NAMES);
 export type WorkspaceToolName = (typeof WORKSPACE_TOOL_NAMES)[number];
 export type WorkspaceToolDefinition =
 	| ReadToolDefinition
+	| ReadImageToolDefinition
 	| BashToolDefinition
 	| EditToolDefinition
 	| WriteToolDefinition
@@ -47,6 +60,7 @@ type AnyToolDefinition = ToolDefinition<any, any, any>;
 
 export interface WorkspaceToolOptions {
 	read?: ReadToolOptions;
+	read_image?: ReadToolOptions;
 	bash?: BashToolOptions;
 	write?: WriteToolOptions;
 	edit?: EditToolOptions;
@@ -138,9 +152,9 @@ function validateDisposeTimeout(value: number | undefined): number {
 
 function createRemoteExecutionOptions(toolOptions: WorkspaceToolOptions | undefined): WorkspaceToolExecutionOptions {
 	return Object.freeze({
-		...(toolOptions?.read?.autoResizeImages === undefined
+		...((toolOptions?.read_image?.autoResizeImages ?? toolOptions?.read?.autoResizeImages) === undefined
 			? {}
-			: { imageAutoResize: toolOptions.read.autoResizeImages }),
+			: { imageAutoResize: toolOptions?.read_image?.autoResizeImages ?? toolOptions?.read?.autoResizeImages }),
 		...(toolOptions?.bash?.commandPrefix === undefined ? {} : { shellCommandPrefix: toolOptions.bash.commandPrefix }),
 	});
 }
@@ -148,7 +162,7 @@ function createRemoteExecutionOptions(toolOptions: WorkspaceToolOptions | undefi
 /**
  * Canonical workspace-scoped tool construction and execution without an AgentSession.
  *
- * This host deliberately excludes subagents, session lifecycle tools, extensions,
+ * This host deliberately excludes jobs, session lifecycle tools, extensions,
  * models, prompts, conversation state, persistence, and UI. Caller-provided operations
  * are borrowed unless ownsOperations is explicitly enabled.
  */
@@ -284,6 +298,11 @@ export class WorkspaceToolHost {
 	private registerConfiguredTools(enabledNames: ReadonlySet<WorkspaceToolName>): void {
 		const toolOptions = this.toolOptions;
 		if (enabledNames.has("read")) this.register("read", createReadToolDefinition(this.operations, toolOptions?.read));
+		if (enabledNames.has("read_image"))
+			this.register(
+				"read_image",
+				createReadImageToolDefinition(this.operations, toolOptions?.read_image ?? toolOptions?.read),
+			);
 		if (enabledNames.has("bash")) this.register("bash", createBashToolDefinition(this.operations, toolOptions?.bash));
 		if (enabledNames.has("edit")) this.register("edit", createEditToolDefinition(this.operations, toolOptions?.edit));
 		if (enabledNames.has("write"))
@@ -294,8 +313,10 @@ export class WorkspaceToolHost {
 	}
 	private selectWorkspaceExecution(name: string, params: unknown): WorkspaceExecutionSelection {
 		const executeRemotely = this.remoteToolNames.has(name);
-		const operationsForPath = this.toolOptions?.read?.operationsForPath;
-		if (!executeRemotely || name !== "read" || !operationsForPath) {
+		const operationsForPath = (
+			name === "read_image" ? (this.toolOptions?.read_image ?? this.toolOptions?.read) : this.toolOptions?.read
+		)?.operationsForPath;
+		if (!executeRemotely || (name !== "read" && name !== "read_image") || !operationsForPath) {
 			return { executeRemotely, readOperations: undefined };
 		}
 		const readPath = (params as { path?: unknown }).path;
@@ -323,6 +344,27 @@ export class WorkspaceToolHost {
 		return factories[name as WorkspaceToolName]?.();
 	}
 
+	private createScopedReadDefinition<TParams extends TSchema, TDetails>(
+		request: HostedToolExecution<TParams, TDetails>,
+		operations: ToolOperations,
+		readOperations: ReadToolOperations | undefined,
+	): ToolDefinition<TParams, TDetails> {
+		const toolOptions =
+			request.name === "read_image"
+				? (this.toolOptions?.read_image ?? this.toolOptions?.read)
+				: this.toolOptions?.read;
+		const options = {
+			...toolOptions,
+			...(request.executionOptions?.imageAutoResize === undefined
+				? {}
+				: { autoResizeImages: request.executionOptions.imageAutoResize }),
+			...(readOperations ? { operationsForPath: () => readOperations } : {}),
+		};
+		return (request.name === "read_image"
+			? createReadImageToolDefinition(operations, options)
+			: createReadToolDefinition(operations, options)) as unknown as ToolDefinition<TParams, TDetails>;
+	}
+
 	private resolveLocalDefinition<TParams extends TSchema, TDetails>(
 		request: HostedToolExecution<TParams, TDetails>,
 		definition: ToolDefinition<TParams, TDetails>,
@@ -337,16 +379,10 @@ export class WorkspaceToolHost {
 				}) as ToolOperations)
 			: this.operations;
 		if (
-			request.name === "read" &&
+			(request.name === "read" || request.name === "read_image") &&
 			(cwd || readOperations || request.executionOptions?.imageAutoResize !== undefined)
 		) {
-			return createReadToolDefinition(operations, {
-				...this.toolOptions?.read,
-				...(request.executionOptions?.imageAutoResize === undefined
-					? {}
-					: { autoResizeImages: request.executionOptions.imageAutoResize }),
-				...(readOperations ? { operationsForPath: () => readOperations } : {}),
-			}) as unknown as ToolDefinition<TParams, TDetails>;
+			return this.createScopedReadDefinition(request, operations, readOperations);
 		}
 		if (
 			request.name === "bash" &&

@@ -114,6 +114,7 @@ import {
 	type HookExecutionNotice,
 	parseHookExecutionNotice,
 } from "../../core/hooks/types.ts";
+import { completeJobCommand, JOB_COMMAND_USAGE, parseJobCommand } from "../../core/job-command.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
 import { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.ts";
@@ -154,11 +155,9 @@ import {
 import type { LoadSkillsResult } from "../../core/skills.ts";
 import { BUILTIN_SLASH_COMMANDS, HIDDEN_BUILTIN_SLASH_COMMAND_NAMES } from "../../core/slash-commands.ts";
 import { getSourceBackendIcon, type SourceInfo } from "../../core/source-info.ts";
-import { completeSubagentCommand, parseSubagentCommand, SUBAGENT_COMMAND_USAGE } from "../../core/subagent-command.ts";
 import { parseSystemPromptCommand, SYSTEM_PROMPT_COMMAND_USAGE } from "../../core/system-prompt-command.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 import type { ToolBackendInfo } from "../../core/tools/operations.ts";
-import { discoverAgentsWithOperations, discoverAvailableSubagents } from "../../core/tools/subagent-agents.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { parseWebsearchToolOptions, WEBSEARCH_AUTH_PROVIDER_IDS } from "../../core/tools/websearch.ts";
 import { getNewEntries, parseChangelog } from "../../utils/changelog.ts";
@@ -943,36 +942,16 @@ export class InteractiveMode {
 				}));
 			};
 		}
-		const subagentCommand = slashCommands.find((command) => command.name === "subagent")!;
-		subagentCommand.argumentHint = "list | model <get|set> --name <name> [--model <provider/model-id>]";
-		subagentCommand.getArgumentCompletions = async (prefix) => {
-			const operations = this.session.getToolOperations();
-			const names = prefix.includes("--name")
-				? (
-						await discoverAgentsWithOperations(operations.cwd ?? this.activeSession.getCwd(), "both", operations)
-					).agents.map((agent) => agent.name)
-				: [];
+		const jobCommand = slashCommands.find((command) => command.name === "job")!;
+		jobCommand.argumentHint = "model <show|set --model <provider/model-id>|clear>";
+		jobCommand.getArgumentCompletions = (prefix) => {
 			const models = this.session.modelRegistry.getAvailable().map((model) => `${model.provider}/${model.id}`);
-			return completeSubagentCommand(prefix, names, models);
+			return completeJobCommand(prefix, models);
 		};
 		const systemPromptCommand = slashCommands.find((command) => command.name === "system-prompt")!;
-		systemPromptCommand.argumentHint = "[--subagent <name> [--agent-scope user|project|both]]";
-		systemPromptCommand.getArgumentCompletions = async (prefix) => {
-			if (!prefix.includes(" ")) {
-				return "--subagent".startsWith(prefix) ? [{ value: "--subagent ", label: "--subagent" }] : [];
-			}
-			if (!prefix.startsWith("--subagent ")) return [];
-			const query = prefix.slice("--subagent ".length).replace(/^"/, "").toLowerCase();
-			const operations = this.session.getToolOperations();
-			const agents = await discoverAvailableSubagents(operations.cwd ?? this.activeSession.getCwd(), operations);
-			return agents
-				.filter((agent) => agent.name.toLowerCase().includes(query) && !agent.name.includes('"'))
-				.map((agent) => ({
-					value: `--subagent ${/\s/.test(agent.name) ? `"${agent.name}"` : agent.name}${agent.agentScope === "project" ? " --agent-scope project" : ""}`,
-					label: agent.name,
-					description: agent.source,
-				}));
-		};
+		systemPromptCommand.argumentHint = "";
+		systemPromptCommand.getArgumentCompletions = undefined;
+
 		const profileCommand = slashCommands.find((command) => command.name === "profile");
 		if (profileCommand) {
 			profileCommand.argumentHint = "use <name> | create <name>";
@@ -3410,58 +3389,60 @@ export class InteractiveMode {
 		};
 		return commands[text];
 	}
-	private async handleSubagentCommand(text: string): Promise<void> {
-		const parsed = parseSubagentCommand(text.slice("/subagent".length));
+	private async handleJobCommand(text: string): Promise<void> {
+		const parsed = parseJobCommand(text.slice("/job".length));
 		if (parsed.action === "invalid") {
-			this.showWarning(SUBAGENT_COMMAND_USAGE);
+			this.showWarning(JOB_COMMAND_USAGE);
 			return;
 		}
-		const operations = this.session.getToolOperations();
-		const agents = (
-			await discoverAgentsWithOperations(operations.cwd ?? this.activeSession.getCwd(), "both", operations)
-		).agents;
-		const configured = this.settingsManager.getSubagentModels();
-		const defaultModel =
-			process.env.GRIP_DEFAULT_SUBAGENT_MODEL?.trim() ||
-			(this.session.model ? `${this.session.model.provider}/${this.session.model.id}` : "(no parent model)");
-		if (parsed.action === "list") {
-			this.showStatus(
-				`Subagents (project presets require approval when run):\n${
-					agents
-						.map((agent) => `${agent.name} (${agent.source}) — ${configured[agent.name] ?? defaultModel}`)
-						.join("\n") || "none"
-				}`,
-			);
+		if (parsed.action === "show") {
+			this.handleJobModelShow();
 			return;
 		}
-		const agent = agents.find((entry) => entry.name === parsed.name);
-		if (!agent) {
-			this.showWarning(`Unknown subagent: ${parsed.name}. Use /subagent list to see available presets.`);
+		if (parsed.action === "clear") {
+			await this.handleJobModelClear();
 			return;
 		}
-		if (parsed.action === "get") {
-			const model = configured[agent.name];
-			this.showStatus(
-				`${agent.name} (${agent.source}): ${model ?? defaultModel} (${model ? "configured" : "default"})`,
-			);
+		await this.handleJobModelSet(parsed.model);
+	}
+
+	private handleJobModelShow(): void {
+		const setting = this.settingsManager.getJobModel();
+		const environment = process.env.GRIP_DEFAULT_JOB_MODEL?.trim();
+		const parent = this.session.model ? `${this.session.model.provider}/${this.session.model.id}` : undefined;
+		const effective = setting ?? environment ?? parent;
+		const source = setting ? "setting" : environment ? "environment" : parent ? "parent model" : "none";
+		this.showStatus(`Job model: ${effective ?? "(unset)"} (${source})`);
+	}
+
+	private async handleJobModelClear(): Promise<void> {
+		const loadError = this.settingsManager.getLoadError("global");
+		if (loadError) {
+			this.showError(`Cannot clear job model: ${loadError.message}`);
 			return;
 		}
+		this.settingsManager.setJobModel(undefined);
+		await this.settingsManager.flush();
+		this.showStatus("Global job model cleared");
+	}
+
+	private async handleJobModelSet(model: string): Promise<void> {
 		const selected = this.session.modelRegistry
 			.getAvailable()
-			.find((model) => `${model.provider}/${model.id}`.toLowerCase() === parsed.model.toLowerCase());
+			.find((available) => `${available.provider}/${available.id}`.toLowerCase() === model.toLowerCase());
 		if (!selected) {
-			this.showWarning(`Unavailable subagent model: ${parsed.model}. Choose an available provider/model-id.`);
+			this.showWarning(`Unavailable job model: ${model}. Choose an available provider/model-id.`);
 			return;
 		}
 		const loadError = this.settingsManager.getLoadError("global");
 		if (loadError) {
-			this.showError(`Cannot save subagent model: ${loadError.message}`);
+			this.showError(`Cannot save job model: ${loadError.message}`);
 			return;
 		}
 		const reference = `${selected.provider}/${selected.id}`;
-		this.settingsManager.setSubagentModel(agent.name, reference);
+		this.settingsManager.setJobModel(reference);
 		await this.settingsManager.flush();
-		this.showStatus(`${agent.name} (${agent.source}) model set to ${reference}`);
+		this.showStatus(`Global job model set to ${reference}`);
 	}
 
 	private resolveWebsearchEditorCommand(text: string): EditorCommandAction | undefined {
@@ -3483,19 +3464,8 @@ export class InteractiveMode {
 			this.showWarning(SYSTEM_PROMPT_COMMAND_USAGE);
 			return;
 		}
-		let prompt: string;
-		let label = "System Prompt (current session)";
-		if (command.action === "main") {
-			prompt = this.session.systemPrompt;
-		} else {
-			try {
-				prompt = await this.runtimeHost.previewSubagentSystemPrompt(command.name, command.agentScope);
-			} catch (error) {
-				this.showError(error instanceof Error ? error.message : String(error));
-				return;
-			}
-			label = `System Prompt (subagent: ${command.name}; scope: ${command.agentScope}; preview only)`;
-		}
+		const prompt = this.session.systemPrompt;
+		const label = "System Prompt (current session)";
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new DynamicBorder());
 		this.chatContainer.addChild(new Text(theme.fg("accent", label), 1, 0));
@@ -3515,11 +3485,11 @@ export class InteractiveMode {
 						},
 					}
 				: undefined) ??
-			(this.matchesEditorCommand(text, "/subagent")
+			(this.matchesEditorCommand(text, "/job")
 				? {
 						run: async () => {
 							this.editor.setText("");
-							await this.handleSubagentCommand(text);
+							await this.handleJobCommand(text);
 						},
 					}
 				: undefined) ??
@@ -5023,7 +4993,7 @@ export class InteractiveMode {
 					autoResizeImages: this.settingsManager.getImageAutoResize(),
 					blockImages: this.settingsManager.getBlockImages(),
 					enableSkillCommands: this.settingsManager.getEnableSkillCommands(),
-					enableSubagents: this.session.subagentsEnabled,
+					enableJobs: this.session.jobsEnabled,
 					steeringMode: this.session.steeringMode,
 					followUpMode: this.session.followUpMode,
 					transport: this.settingsManager.getTransport(),
@@ -5081,8 +5051,8 @@ export class InteractiveMode {
 						this.settingsManager.setEnableSkillCommands(enabled);
 						this.setupAutocompleteProvider();
 					},
-					onEnableSubagentsChange: (enabled) => {
-						this.session.setSubagentsEnabled(enabled);
+					onEnableJobsChange: (enabled) => {
+						this.session.setJobsEnabled(enabled);
 					},
 					onSteeringModeChange: (mode) => {
 						this.session.setSteeringMode(mode);

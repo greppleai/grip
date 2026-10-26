@@ -15,7 +15,7 @@ console.log("Current settings:", JSON.stringify(settingsManagerFromDisk.getGloba
 // Override specific settings
 const settingsManager = SettingsManager.create(cwd);
 settingsManager.applyOverrides({
-	enableSubagents: true,
+	enableJobs: true,
 	compaction: { enabled: false },
 	retry: { enabled: true, maxRetries: 5, baseDelayMs: 1000 },
 });

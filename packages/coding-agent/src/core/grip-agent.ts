@@ -57,19 +57,13 @@ import type { Skill } from "./skills.ts";
 import { getSourceBackend } from "./source-info.ts";
 import { isInstallTelemetryEnabled } from "./telemetry.ts";
 import { printTimings, time } from "./timings.ts";
+import type { JobExecutionContext, JobRunner, JobRunOutcome, JobRunRequest } from "./tools/job.ts";
 import {
 	type BorrowedToolOperations,
 	borrowToolOperations,
 	type ToolBackendInfo,
 	type ToolOperations,
 } from "./tools/operations.ts";
-import type { SubagentRunner, SubagentRunOutcome, SubagentRunRequest } from "./tools/subagent.ts";
-import {
-	type AgentScope,
-	type AvailableSubagent,
-	discoverAgentsWithOperations,
-	discoverAvailableSubagents,
-} from "./tools/subagent-agents.ts";
 
 export type GripAgentDiagnosticType = "info" | "warning" | "error";
 export type GripAgentToolExclusionMode = "all" | "builtin";
@@ -150,8 +144,6 @@ export interface GripAgentSessionOptions {
 	scopedModels?: ScopedModel[];
 	tools?: string[];
 	excludedTools?: string[];
-	/** Trust project-local subagent presets without an interactive host prompt. */
-	trustProjectAgents?: boolean;
 	/** Explicit host trust grant for project grip and Claude-compatible hooks. Ignored by non-local backends. */
 	trustProjectHooks?: boolean;
 	/** Optional canonical repository identity constraining the project-hook trust grant. */
@@ -172,7 +164,7 @@ export interface ResolveGripAgentSessionOptionsResult extends GripAgentSessionOp
 }
 
 export interface CreateGripAgentOptions extends GripAgentSessionOptions {
-	/** Dispose toolOperations with this top-level GripAgent. Child sessions and subagents always borrow it. */
+	/** Dispose toolOperations with this top-level GripAgent. Child sessions and jobs always borrow it. */
 	ownsToolOperations?: boolean;
 	/** Runtime mode. Default: embedded SDK usage. */
 	mode?: GripAgentAppMode;
@@ -224,34 +216,30 @@ interface ForkPreparationOptions {
 	position: SessionForkPosition;
 }
 
-interface EmbeddedSubagentRunnerContext {
+interface EmbeddedJobRunnerContext {
 	services: GripAgentServices;
 	excludedTools: string[];
 	allowedToolNames: string[] | undefined;
 	children: Set<GripAgent>;
 }
 
-interface EmbeddedSubagentRequestContext {
+interface EmbeddedJobRequestContext {
 	resolvedModel: ResolveCliModelResult | undefined;
 	toolOperations: ToolOperations;
 	backendInfo: ToolBackendInfo | undefined;
 }
 
-type EmbeddedSubagentRequestResolution =
-	| { context: EmbeddedSubagentRequestContext; failure?: never }
-	| { context?: never; failure: SubagentRunOutcome };
+type EmbeddedJobRequestResolution =
+	| { context: EmbeddedJobRequestContext; failure?: never }
+	| { context?: never; failure: JobRunOutcome };
 
-type EmbeddedSubagentSkillSelection =
-	| { skills: Skill[]; failure?: never }
-	| { skills?: never; failure: SubagentRunOutcome };
+type EmbeddedJobSkillSelection = { skills: Skill[]; failure?: never } | { skills?: never; failure: JobRunOutcome };
 
-type EmbeddedSubagentPreparation =
-	| { child: GripAgent; skillCatalog: Skill[]; failure?: never }
-	| { child?: never; failure: SubagentRunOutcome };
+type EmbeddedJobPreparation =
+	| { child: GripAgent; skillCatalog: Skill[]; preloadedSkills: string[]; failure?: never }
+	| { child?: never; failure: JobRunOutcome };
 
-type EmbeddedSubagentSkillPreload =
-	| { blocks: string[]; failure?: never }
-	| { blocks?: never; failure: SubagentRunOutcome };
+type EmbeddedJobSkillPreload = { blocks: string[]; failure?: never } | { blocks?: never; failure: JobRunOutcome };
 
 export type GripAgentAppMode = "embedded" | "interactive" | "print" | "json" | "rpc";
 
@@ -272,7 +260,6 @@ export interface GripAgentRuntimeHost {
 	readonly session: AgentSession;
 	readonly diagnostics: readonly GripAgentDiagnostic[];
 	readonly modelFallbackMessage: string | undefined;
-	previewSubagentSystemPrompt(name: string, agentScope: AgentScope): Promise<string>;
 	setRebindSession(rebindSession?: (session: AgentSession) => Promise<void>): void;
 	setBeforeSessionInvalidate(beforeSessionInvalidate?: () => void): void;
 	changeDirectory(cwd: string): Promise<ExtensionSessionActionResult>;
@@ -295,7 +282,7 @@ export class SessionImportFileNotFoundError extends Error {
 	}
 }
 
-function isSubagentCwdConfined(cwd: string, operations: ToolOperations, backend: ToolBackendInfo | undefined): boolean {
+function isJobCwdConfined(cwd: string, operations: ToolOperations, backend: ToolBackendInfo | undefined): boolean {
 	if (backend?.type === "local") return true;
 	if (backend === undefined) return posix.normalize(cwd) === posix.normalize(operations.cwd);
 	const pathApi =
@@ -486,8 +473,7 @@ export class GripAgent {
 	private readonly borrowedToolOperations: BorrowedToolOperations | undefined;
 	private toolOperationsDisposed = false;
 	private disposePromise: Promise<void> | undefined;
-	private readonly activeSubagents = new Set<GripAgent>();
-	private _embeddedSubagentRunnerContext?: EmbeddedSubagentRunnerContext;
+	private readonly activeJobs = new Set<GripAgent>();
 	private constructor(options: CreateGripAgentOptions, resolved: GripAgentResolvedDependencies) {
 		this.options = options;
 		this.borrowedToolOperations = options.toolOperations ? borrowToolOperations(options.toolOperations) : undefined;
@@ -590,20 +576,20 @@ export class GripAgent {
 			diagnostics,
 		};
 	}
-	private resolveEmbeddedSubagentRequest(
-		request: SubagentRunRequest,
+	private resolveEmbeddedJobRequest(
+		request: JobRunRequest,
 		services: GripAgentServices,
-	): EmbeddedSubagentRequestResolution {
-		const namedModel =
-			request.agentSource === "ad-hoc" ? undefined : services.settingsManager.getSubagentModel(request.agent);
-		const fromNamedPreset = namedModel?.toLowerCase() === request.model?.toLowerCase();
-		const configuredModel = fromNamedPreset ? namedModel : process.env.GRIP_DEFAULT_SUBAGENT_MODEL?.trim();
-		const configurationSource = fromNamedPreset
-			? `subagentModels["${request.agent}"]`
-			: "GRIP_DEFAULT_SUBAGENT_MODEL";
+	): EmbeddedJobRequestResolution {
+		const configuredModel =
+			services.settingsManager.getJobModel()?.trim() || process.env.GRIP_DEFAULT_JOB_MODEL?.trim();
+		const configurationSource = services.settingsManager.getJobModel()?.trim()
+			? "jobModel"
+			: "GRIP_DEFAULT_JOB_MODEL";
+		const parentModel = this.session?.model;
+		const modelName =
+			configuredModel || (parentModel ? `${parentModel.provider}/${parentModel.id}` : undefined) || request.model;
 		if (
 			configuredModel &&
-			request.model?.toLowerCase() === configuredModel.toLowerCase() &&
 			!services.modelRegistry
 				.getAvailable()
 				.some((model) => `${model.provider}/${model.id}`.toLowerCase() === configuredModel.toLowerCase())
@@ -615,43 +601,37 @@ export class GripAgent {
 				},
 			};
 		}
-		const resolvedModel = request.model
-			? resolveCliModel({ cliModel: request.model, modelRegistry: services.modelRegistry })
+		const resolvedModel = modelName
+			? resolveCliModel({ cliModel: modelName, modelRegistry: services.modelRegistry })
 			: undefined;
 		if (resolvedModel?.error) {
 			return {
 				failure: {
 					exitCode: 1,
-					stderr:
-						configuredModel && request.model?.toLowerCase() === configuredModel.toLowerCase()
-							? `${configurationSource}: ${resolvedModel.error}`
-							: resolvedModel.error,
+					stderr: configuredModel ? `${configurationSource}: ${resolvedModel.error}` : resolvedModel.error,
 				},
 			};
 		}
 		const toolOperations = request.toolOperations;
 		if (!toolOperations) {
-			return { failure: { exitCode: 1, stderr: "Subagents require explicit workspace tool operations" } };
+			return { failure: { exitCode: 1, stderr: "Jobs require explicit workspace tool operations" } };
 		}
 		const backendInfo = toolOperations.getBackendInfo?.();
 		if (backendInfo?.type === "remote" && !backendInfo.configured) {
-			return { failure: { exitCode: 1, stderr: "Subagents cannot run with an unconfigured remote backend" } };
+			return { failure: { exitCode: 1, stderr: "Jobs cannot run with an unconfigured remote backend" } };
 		}
-		if (!isSubagentCwdConfined(request.cwd, toolOperations, backendInfo)) {
+		if (!isJobCwdConfined(request.cwd, toolOperations, backendInfo)) {
 			return {
 				failure: {
 					exitCode: 1,
-					stderr: `Sandboxed subagent cwd must stay within the sandbox workspace root: ${toolOperations.cwd}`,
+					stderr: `Sandboxed job cwd must stay within the sandbox workspace root: ${toolOperations.cwd}`,
 				},
 			};
 		}
 		return { context: { resolvedModel, toolOperations, backendInfo } };
 	}
 
-	private selectEmbeddedSubagentSkills(
-		request: SubagentRunRequest,
-		loadedSkills: Skill[],
-	): EmbeddedSubagentSkillSelection {
+	private selectEmbeddedJobSkills(request: JobRunRequest, loadedSkills: Skill[]): EmbeddedJobSkillSelection {
 		const requestedSkills = request.skills ?? [];
 		const skillsByName = new Map<string, Skill>();
 		for (const skill of loadedSkills) {
@@ -665,27 +645,27 @@ export class GripAgent {
 			else missingSkills.push(name);
 		}
 		if (missingSkills.length > 0) {
-			return { failure: { exitCode: 1, stderr: `Unknown subagent skill(s): ${missingSkills.join(", ")}` } };
+			return { failure: { exitCode: 1, stderr: `Unknown job skill(s): ${missingSkills.join(", ")}` } };
 		}
 		return { skills };
 	}
 
-	private getEmbeddedSubagentSkillCatalog(skills: Skill[]): Skill[] {
+	private getEmbeddedJobSkillCatalog(skills: Skill[]): Skill[] {
 		return skills.filter((skill) => !skill.disableModelInvocation);
 	}
-	private async loadEmbeddedSubagentSkillContent(skill: Skill, toolOperations: ToolOperations): Promise<string> {
+	private async loadEmbeddedJobSkillContent(skill: Skill, toolOperations: ToolOperations): Promise<string> {
 		if (skill.content !== undefined) return skill.content;
 		if (getSourceBackend(skill.sourceInfo) === "local") return readFileSync(skill.filePath, "utf-8");
 		return (await toolOperations.readFile(skill.filePath)).toString("utf-8");
 	}
-	private async preloadEmbeddedSubagentSkills(
+	private async preloadEmbeddedJobSkills(
 		skills: Skill[],
-		context: EmbeddedSubagentRequestContext,
-	): Promise<EmbeddedSubagentSkillPreload> {
+		context: EmbeddedJobRequestContext,
+	): Promise<EmbeddedJobSkillPreload> {
 		const blocks: string[] = [];
 		for (const skill of skills) {
 			try {
-				const content = await this.loadEmbeddedSubagentSkillContent(skill, context.toolOperations);
+				const content = await this.loadEmbeddedJobSkillContent(skill, context.toolOperations);
 				blocks.push(
 					`<preloaded-skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${stripFrontmatter(content).trim()}\n</preloaded-skill>`,
 				);
@@ -693,7 +673,7 @@ export class GripAgent {
 				return {
 					failure: {
 						exitCode: 1,
-						stderr: `Failed to preload subagent skill ${skill.name}: ${error instanceof Error ? error.message : String(error)}`,
+						stderr: `Failed to preload job skill ${skill.name}: ${error instanceof Error ? error.message : String(error)}`,
 					},
 				};
 			}
@@ -701,19 +681,18 @@ export class GripAgent {
 		return { blocks };
 	}
 
-	private async createEmbeddedSubagent(
-		request: SubagentRunRequest,
-		runnerContext: EmbeddedSubagentRunnerContext,
-		preview = false,
-	): Promise<EmbeddedSubagentPreparation> {
-		const resolution = this.resolveEmbeddedSubagentRequest(request, runnerContext.services);
+	private async createEmbeddedJob(
+		request: JobRunRequest,
+		runnerContext: EmbeddedJobRunnerContext,
+	): Promise<EmbeddedJobPreparation> {
+		const resolution = this.resolveEmbeddedJobRequest(request, runnerContext.services);
 		if (resolution.failure) return { failure: resolution.failure };
 		const requestContext = resolution.context;
 		const parentSkills = this.session.getRegisteredSkills();
-		const selection = this.selectEmbeddedSubagentSkills(request, parentSkills);
+		const selection = this.selectEmbeddedJobSkills(request, parentSkills);
 		if (selection.failure) return { failure: selection.failure };
-		const skillCatalog = this.getEmbeddedSubagentSkillCatalog(parentSkills);
-		const preload = await this.preloadEmbeddedSubagentSkills(selection.skills, requestContext);
+		const skillCatalog = this.getEmbeddedJobSkillCatalog(parentSkills);
+		const preload = await this.preloadEmbeddedJobSkills(selection.skills, requestContext);
 		if (preload.failure) return { failure: preload.failure };
 
 		const settingsStorage = new InMemorySettingsStorage();
@@ -724,7 +703,7 @@ export class GripAgent {
 			JSON.stringify(runnerContext.services.settingsManager.getProjectSettings()),
 		);
 		const settingsManager = SettingsManager.fromStorage(settingsStorage);
-		const childExcludedTools = new Set(["subagent", ...runnerContext.excludedTools]);
+		const childExcludedTools = new Set(["job", ...runnerContext.excludedTools]);
 		const permittedTools = runnerContext.allowedToolNames ? new Set(runnerContext.allowedToolNames) : undefined;
 		const requestedTools = request.tools ?? getDefaultActiveToolNames();
 		const skillTools = request.tools === undefined ? selection.skills.flatMap((skill) => skill.tools ?? []) : [];
@@ -739,7 +718,7 @@ export class GripAgent {
 			authStorage: runnerContext.services.authStorage,
 			modelRegistry: runnerContext.services.modelRegistry,
 			settingsManager,
-			hooks: preview ? false : undefined,
+			hooks: undefined,
 			model: requestContext.resolvedModel?.model,
 			thinkingLevel: requestContext.resolvedModel?.thinkingLevel,
 			tools,
@@ -750,23 +729,19 @@ export class GripAgent {
 				// Only extensions that explicitly supplied a child-specific factory run in isolated sessions.
 				extensionFactories: runnerContext.services.resourceLoader
 					.getExtensions()
-					.extensions.flatMap((extension) => (extension.subagentFactory ? [extension.subagentFactory] : [])),
+					.extensions.flatMap((extension) => (extension.jobFactory ? [extension.jobFactory] : [])),
 				noExtensions: true,
-				noSkills: true,
-				noRules: true,
 				noPromptTemplates: true,
 				noThemes: true,
-				noContextFiles: true,
-				systemPrompt: "",
-				appendSystemPrompt: [],
-				systemPromptOverride: () => undefined,
-				appendSystemPromptOverride: () => [request.systemPrompt, ...preload.blocks],
+				systemPrompt: runnerContext.services.resourceLoader.getSystemPrompt(),
+				appendSystemPrompt: runnerContext.services.resourceLoader.getAppendSystemPrompt(),
+				appendSystemPromptOverride: (base) => [...base, ...preload.blocks],
 			},
 		});
-		return { child, skillCatalog };
+		return { child, skillCatalog, preloadedSkills: selection.skills.map((skill) => skill.name) };
 	}
 
-	private async createEmbeddedSubagentSession(prepared: EmbeddedSubagentPreparation): Promise<AgentSession> {
+	private async createEmbeddedJobSession(prepared: EmbeddedJobPreparation): Promise<AgentSession> {
 		if (prepared.failure) throw new Error(prepared.failure.stderr);
 		const session = await prepared.child.createAgentSession();
 		for (const skill of prepared.skillCatalog) session.registerSessionSkill(skill);
@@ -774,33 +749,48 @@ export class GripAgent {
 		return session;
 	}
 
-	private async runEmbeddedSubagent(
-		request: SubagentRunRequest,
-		runnerContext: EmbeddedSubagentRunnerContext,
-	): Promise<SubagentRunOutcome> {
-		const prepared = await this.createEmbeddedSubagent(request, runnerContext);
+	private async runEmbeddedJob(
+		request: JobRunRequest,
+		runnerContext: EmbeddedJobRunnerContext,
+	): Promise<JobRunOutcome> {
+		const prepared = await this.createEmbeddedJob(request, runnerContext);
 		if (prepared.failure) return prepared.failure;
 		const { child } = prepared;
 		runnerContext.children.add(child);
 		let unsubscribe: (() => void) | undefined;
 		let session: AgentSession | undefined;
+		let execution: JobExecutionContext | undefined;
 		const abort = (): void => {
 			if (session) void session.abort();
 		};
 		try {
-			session = await this.createEmbeddedSubagentSession(prepared);
+			session = await this.createEmbeddedJobSession(prepared);
 			unsubscribe = session.subscribe((event) => {
 				if (event.type !== "message_end") return;
 				if (event.message.role === "assistant" || event.message.role === "toolResult") {
 					request.onMessage(event.message as Message);
 				}
 			});
-			if (request.signal?.aborted) return { exitCode: 1, stderr: "Subagent was aborted" };
+			execution = {
+				cwd: session.session.getCwd(),
+				backend: request.toolOperations?.getBackendInfo?.()?.type ?? "unknown",
+				model: session.model ? `${session.model.provider}/${session.model.id}` : undefined,
+				tools: session.getActiveToolNames(),
+				preloadedSkills: prepared.preloadedSkills,
+			};
+			if (request.signal?.aborted) return { exitCode: 1, stderr: "Job was aborted", execution };
 			request.signal?.addEventListener("abort", abort, { once: true });
 			await session.prompt(request.prompt);
-			return { exitCode: request.signal?.aborted ? 1 : 0, stderr: "" };
+			return {
+				exitCode: request.signal?.aborted ? 1 : 0,
+				stderr: "",
+				execution: {
+					...execution,
+					model: session.model ? `${session.model.provider}/${session.model.id}` : undefined,
+				},
+			};
 		} catch (error) {
-			return { exitCode: 1, stderr: error instanceof Error ? error.message : String(error) };
+			return { exitCode: 1, stderr: error instanceof Error ? error.message : String(error), execution };
 		} finally {
 			request.signal?.removeEventListener("abort", abort);
 			unsubscribe?.();
@@ -809,19 +799,18 @@ export class GripAgent {
 		}
 	}
 
-	private createEmbeddedSubagentRunner(
+	private createEmbeddedJobRunner(
 		services: GripAgentServices,
 		excludedTools: string[],
 		allowedToolNames: string[] | undefined,
-	): SubagentRunner {
-		const runnerContext: EmbeddedSubagentRunnerContext = {
+	): JobRunner {
+		const runnerContext: EmbeddedJobRunnerContext = {
 			services,
 			excludedTools,
 			allowedToolNames,
-			children: this.activeSubagents,
+			children: this.activeJobs,
 		};
-		this._embeddedSubagentRunnerContext = runnerContext;
-		return (request) => this.runEmbeddedSubagent(request, runnerContext);
+		return (request) => this.runEmbeddedJob(request, runnerContext);
 	}
 
 	private shouldDiscoverProjectHooks(resolvedOptions: ResolveGripAgentSessionOptionsResult): boolean {
@@ -896,7 +885,6 @@ export class GripAgent {
 			toolOperations: resolvedOptions.toolOperations
 				? borrowToolOperations(resolvedOptions.toolOperations)
 				: this.borrowedToolOperations,
-			trustProjectAgents: resolvedOptions.trustProjectAgents ?? this.options.trustProjectAgents,
 			trustProjectHooks: resolvedOptions.trustProjectHooks ?? this.options.trustProjectHooks,
 		};
 	}
@@ -1018,16 +1006,6 @@ export class GripAgent {
 		});
 	}
 
-	private async discoverSessionSubagents(cwd: string, options: GripAgentSessionOptions): Promise<AvailableSubagent[]> {
-		if (
-			options.noTools ||
-			options.excludedTools?.includes("subagent") ||
-			(options.tools !== undefined && !options.tools.includes("subagent"))
-		)
-			return [];
-		return discoverAvailableSubagents(cwd, options.toolOperations);
-	}
-
 	private async buildAgentSession(
 		activeSession: Session,
 		sessionStartEvent?: SessionStartEvent,
@@ -1061,12 +1039,11 @@ export class GripAgent {
 			model,
 		);
 
-		const defaultActiveToolNames = getDefaultActiveToolNames(services.settingsManager.getEnableSubagents());
+		const defaultActiveToolNames = getDefaultActiveToolNames(services.settingsManager.getEnableJobs());
 		const allowedToolNames = sessionOptions.tools ?? (sessionOptions.noTools === "all" ? [] : undefined);
 		const initialActiveToolNames = [
 			...(sessionOptions.tools ?? (sessionOptions.noTools ? [] : defaultActiveToolNames)),
 		];
-		const availableSubagents = await this.discoverSessionSubagents(services.cwd, sessionOptions);
 		const extensionRunnerRef: ExtensionRunnerReference = {};
 		const agent = this.createCoreAgent(services, activeSession, model, thinkingLevel, extensionRunnerRef);
 
@@ -1090,16 +1067,10 @@ export class GripAgent {
 				customTools: sessionOptions.customTools,
 				toolOperations: sessionOptions.toolOperations,
 				modelRegistry: services.modelRegistry,
-				availableSubagents,
 				initialActiveToolNames,
 				excludedToolNames: sessionOptions.excludedTools,
 				allowedToolNames,
-				subagentRunner: this.createEmbeddedSubagentRunner(
-					services,
-					sessionOptions.excludedTools ?? [],
-					allowedToolNames,
-				),
-				trustProjectAgents: sessionOptions.trustProjectAgents,
+				jobRunner: this.createEmbeddedJobRunner(services, sessionOptions.excludedTools ?? [], allowedToolNames),
 				extensionRunnerRef,
 				sessionStartEvent,
 				loadedHooks: hookResolution.loadedHooks,
@@ -1186,48 +1157,6 @@ export class GripAgent {
 		return this._session;
 	}
 
-	/** Build the exact initial prompt for a named subagent without executing a task or requesting project trust. */
-	async previewSubagentSystemPrompt(name: string, agentScope: AgentScope = "user"): Promise<string> {
-		const operations = this.session.getToolOperations();
-		const backend = operations.getBackendInfo?.();
-		if (backend?.type === "remote" && !backend.configured) {
-			throw new Error("Subagents cannot run with an unconfigured remote backend.");
-		}
-		const workspaceCwd = operations.cwd ?? this.session.session.getCwd();
-		const discovery = await discoverAgentsWithOperations(workspaceCwd, agentScope, operations);
-		const preset = discovery.agents.find((agent) => agent.name === name);
-		if (!preset) throw new Error(`Unknown subagent: ${name} (agentScope: ${agentScope}).`);
-		const runnerContext = this._embeddedSubagentRunnerContext;
-		if (!runnerContext) throw new Error("Subagent runner is not configured for this session.");
-		const configuredModel = this.settingsManager.getSubagentModel(name);
-		const parentModel = this.session.model;
-		const request: SubagentRunRequest = {
-			cwd: preset.cwd ?? workspaceCwd,
-			toolOperations: operations,
-			prompt: "",
-			task: "",
-			agent: name,
-			agentSource: preset.source,
-			systemPrompt: preset.systemPrompt,
-			model:
-				configuredModel ||
-				process.env.GRIP_DEFAULT_SUBAGENT_MODEL?.trim() ||
-				(parentModel ? `${parentModel.provider}/${parentModel.id}` : undefined),
-			tools: preset.tools,
-			skills: preset.skills,
-			includeDefaultSkillTool: true,
-			onMessage: () => {},
-		};
-		const prepared = await this.createEmbeddedSubagent(request, runnerContext, true);
-		if (prepared.failure) throw new Error(prepared.failure.stderr);
-		const { child } = prepared;
-		try {
-			const childSession = await this.createEmbeddedSubagentSession(prepared);
-			return childSession.systemPrompt;
-		} finally {
-			await child.dispose();
-		}
-	}
 	get modelFallbackMessage(): string | undefined {
 		return this._modelFallbackMessage;
 	}
@@ -1581,8 +1510,8 @@ export class GripAgent {
 				this.toolOperationsDisposed = true;
 				await this.options.toolOperations?.dispose?.();
 			}
-			for (const child of this.activeSubagents) await child.dispose();
-			this.activeSubagents.clear();
+			for (const child of this.activeJobs) await child.dispose();
+			this.activeJobs.clear();
 		}
 	}
 }

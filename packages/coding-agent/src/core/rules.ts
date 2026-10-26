@@ -91,7 +91,7 @@ export function formatRulesForPrompt(rules: Rule[]): string {
 	return formatInstructionResourcesForPrompt(rules, {
 		intro: [
 			"The following rules provide mandatory constraints and policies.",
-			"Use the read tool to load a rule's file when the task or files match its description; applicable rules are mandatory.",
+			"Load a rule's file with an available workspace tool when the task or files match its description; applicable rules are mandatory.",
 			"When a rule file references a relative path, resolve it against the rule directory (parent of RULES.md / dirname of the path) and use that absolute path in tool commands.",
 		],
 		containerTag: "available_rules",

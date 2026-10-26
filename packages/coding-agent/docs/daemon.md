@@ -1,6 +1,6 @@
 # Remote Workspace Daemon
 
-`grip --daemon` starts Grip as a remote workspace runtime. A normal local Grip process remains the orchestrator: it owns provider credentials, model calls, prompts, sessions, compaction, extensions, subagents, RPC, and UI. The daemon owns one configured workspace and executes canonical workspace tools, primitive project-resource operations, streamed file transfers, and optional process execution.
+`grip --daemon` starts Grip as a remote workspace runtime. A normal local Grip process remains the orchestrator: it owns provider credentials, model calls, prompts, sessions, compaction, extensions, jobs, RPC, and UI. The daemon owns one configured workspace and executes canonical workspace tools, primitive project-resource operations, streamed file transfers, and optional process execution.
 
 Grip includes the daemon in the single-file executable; install a published, checksummed binary using [Quickstart](quickstart.md#install) or use a locally built executable. The daemon needs no npm installation on its host.
 

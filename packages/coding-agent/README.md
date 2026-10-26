@@ -6,7 +6,7 @@
 
 Grip is a minimal terminal coding harness. Adapt Grip to your workflows without forking and modifying its internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Rules](#rules), [Prompt Templates](#prompt-templates), and [Themes](#themes). Bundle those resources into [Grip Packages](#grip-packages) to share through npm or git.
 
-Grip ships with powerful defaults and built-in isolated subagent delegation, while leaving broader workflows such as plan mode to extensions and packages.
+Grip ships with powerful defaults and built-in isolated job delegation, while leaving broader workflows such as plan mode to extensions and packages.
 
 Grip runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps. The linked [openclaw/openclaw](https://github.com/openclaw/openclaw) is an upstream Pi SDK integration, not a verified Grip integration.
 
@@ -86,7 +86,7 @@ grip
 /login  # Then select provider
 ```
 
-Then just talk to Grip. By default, Grip gives the model file and shell tools plus `subagent` for bounded jobs; see [subagent usage](docs/usage.md#tool-options). Disable delegation via `/settings` or `"enableSubagents": false` in `settings.json` if you prefer. The model uses enabled tools to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [packages](#grip-packages).
+Then just talk to Grip. By default, Grip gives the model file and shell tools plus the `job` tool for bounded jobs; see [job usage](docs/usage.md#tool-options). Disable job delegation via `/settings` or `"enableJobs": false` in `settings.json` if you prefer. The model uses enabled tools to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [packages](#grip-packages).
 
 **Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 
@@ -170,7 +170,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/login`, `/logout` | Manage model-provider credentials |
 | `/websearch login` | Choose a web search engine and configure its API key |
 | `/model` | Switch models |
-| `/subagent list`, `/subagent model get/set --name <name> [--model <provider/model-id>]` | List presets and configure their models (interactive, with argument completion) |
+| `/job model show`, `/job model set --model <provider/model-id>`, `/job model clear` | Inspect, set, or clear the single global job model |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
@@ -296,7 +296,7 @@ Use `--offline` or `GRIP_OFFLINE=1` to disable all startup network operations de
 
 ## Remote Daemon
 
-`grip --daemon` starts an integrated remote workspace daemon from the `@greppleai/grip` package. The local Grip process remains the orchestrator for model calls, credentials, sessions, prompts, extensions, subagents, RPC, and UI; the daemon owns one confined workspace for canonical tools, project resources, file transfer, and optional process execution.
+`grip --daemon` starts an integrated remote workspace daemon from the `@greppleai/grip` package. The local Grip process remains the orchestrator for model calls, credentials, sessions, prompts, extensions, jobs, RPC, and UI; the daemon owns one confined workspace for canonical tools, project resources, file transfer, and optional process execution.
 
 Start a daemon:
 
@@ -522,7 +522,7 @@ Grip is aggressively extensible so it does not have to dictate your workflow. Fe
 
 **No MCP.** Build CLI tools with READMEs (see [Skills](#skills)), or build an extension that adds MCP support. [Why?](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)
 
-**Focused sub-agents.** The built-in `subagent` tool is enabled by default and offloads bounded jobs to fresh in-memory sessions with isolated conversations and shared authentication. Choose `explore` for codebase investigation, `reviewer` for independent review, or `worker` for a specific implementation; the parent verifies results and owns the final answer. Use `task` for one job, `tasks` for independent parallel jobs, or `chain` for sequential jobs. Run `/subagent list` to see available presets and `/subagent model set --name worker --model provider/model-id` to persist a model for a named preset. A named preset's configured model takes precedence over `GRIP_DEFAULT_SUBAGENT_MODEL`; otherwise runs inherit the parent model. Extensions and packages can provide other orchestration models.
+**Focused jobs.** The built-in `job` tool is enabled by default and offloads bounded tasks to fresh in-memory sessions with isolated conversations and shared authentication. Each child uses the main agent's normal prompt builder, including current project instructions and available skills, with a bounded-job overlay; the parent verifies results and owns the final answer. Pass `task` for one job, `tasks` for independent parallel jobs, or `chain` for sequential jobs with `{previous}` handoff. Each task can specify `tools`, `skills`, `cwd`, and `responseFormat`. Run `/job model set --model provider/model-id` to persist one global model for jobs, `/job model show` to inspect it, or `/job model clear` to restore the fallback: `GRIP_DEFAULT_JOB_MODEL`, then the parent model. Extensions and packages can provide other orchestration models.
 
 **No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
 
@@ -605,8 +605,9 @@ cat README.md | grip -p "Summarize this text"
 | `--remote-deferred` | Start with a deferred daemon backend and connect later with `/sandbox --attach <ws://url>` |
 | `--remote-cwd <path>` | Stable daemon workspace cwd for deferred remote mode |
 | `--daemon` | Start the integrated remote workspace daemon instead of a normal Grip session |
-Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `websearch`, `session_search`, `session_entry_get`, `compress_context`, and `subagent`. By default `read`, `bash`, `edit`, `write`, `websearch`, `session_search`, `session_entry_get`, and `subagent` are active. Context compression is opt-in via `/context-compression on`, `GRIP_CONTEXT_COMPRESSION=1`, or an explicit `--tools` allowlist. Background detection is separately opt-in via `/compress-detection on` or `GRIP_CONTEXT_COMPRESSION_DETECTION=1` and requires a configured detector model. Disable delegation with `/settings` or `"enableSubagents": false`; an explicit `--tools` allowlist can still select `subagent` independently. An explicit parent tool allowlist also limits tools available to its subagents; `--no-tools` and `--no-builtin-tools` remain authoritative.
+Available built-in tools include `read_image`, `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `websearch`, `session_search`, `session_entry_get`, `compress_context`, and `job`. By default `read_image`, `bash`, `write`, `websearch`, `session_search`, `session_entry_get`, and `job` are active; `read`, `edit`, `grep`, `find`, and `ls` remain available through explicit tool selection. Context compression is opt-in via `/context-compression on`, `GRIP_CONTEXT_COMPRESSION=1`, or an explicit `--tools` allowlist. Background detection is separately opt-in via `/compress-detection on` or `GRIP_CONTEXT_COMPRESSION_DETECTION=1` and requires a configured detector model. Disable job delegation with `/settings` or `"enableJobs": false`; an explicit `--tools` allowlist can still select `job` independently. An explicit parent tool allowlist also limits tools available to its jobs; `--no-tools` and `--no-builtin-tools` remain authoritative.
 
+The built-in `read_image` tool accepts image files only and returns an image payload for model input; it rejects text files without exposing their contents. The separate text-file `read` tool remains opt-in and must be selected explicitly (for example, `--tools read`). Large images may be resized, and image size/format limits and vision support depend on the selected model/provider.
 ### Resource Options
 
 | Option | Description |
@@ -704,7 +705,7 @@ grip --thinking high "Solve this complex problem"
 | `GRIP_CONTEXT_COMPRESSION` | Set to `1` to enable `compress_context` by default for all agents. Detection remains off |
 | `GRIP_CONTEXT_COMPRESSION_DETECTION` | Set to `1` to enable background detection and `compress_context` for all agents. Requires a configured `compressionDetectionModel` |
 | `GRIP_CACHE_RETENTION` | Set to `long` for extended prompt cache (Anthropic: 1h, OpenAI: 24h) |
-| `GRIP_DEFAULT_SUBAGENT_MODEL` | Optional `provider/model-id` used for built-in subagent runs without a named model override; unset inherits the parent model. An invalid/unavailable model fails the delegated job rather than silently falling back |
+| `GRIP_DEFAULT_JOB_MODEL` | Optional `provider/model-id` used for built-in jobs unless global `jobModel` is set; unset inherits the parent model. An invalid/unavailable model fails the job rather than silently falling back |
 | `VISUAL`, `EDITOR` | External editor for Ctrl+G |
 | `GRIP_DAEMON_HOST`, `GRIP_DAEMON_PORT`, `GRIP_DAEMON_CWD`, `GRIP_DAEMON_TOKEN` | Integrated daemon bind address, port, workspace root, and bearer token |
 | `GRIP_DAEMON_TEMP_ROOT` | Optional additional confined daemon temporary root; the default sandbox image uses `/tmp` |

@@ -409,7 +409,7 @@ describe("findCutPoint", () => {
 			createMessageEntry({
 				role: "toolResult",
 				toolCallId: "call-1",
-				toolName: "subagent",
+				toolName: "job",
 				content: [{ type: "text", text: "x".repeat(4000) }],
 				details: {},
 				isError: false,
@@ -427,7 +427,7 @@ describe("findCutPoint", () => {
 			createMessageEntry({
 				role: "toolResult",
 				toolCallId: "call-1",
-				toolName: "subagent",
+				toolName: "job",
 				content: [{ type: "text", text: "x".repeat(4000) }],
 				details: {},
 				isError: false,
@@ -449,24 +449,24 @@ describe("findCutPoint", () => {
 });
 
 describe("prepareBranchEntries", () => {
-	it("retains subagent tool results and omits structured-response internals", () => {
+	it("retains job tool results and omits structured-response internals", () => {
 		const assistant = createMessageEntry(createAssistantMessage("delegating"));
-		const subagentResult = createMessageEntry({
+		const jobResult = createMessageEntry({
 			role: "toolResult",
-			toolCallId: "subagent-1",
-			toolName: "subagent",
+			toolCallId: "job-1",
+			toolName: "job",
 			content: [{ type: "text", text: "child output" }],
 			details: { results: [{ messages: ["private child transcript".repeat(1000)] }] },
 			isError: false,
 			timestamp: Date.now(),
 		});
 		const hidden = createCustomMessageEntry("hidden extraction", "structured_response_internal");
-		const preparation = prepareBranchEntries([assistant, subagentResult, hidden]);
+		const preparation = prepareBranchEntries([assistant, jobResult, hidden]);
 
 		expect(preparation.messages.map((message) => message.role)).toEqual(["assistant", "toolResult"]);
 		expect(extractText(preparation.messages)).toContain("child output");
 		expect(extractText(preparation.messages)).not.toContain("hidden extraction");
-		expect(preparation.totalTokens).toBe(estimateTokens(assistant.message) + estimateTokens(subagentResult.message));
+		expect(preparation.totalTokens).toBe(estimateTokens(assistant.message) + estimateTokens(jobResult.message));
 	});
 });
 

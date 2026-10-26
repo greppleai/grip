@@ -126,8 +126,8 @@ export interface Settings {
 	prompts?: string[]; // Array of local prompt template paths or directories
 	themes?: string[]; // Array of local theme file paths or directories
 	enableSkillCommands?: boolean; // default: true - register skills and rules as /skill:name and /rule:name commands
-	enableSubagents?: boolean; // default: true - expose built-in subagent tools
-	subagentModels?: Record<string, string>; // Host-controlled per-preset provider/model-id overrides (global settings)
+	enableJobs?: boolean; // default: true - expose built-in job tools
+	jobModel?: string; // Global provider/model ID used for jobs
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
@@ -1123,35 +1123,26 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getEnableSubagents(): boolean {
-		return this.settings.enableSubagents ?? true;
+	getEnableJobs(): boolean {
+		return this.settings.enableJobs ?? true;
 	}
 
-	setEnableSubagents(enabled: boolean): void {
-		this.globalSettings.enableSubagents = enabled;
-		this.markModified("enableSubagents");
+	setEnableJobs(enabled: boolean): void {
+		this.globalSettings.enableJobs = enabled;
+		this.markModified("enableJobs");
 		this.save();
 	}
 
-	getSubagentModels(): Record<string, string> {
-		const stored: unknown = this.globalSettings.subagentModels;
-		if (!isMergeableObject(stored)) return Object.create(null) as Record<string, string>;
-		const models: Record<string, string> = Object.create(null);
-		for (const [name, model] of Object.entries(stored)) {
-			if (typeof model === "string" && model.trim()) setOwnValue(models, name, model);
-		}
-		return models;
+	getJobModel(): string | undefined {
+		const model = this.globalSettings.jobModel;
+		return typeof model === "string" && model.trim() ? model : undefined;
 	}
 
-	getSubagentModel(name: string): string | undefined {
-		return this.getSubagentModels()[name];
-	}
-
-	setSubagentModel(name: string, model: string): void {
-		if (!name.trim() || !model.trim()) throw new Error("A subagent name and model are required");
-		if (!isMergeableObject(this.globalSettings.subagentModels)) this.globalSettings.subagentModels = {};
-		setOwnValue(this.globalSettings.subagentModels, name, model);
-		this.markModified("subagentModels", name);
+	setJobModel(model: string | undefined): void {
+		if (model !== undefined && !model.trim()) throw new Error("A job model is required");
+		if (model === undefined) delete this.globalSettings.jobModel;
+		else this.globalSettings.jobModel = model;
+		this.markModified("jobModel");
 		this.save();
 	}
 

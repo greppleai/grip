@@ -15,7 +15,7 @@ export interface SystemPromptContextFile {
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
-	/** Tools to include in prompt. Default: [read, bash, edit, write, load_skill] */
+	/** Tools to include in prompt. Default: [bash, write, websearch, load_skill] */
 	selectedTools?: string[];
 	/** Optional one-line tool snippets keyed by tool name. */
 	toolSnippets?: Record<string, string>;
@@ -23,8 +23,8 @@ export interface BuildSystemPromptOptions {
 	promptGuidelines?: string[];
 	/** Text to append to system prompt. */
 	appendSystemPrompt?: string;
-	/** Built-in subagent catalog and guidance, when the built-in tool is active. */
-	subagentPrompt?: SubagentPromptParts;
+	/** Brief parent-agent job guidance, shown only when the built-in job tool is active. */
+	jobGuidance?: string;
 	/** Working directory. */
 	cwd: string;
 	/** Pre-loaded context files. */
@@ -35,20 +35,16 @@ export interface BuildSystemPromptOptions {
 	rules?: Rule[];
 }
 
-export interface SubagentPromptParts {
-	catalog: string;
-	guidance: string;
-}
 interface SystemPromptFinalizationOptions {
 	appendSystemPrompt?: string;
-	subagentPrompt?: SubagentPromptParts;
+	jobGuidance?: string;
 	includeGripDocumentation: boolean;
 	promptCwd: string;
 	date: string;
 	contextFiles: SystemPromptContextFile[];
 	skills: Skill[];
 	rules: Rule[];
-	hasRead: boolean;
+	canReadFiles: boolean;
 	hasLoadSkill: boolean;
 }
 
@@ -149,13 +145,12 @@ function finalizeSystemPrompt(prompt: string, options: SystemPromptFinalizationO
 		}
 		prompt += "</project_context>\n";
 	}
-	if (options.hasRead && options.rules.length > 0) prompt += formatRulesForPrompt(options.rules);
+	if (options.canReadFiles && options.rules.length > 0) prompt += formatRulesForPrompt(options.rules);
 	if (options.hasLoadSkill) {
 		const skillCatalog = formatSkillsForPrompt(options.skills);
 		if (skillCatalog) prompt += `\n\n## Skills${skillCatalog}`;
 	}
-	if (options.subagentPrompt?.catalog) prompt += `\n\n${options.subagentPrompt.catalog}`;
-	if (options.subagentPrompt?.guidance) prompt += `\n\n## Subagents\n${options.subagentPrompt.guidance}`;
+	if (options.jobGuidance) prompt += `\n\n## Jobs\n${options.jobGuidance}`;
 	if (options.includeGripDocumentation) prompt += `\n\n${formatGripDocumentation()}`;
 	prompt += `\nCurrent date: ${options.date}`;
 	prompt += `\nCurrent working directory: ${options.promptCwd}`;
@@ -164,18 +159,18 @@ function finalizeSystemPrompt(prompt: string, options: SystemPromptFinalizationO
 
 /** Build the system prompt with tools, guidelines, and context */
 export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
-	const tools = options.selectedTools || ["read", "bash", "edit", "write", "load_skill"];
+	const tools = options.selectedTools || ["bash", "write", "websearch", "load_skill"];
 	const basePrompt = options.customPrompt || buildDefaultSystemPrompt(options, tools);
 	return finalizeSystemPrompt(basePrompt, {
 		includeGripDocumentation: !options.customPrompt,
-		subagentPrompt: options.subagentPrompt,
+		jobGuidance: tools.includes("job") ? options.jobGuidance : undefined,
 		appendSystemPrompt: options.appendSystemPrompt,
 		promptCwd: options.cwd.replace(/\\/g, "/"),
 		date: getCurrentPromptDate(),
 		contextFiles: options.contextFiles ?? [],
 		skills: options.skills ?? [],
 		rules: options.rules ?? [],
-		hasRead: !options.selectedTools || tools.includes("read"),
+		canReadFiles: tools.includes("read") || tools.includes("bash"),
 		hasLoadSkill: tools.includes("load_skill"),
 	});
 }

@@ -1,6 +1,6 @@
 # Workspace Sandbox
 
-`/sandbox` is the user-only interactive command for workspace tool backends. It can show or clear the active backend, attach an existing sandbox daemon, or manage a Lima VM. Connections are remembered in memory while Grip runs. If `/resume` switches sessions while a sandbox is connected, the selected session uses that active connection; without a live connection, switching back to a session reconnects its remembered sandbox (if any). Local Grip retains provider credentials, model calls, session history, extensions, RPC, and UI; subagent workspace tools inherit the active backend.
+`/sandbox` is the user-only interactive command for workspace tool backends. It can show or clear the active backend, attach an existing sandbox daemon, or manage a Lima VM. Connections are remembered in memory while Grip runs. If `/resume` switches sessions while a sandbox is connected, the selected session uses that active connection; without a live connection, switching back to a session reconnects its remembered sandbox (if any). Local Grip retains provider credentials, model calls, session history, extensions, RPC, and UI; child job workspace tools inherit the active backend.
 
 The command appears in slash-command completion but not in model-visible catalogs, system prompts, tool definitions, templates, skills, or rules. This is not a permission boundary: a model with host shell access may still invoke Lima directly.
 
@@ -105,7 +105,7 @@ Shared startup requires guest `systemd-run --user`, `systemctl --user`, and `log
 
 Automatically named, process-owned VMs follow `sandbox.cleanup` on graceful Grip shutdown, subject to stopped-VM uncertainty. Tracked per-session named Lima daemons stop without stopping their VMs. A failed readiness check leaves uncertain guest state for manual reconciliation. Shared guest daemons and VMs remain running. Session switches reconnect remembered channels while the process remains running.
 
-Lima VMs are not complete security sandboxes. The workspace is mounted read/write and guest processes can modify it as the guest user. Subagents inherit the active workspace backend, reject host cwd overrides, and do not load host project context or extensions. The daemon token grants privileged workspace tool access. Reused VMs retain their own software, credentials, filesystem, and network access; use only trusted instances and Lima templates. Keep `sandbox.daemonHostBind` loopback-only unless you provide a separate trusted network/TLS boundary, and do not store secrets in the mounted workspace unless the guest should read them.
+Lima VMs are not complete security sandboxes. The workspace is mounted read/write and guest processes can modify it as the guest user. Child jobs inherit the active workspace backend and load project instructions through it; parent extensions are not loaded in children by default. The daemon token grants privileged workspace tool access. Reused VMs retain their own software, credentials, filesystem, and network access; use only trusted instances and Lima templates. Keep `sandbox.daemonHostBind` loopback-only unless you provide a separate trusted network/TLS boundary, and do not store secrets in the mounted workspace unless the guest should read them.
 
 ## Troubleshooting
 

@@ -46,7 +46,7 @@ export interface SettingsConfig {
 	autoResizeImages: boolean;
 	blockImages: boolean;
 	enableSkillCommands: boolean;
-	enableSubagents: boolean;
+	enableJobs: boolean;
 	steeringMode: QueueMode;
 	followUpMode: QueueMode;
 	transport: Transport;
@@ -81,7 +81,7 @@ export interface SettingsCallbacks {
 	onAutoResizeImagesChange: (enabled: boolean) => void;
 	onBlockImagesChange: (blocked: boolean) => void;
 	onEnableSkillCommandsChange: (enabled: boolean) => void;
-	onEnableSubagentsChange: (enabled: boolean) => void;
+	onEnableJobsChange: (enabled: boolean) => void;
 	onSteeringModeChange: (mode: QueueMode) => void;
 	onFollowUpModeChange: (mode: QueueMode) => void;
 	onTransportChange: (transport: Transport) => void;
@@ -433,17 +433,17 @@ export class SettingsSelectorComponent extends Container {
 			currentValue: config.enableSkillCommands ? "true" : "false",
 			values: ["true", "false"],
 		});
-
-		// Subagent toggle (insert after skill-commands)
+		// Job toggle (insert after skill commands)
 		items.splice(blockImagesIndex + 2, 0, {
-			id: "enable-subagents",
-			label: "Enable subagents",
-			description: "Expose built-in tools for delegating work to subagents",
-			currentValue: String(config.enableSubagents),
+			id: "enable-jobs",
+			label: "Enable jobs",
+			description: "Expose built-in tools for delegating work to jobs",
+			currentValue: String(config.enableJobs),
 			values: ["true", "false"],
 		});
 
-		// Hardware cursor toggle (insert after enable-subagents)
+		// Hardware cursor toggle (insert after enable-jobs)
+
 		items.splice(blockImagesIndex + 3, 0, {
 			id: "show-hardware-cursor",
 			label: "Show hardware cursor",
@@ -555,8 +555,8 @@ export class SettingsSelectorComponent extends Container {
 					case "skill-commands":
 						callbacks.onEnableSkillCommandsChange(newValue === "true");
 						break;
-					case "enable-subagents":
-						callbacks.onEnableSubagentsChange(newValue === "true");
+					case "enable-jobs":
+						callbacks.onEnableJobsChange(newValue === "true");
 						break;
 					case "steering-mode":
 						callbacks.onSteeringModeChange(newValue as "all" | "one-at-a-time");

@@ -169,8 +169,8 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `enableSubagents` | boolean | `true` | Enable the built-in `subagent` tool for bounded delegated jobs. Changes made in `/settings` apply immediately; `/reload` applies file edits. Set to `false` to opt out. An explicit CLI/SDK tool allowlist can still select the tool, while no-tools modes remain authoritative. |
-| `subagentModels` | object | `{}` | Global-only map of preset names to exact available `provider/model-id` references. Set with `/subagent model set --name <name> --model <provider/model-id>`; overrides `GRIP_DEFAULT_SUBAGENT_MODEL`, then the parent model. Applies on the next run, not to a running subagent. |
+| `enableJobs` | boolean | `true` | Enable the built-in `job` tool for bounded delegated tasks. Changes made in `/settings` apply immediately; `/reload` applies file edits. An explicit CLI/SDK tool allowlist can still select `job`, while no-tools modes remain authoritative. |
+| `jobModel` | string | - | Global-only exact available `provider/model-id` for all jobs. Set via `/job model set --model <provider/model-id>` and clear via `/job model clear`. Takes precedence over `GRIP_DEFAULT_JOB_MODEL`, then the parent model; applies on the next job, not to a running child. |
 | `tools` | object | `{}` | Per-tool configuration keyed by tool name |
 | `tools.websearch.provider` | string | `"duckduckgo"` | Web search provider: `"duckduckgo"`, `"brave"`, or `"firecrawl"` |
 | `tools.websearch.apiKey` | string | - | Provider API key. Brave env fallback: `GRIP_WEBSEARCH_BRAVE_API_KEY` or `BRAVE_SEARCH_API_KEY`. Firecrawl env fallback: `GRIP_WEBSEARCH_FIRECRAWL_API_KEY` or `FIRECRAWL_API_KEY` |

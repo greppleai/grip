@@ -336,7 +336,7 @@ export function printHelp(extensionFlags?: ExtensionFlag[]): void {
 					})
 					.join("\n")}\n`
 			: "";
-	console.log(`${chalk.bold(APP_NAME)} - AI coding assistant with read, bash, edit, write tools
+	console.log(`${chalk.bold(APP_NAME)} - AI coding assistant with shell and workspace tools
 
 ${chalk.bold("Usage:")}
   ${APP_NAME} [options] [@files...] [messages...]
@@ -502,9 +502,9 @@ ${chalk.bold("Environment Variables:")}
   GRIP_SHARE_VIEWER_URL            - Base URL for /share command (default: https://pi.dev/session/)
 
 ${chalk.bold("Built-in Tool Names:")}
-  read   - Read file contents
+  read   - Read file contents (off by default)
   bash   - Execute bash commands
-  edit   - Edit files with find/replace
+  edit   - Edit files with find/replace (off by default)
   write  - Write files (creates/overwrites)
   grep   - Search file contents (read-only, off by default)
   find   - Find files by glob pattern (read-only, off by default)
