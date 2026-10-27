@@ -2,6 +2,13 @@
 
 All notable changes to `@greppleai/grip-ai` are documented in this file.
 
+## [0.1.11](https://github.com/greppleai/grip/compare/@greppleai/grip-ai-v0.1.10...@greppleai/grip-ai-v0.1.11) (2026-10-27)
+
+
+### Bug Fixes
+
+* **sandbox:** sandbox-reattach - Preserve concurrent clients ([8f4d138](https://github.com/greppleai/grip/commit/8f4d138828998f6c653a307205caafbe80119834))
+
 ## [0.1.10](https://github.com/greppleai/grip/compare/@greppleai/grip-ai-v0.1.9...@greppleai/grip-ai-v0.1.10) (2026-10-27)
 
 
