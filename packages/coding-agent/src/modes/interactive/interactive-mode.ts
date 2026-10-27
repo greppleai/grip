@@ -23,6 +23,8 @@ import {
 	type OAuthPrompt,
 	type OAuthProviderId,
 	type OAuthSelectPrompt,
+	refreshImageModels,
+	refreshModelCatalog,
 	type TextContent,
 	type ToolCall,
 	type ToolResultMessage,
@@ -956,6 +958,8 @@ export class InteractiveMode {
 		const modelCommand = slashCommands.find((command) => command.name === "model");
 		if (modelCommand) {
 			modelCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
+				if ("--refresh".startsWith(prefix))
+					return [{ value: "--refresh", label: "--refresh", description: "Regenerate model catalog" }];
 				// Get available models (scoped or from registry)
 				const models =
 					this.session.scopedModels.length > 0
@@ -5336,7 +5340,50 @@ export class InteractiveMode {
 		});
 	}
 
+	private async refreshInteractiveModelCatalog(): Promise<void> {
+		if (/^(1|true|yes)$/i.test(process.env.GRIP_OFFLINE ?? "")) {
+			this.showError("Model catalog refresh is unavailable in offline mode");
+			return;
+		}
+		try {
+			let baseFailed = false;
+			try {
+				await refreshModelCatalog({
+					force: true,
+					cachePath: this.session.modelRegistry.catalogCachePath,
+				});
+			} catch {
+				baseFailed = true;
+				this.showWarning("Model catalog refresh failed; previous catalog retained");
+			}
+			await refreshImageModels({
+				force: true,
+				cachePath: this.session.modelRegistry.imageCatalogCachePath,
+			}).catch(() => {
+				this.showWarning("Image catalog refresh failed; previous catalog retained");
+			});
+			this.session.modelRegistry.refresh();
+			const codex = await this.session.modelRegistry.refreshCodexModels({ force: true });
+			if (codex.error) this.showWarning(`Codex models: ${codex.error.message}; using cached models`);
+			const openRouter = await this.session.modelRegistry.refreshOpenRouterModels({ force: true });
+			if (openRouter.error) this.showWarning(`OpenRouter models: ${openRouter.error.message}; using cached models`);
+			await this.updateAvailableProviderCount();
+			this.footer.invalidate();
+			if (baseFailed && (codex.error || codex.count === 0) && (openRouter.error || openRouter.count === 0)) {
+				this.showError("Model catalogs could not be refreshed; previous catalogs retained");
+			} else {
+				this.showStatus(`Model catalog refreshed: ${this.session.modelRegistry.getAll().length} models`);
+			}
+		} catch (error) {
+			this.showError(`Model catalog refresh failed; previous catalog retained: ${error}`);
+		}
+	}
+
 	private async handleModelCommand(searchTerm?: string): Promise<void> {
+		if (searchTerm === "--refresh") {
+			await this.refreshInteractiveModelCatalog();
+			return;
+		}
 		if (!searchTerm) {
 			this.showModelSelector();
 			return;
@@ -5896,7 +5943,7 @@ export class InteractiveMode {
 						: providerId === WEBSEARCH_AUTH_PROVIDER_IDS.firecrawl
 							? "Firecrawl (web search)"
 							: this.session.modelRegistry.getProviderDisplayName(providerId),
-				authType: credential.type,
+				authType: credential.type === "api_key" && credential.obtainedVia === "oauth" ? "oauth" : credential.type,
 			});
 		}
 
@@ -6073,6 +6120,18 @@ export class InteractiveMode {
 		previousModel: Model<any> | undefined,
 	): Promise<void> {
 		this.session.modelRegistry.refresh();
+		if (providerId === "openai-codex") {
+			const codex = await this.session.modelRegistry.refreshCodexModels({
+				offline: /^(1|true|yes)$/i.test(process.env.GRIP_OFFLINE ?? ""),
+			});
+			if (codex.error) this.showWarning(`Codex models: ${codex.error.message}; using cached models`);
+		}
+		if (providerId === "openrouter") {
+			const openRouter = await this.session.modelRegistry.refreshOpenRouterModels({
+				offline: /^(1|true|yes)$/i.test(process.env.GRIP_OFFLINE ?? ""),
+			});
+			if (openRouter.error) this.showWarning(`OpenRouter models: ${openRouter.error.message}; using cached models`);
+		}
 		const actionLabel = authType === "oauth" ? `Logged in to ${providerName}` : `Saved API key for ${providerName}`;
 		let selection: ProviderAuthenticationModelSelection = {};
 		if (isUnknownModel(previousModel)) {

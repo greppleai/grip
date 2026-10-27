@@ -2,7 +2,14 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@greppleai/grip-agent-core";
-import { fauxAssistantMessage, registerFauxProvider, type TextContent } from "@greppleai/grip-ai";
+import {
+	fauxAssistantMessage,
+	getApiProvider,
+	registerApiProvider,
+	registerFauxProvider,
+	type TextContent,
+	unregisterApiProviders,
+} from "@greppleai/grip-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../../../src/core/auth-storage.ts";
 import { GripAgent } from "../../../src/core/grip-agent.ts";
@@ -38,6 +45,12 @@ describe("regression #2860: replaced session callbacks", () => {
 			models: [{ id: "faux-1", reasoning: false }],
 		});
 		faux.setResponses(responses.map((response) => fauxAssistantMessage(response)));
+		const fauxStreamProvider = getApiProvider(faux.api);
+		if (!fauxStreamProvider) throw new Error("Faux API provider was not registered");
+		const restoredProviderSource = `test-2860:${tempDir}`;
+		const restoreFauxStream = () => {
+			if (!getApiProvider(faux.api)) registerApiProvider(fauxStreamProvider, restoredProviderSource);
+		};
 
 		const authStorage = AuthStorage.inMemory();
 		authStorage.setRuntimeApiKey(faux.getModel().provider, "faux-key");
@@ -75,6 +88,7 @@ describe("regression #2860: replaced session callbacks", () => {
 			resolveSessionOptions: () => ({ model: faux.getModel() }),
 		});
 		await runtime.createAgentSession();
+		restoreFauxStream();
 
 		const rebindSession = async (): Promise<void> => {
 			const session = runtime.session;
@@ -105,12 +119,16 @@ describe("regression #2860: replaced session callbacks", () => {
 
 		runtime.setRebindSession(async () => {
 			await rebindSession();
+			// Session reload resets stream registrations; keep this test's faux stream
+			// available for the prompt issued from the replacement session callback.
+			restoreFauxStream();
 		});
 		await rebindSession();
 
 		cleanups.push(async () => {
 			await runtime.dispose();
 			faux.unregister();
+			unregisterApiProviders(restoredProviderSource);
 			if (existsSync(tempDir)) {
 				rmSync(tempDir, { recursive: true, force: true });
 			}

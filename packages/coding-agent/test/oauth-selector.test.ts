@@ -63,6 +63,29 @@ describe("OAuthSelectorComponent", () => {
 		expect(output).toContain("subscription configured");
 	});
 
+	it("distinguishes OpenRouter browser-authorized keys from manually entered keys", () => {
+		const authStorage = AuthStorage.inMemory({
+			openrouter: { type: "api_key", key: "browser-key", obtainedVia: "oauth" },
+		});
+		const provider = [{ id: "openrouter", name: "OpenRouter", authType: "oauth" as const }];
+		const browserSelector = new OAuthSelectorComponent(
+			"login",
+			authStorage,
+			provider,
+			() => {},
+			() => {},
+		);
+		expect(stripAnsi(browserSelector.render(120).join("\n"))).toContain("OAuth sign-in configured (API key)");
+		authStorage.set("openrouter", { type: "api_key", key: "manual-key" });
+		const manualSelector = new OAuthSelectorComponent(
+			"login",
+			authStorage,
+			provider,
+			() => {},
+			() => {},
+		);
+		expect(stripAnsi(manualSelector.render(120).join("\n"))).toContain("API key configured (origin unknown)");
+	});
 	it("shows environment API key auth as configured", () => {
 		process.env.OPENAI_API_KEY = "test-openai-key";
 		const authStorage = AuthStorage.inMemory();

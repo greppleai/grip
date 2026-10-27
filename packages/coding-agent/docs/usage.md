@@ -70,7 +70,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 
 ## Model Selection
 
-Open `/model` or use `app.model.select` (Ctrl+L by default). The native picker **always starts with providers**, even when only one provider is available; it never skips straight to models.
+Open `/model` or use `app.model.select` (Ctrl+L by default). Run `/model --refresh` to force catalog regeneration from upstream (including image models), refresh your authenticated Codex model list, and filter OpenRouter built-ins by the models allowed for your API key. On failure, the last good key-specific catalog remains available. The native picker **always starts with providers**, even when only one provider is available; it never skips straight to models.
 
 - Type to filter providers by display name or ID. Each row shows its ID, model count in the active scope, and a check mark for the current provider.
 - Use Up/Down or PageUp/PageDown to navigate. Enter opens the highlighted provider without changing the model or saved default.

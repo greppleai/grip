@@ -39,6 +39,29 @@ describe("ModelRegistry", () => {
 			};
 			return [id, model];
 		});
+		const builtin = (provider: string, api: Api, id: string): Model<Api> => ({
+			id,
+			name: id,
+			provider,
+			api,
+			baseUrl: `https://${provider}.example.com/v1`,
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128000,
+			maxTokens: 8192,
+		});
+		const fixtures = {
+			openrouter: Object.fromEntries(openRouterModels),
+			anthropic: Object.fromEntries(
+				["claude-sonnet-test", "claude-opus-test"].map((id) => [
+					id,
+					builtin("anthropic", "anthropic-messages", id),
+				]),
+			),
+			google: { "gemini-test": builtin("google", "google-generative-ai", "gemini-test") },
+			openai: { "gpt-test": builtin("openai", "openai-responses", "gpt-test") },
+		};
 		writeFileSync(
 			catalogPath,
 			JSON.stringify({
@@ -46,7 +69,7 @@ describe("ModelRegistry", () => {
 				indexUrl: catalogUrl,
 				revision: "test-fixture",
 				fetchedAt: 0,
-				models: { openrouter: Object.fromEntries(openRouterModels) },
+				models: fixtures,
 			}),
 		);
 		vi.stubEnv("GRIP_MODEL_CATALOG_CACHE_PATH", catalogPath);
@@ -101,7 +124,106 @@ describe("ModelRegistry", () => {
 		return value.replace(/\\/g, "/").replace(/"/g, '\\"');
 	}
 
-	/** Create a baseUrl-only override (no custom models) */
+	test("uses account-scoped Codex discovery instead of the shared catalog", async () => {
+		authStorage.set("openai-codex", {
+			type: "oauth",
+			access: "test-access",
+			refresh: "test-refresh",
+			expires: Date.now() + 60000,
+			accountId: "acct-1",
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string) => {
+				if (String(input).includes("registry.npmjs.org")) return new Response(JSON.stringify({ version: "1.2.3" }));
+				return new Response(
+					JSON.stringify({
+						models: [
+							{
+								slug: "gpt-account-only",
+								display_name: "Account Only",
+								visibility: "list",
+								input_modalities: ["text", "image"],
+								context_window: 500000,
+								supported_reasoning_levels: [{ effort: "low" }],
+							},
+							{ slug: "review-hidden", visibility: "hide" },
+						],
+					}),
+				);
+			}),
+		);
+		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+		expect(registry.find("openai-codex", "gpt-account-only")).toBeUndefined();
+		const refreshed = await registry.refreshCodexModels();
+		expect(refreshed).toEqual({ count: 1 });
+		expect(registry.find("openai-codex", "gpt-account-only")?.contextWindow).toBe(500000);
+		expect(registry.find("openai-codex", "review-hidden")).toBeUndefined();
+		registry.refresh();
+		expect(registry.find("openai-codex", "gpt-account-only")).toBeDefined();
+		const offline = ModelRegistry.create(authStorage, modelsJsonPath);
+		await offline.refreshCodexModels({ offline: true });
+		expect(offline.find("openai-codex", "gpt-account-only")).toBeDefined();
+		authStorage.set("openai-codex", {
+			type: "oauth",
+			access: "other-access",
+			refresh: "other-refresh",
+			expires: Date.now() + 60000,
+			accountId: "acct-2",
+		});
+		registry.refresh();
+		expect(registry.find("openai-codex", "gpt-account-only")).toBeUndefined();
+		const second = ModelRegistry.create(authStorage, modelsJsonPath);
+		await second.refreshCodexModels({ offline: true });
+		expect(second.find("openai-codex", "gpt-account-only")).toBeUndefined();
+	});
+
+	test("filters OpenRouter built-ins using the API key's available model list", async () => {
+		authStorage.set("openrouter", { type: "api_key", key: "test-openrouter-key" });
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				async () =>
+					new Response(
+						JSON.stringify({
+							data: [
+								{ id: "anthropic/claude-sonnet-4", name: "Claude Sonnet", supported_parameters: ["tools"] },
+								{
+									id: "private/account-only",
+									name: "Account Only",
+									supported_parameters: ["tools"],
+									context_length: 65536,
+								},
+							],
+						}),
+					),
+			),
+		);
+		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+		expect(registry.getAll().filter((model) => model.provider === "openrouter").length).toBe(2);
+		const result = await registry.refreshOpenRouterModels();
+		expect(result).toEqual({ count: 2 });
+		expect(registry.find("openrouter", "anthropic/claude-sonnet-4")).toBeDefined();
+		expect(registry.find("openrouter", "private/account-only")?.contextWindow).toBe(65536);
+		expect(registry.find("openrouter", "anthropic/claude-opus-4.5")).toBeUndefined();
+		resetModelCatalog(); // Simulate a missing general catalog: account metadata must still populate the picker.
+		registry.refresh();
+		expect(
+			registry
+				.getAvailable()
+				.some((model) => model.provider === "openrouter" && model.id === "private/account-only"),
+		).toBe(true);
+		expect(registry.find("openrouter", "anthropic/claude-opus-4.5")).toBeUndefined();
+		const offline = ModelRegistry.create(authStorage, modelsJsonPath);
+		await offline.refreshOpenRouterModels({ offline: true });
+		expect(offline.find("openrouter", "anthropic/claude-sonnet-4")).toBeDefined();
+		expect(offline.find("openrouter", "private/account-only")).toBeDefined();
+		authStorage.set("openrouter", { type: "api_key", key: "other-openrouter-key" });
+		const other = ModelRegistry.create(authStorage, modelsJsonPath);
+		await other.refreshOpenRouterModels({ offline: true });
+		expect(other.getAll().filter((model) => model.provider === "openrouter")).toHaveLength(0);
+	});
+
 	function overrideConfig(baseUrl: string, headers?: Record<string, string>) {
 		return { baseUrl, ...(headers && { headers }) };
 	}

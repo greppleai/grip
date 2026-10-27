@@ -8,6 +8,7 @@ const tuiSrcIndex = fileURLToPath(new URL("../tui/src/index.ts", import.meta.url
 
 export default defineConfig({
 	test: {
+		setupFiles: [fileURLToPath(new URL("../ai/test/setup-model-catalog.ts", import.meta.url))],
 		globals: true,
 		environment: "node",
 		// Source tests must not use assets inherited from a running Grip binary.

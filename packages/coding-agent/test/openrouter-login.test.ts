@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 
@@ -11,14 +14,25 @@ describe("OpenRouter browser login storage", () => {
 			"fetch",
 			vi.fn(async () => new Response(JSON.stringify({ key: "sk-or-v1-minted" }), { status: 200 })),
 		);
-		const auth = AuthStorage.inMemory();
-		await auth.login("openrouter", {
-			onAuth: () => {},
-			onPrompt: async () => "",
-			onManualCodeInput: async () => `${REDIRECT_URI}?code=approved`,
-		});
-		expect(auth.get("openrouter")).toEqual({ type: "api_key", key: "sk-or-v1-minted" });
-		await expect(auth.getApiKey("openrouter")).resolves.toBe("sk-or-v1-minted");
+		const dir = mkdtempSync(join(tmpdir(), "grip-openrouter-login-"));
+		const authPath = join(dir, "auth.json");
+		try {
+			const auth = AuthStorage.create(authPath);
+			await auth.login("openrouter", {
+				onAuth: () => {},
+				onPrompt: async () => "",
+				onManualCodeInput: async () => `${REDIRECT_URI}?code=approved`,
+			});
+			expect(auth.get("openrouter")).toEqual({ type: "api_key", key: "sk-or-v1-minted", obtainedVia: "oauth" });
+			await expect(auth.getApiKey("openrouter")).resolves.toBe("sk-or-v1-minted");
+			expect(JSON.parse(readFileSync(authPath, "utf8")).openrouter).toEqual({
+				type: "api_key",
+				key: "sk-or-v1-minted",
+				obtainedVia: "oauth",
+			});
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("does not replace a previous key if the exchange fails", async () => {

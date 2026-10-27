@@ -6,6 +6,7 @@ export default defineConfig({
 		alias: [{ find: /^@greppleai\/grip-ai$/, replacement: fileURLToPath(new URL("../ai/src/index.ts", import.meta.url)) }],
 	},
 	test: {
+		setupFiles: [fileURLToPath(new URL("../ai/test/setup-model-catalog.ts", import.meta.url))],
 		globals: true,
 		environment: "node",
 		testTimeout: 30000, // 30 seconds for API calls

@@ -94,7 +94,7 @@ Then just talk to Grip. By default, Grip gives the model file and shell tools pl
 
 ## Providers & Models
 
-For each built-in provider, Grip maintains a list of tool-capable models, updated with every release. Authenticate via subscription (`/login`) or API key, then open `/model` (or Ctrl+L) to choose a provider and model. The provider screen always appears, even with only one provider. See [model selection and extension migration](docs/usage.md#model-selection) for navigation, scoped/all switching, and direct or cross-provider search.
+Grip generates built-in model catalogs from upstream metadata on first startup and caches them in `~/.grip/agent/` (or `GRIP_CODING_AGENT_DIR`). Once you sign in to Codex, Grip separately discovers the models listed for your ChatGPT account and caches them per account. With an OpenRouter key, Grip filters its model list using OpenRouter's user-specific endpoint and caches eligible IDs per key. First use requires network access; subsequent starts reuse the caches and check for updates. Run `/model --refresh` to fetch immediately, including account-filtered models; `--offline` uses cached catalogs without making startup requests. Authenticate via subscription (`/login`) or API key, then open `/model` (or Ctrl+L) to choose a provider and model. The provider screen always appears, even with only one provider. See [model selection and extension migration](docs/usage.md#model-selection) for navigation, scoped/all switching, and direct or cross-provider search.
 
 **Subscriptions:**
 - Anthropic Claude Pro/Max
