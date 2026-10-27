@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { FullscreenExitOutput } from "../../../src/core/settings-manager.ts";
+import type { ExtensionManagerReloadCoordinator } from "../../../src/modes/interactive/extension-manager-reload.ts";
 import { InteractiveMode, type ShutdownOptions } from "../../../src/modes/interactive/interactive-mode.ts";
 
 // Regression for upstream Pi issue #5080.
@@ -28,6 +29,8 @@ interface ShutdownUI {
 }
 
 interface ShutdownThis {
+	extensionManagerReload: Pick<ExtensionManagerReloadCoordinator, "dispose">;
+	disposeExtensionManager: () => Promise<void>;
 	isShuttingDown: boolean;
 	unregisterSignalHandlers: () => void;
 	runtimeHost: ShutdownRuntimeHost;
@@ -61,6 +64,8 @@ class ProcessExitError extends Error {}
 function createContext(order: string[], fullscreenExitOutput: FullscreenExitOutput = "resume-hint"): ShutdownThis {
 	return {
 		isShuttingDown: false,
+		extensionManagerReload: { dispose: vi.fn() },
+		disposeExtensionManager: vi.fn(async () => {}),
 		unregisterSignalHandlers: vi.fn(),
 		runtimeHost: {
 			dispose: vi.fn(async () => {

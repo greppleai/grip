@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ExtensionManagerReloadCoordinator } from "../src/modes/interactive/extension-manager-reload.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 interface SubmitDefaultEditor {
@@ -20,6 +21,7 @@ interface SubmitSession {
 }
 
 interface SubmitContext {
+	extensionManagerReload: Pick<ExtensionManagerReloadCoordinator, "trackCommand">;
 	defaultEditor: SubmitDefaultEditor;
 	editor: SubmitEditor;
 	session: SubmitSession;
@@ -47,6 +49,7 @@ function createSubmitContext(): SubmitContext {
 	Object.defineProperties(
 		context,
 		Object.getOwnPropertyDescriptors({
+			extensionManagerReload: { trackCommand: async (command: () => Promise<void>) => command() },
 			defaultEditor: {},
 			editor: {
 				addToHistory: vi.fn(),

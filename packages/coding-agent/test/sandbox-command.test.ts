@@ -20,6 +20,7 @@ import type {
 import { BUILTIN_SLASH_COMMANDS, HIDDEN_BUILTIN_SLASH_COMMAND_NAMES } from "../src/core/slash-commands.ts";
 import { buildSystemPrompt } from "../src/core/system-prompt.ts";
 import type { ToolBackendInfo } from "../src/core/tools/operations.ts";
+import type { ExtensionManagerReloadCoordinator } from "../src/modes/interactive/extension-manager-reload.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 interface SandboxSessionStub {
@@ -100,6 +101,7 @@ interface SandboxSubmitSession {
 }
 
 interface SubmitContext {
+	extensionManagerReload: Pick<ExtensionManagerReloadCoordinator, "trackCommand">;
 	defaultEditor: SandboxSubmitDefaultEditor;
 	editor: SandboxSubmitEditor;
 	session: SandboxSubmitSession;
@@ -116,6 +118,7 @@ function createSubmitContext(): SubmitContext {
 	Object.defineProperties(
 		context,
 		Object.getOwnPropertyDescriptors({
+			extensionManagerReload: { trackCommand: async (command: () => Promise<void>) => command() },
 			defaultEditor: {},
 			editor: {
 				addToHistory: vi.fn(),
