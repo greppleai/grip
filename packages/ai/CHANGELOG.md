@@ -2,6 +2,14 @@
 
 All notable changes to `@greppleai/grip-ai` are documented in this file.
 
+## [0.1.9](https://github.com/greppleai/grip/compare/@greppleai/grip-ai-v0.1.8...@greppleai/grip-ai-v0.1.9) (2026-10-27)
+
+
+### Features
+
+* **coding-agent:** add directory-selected settings profiles and sand… ([d956288](https://github.com/greppleai/grip/commit/d95628830f118794510a1bb3eb39324e7b798bb0))
+* **coding-agent:** add directory-selected settings profiles and sandbox preferences ([813c984](https://github.com/greppleai/grip/commit/813c984d6232445225e802956ef4a44681fa4e36))
+
 ## [0.1.8](https://github.com/greppleai/grip/compare/@greppleai/grip-ai-v0.1.7...@greppleai/grip-ai-v0.1.8) (2026-10-26)
 
 
