@@ -1153,7 +1153,7 @@ const key = getEnvApiKey('openai');  // checks OPENAI_API_KEY
 Several providers require OAuth authentication instead of static API keys:
 
 - **Anthropic** (Claude Pro/Max subscription)
-- **OpenAI Codex** (ChatGPT Plus/Pro subscription, access to GPT-5.x Codex models)
+- **OpenAI Codex** (ChatGPT Plus/Pro subscription; Grip discovers the account-specific model list after login)
 - **GitHub Copilot** (Copilot subscription)
 
 For paid Cloud Code Assist subscriptions, set `GOOGLE_CLOUD_PROJECT` or `GOOGLE_CLOUD_PROJECT_ID` to your project ID.
@@ -1284,7 +1284,7 @@ const response = await complete(model, {
 
 ### Provider Notes
 
-**OpenAI Codex**: Requires a ChatGPT Plus or Pro subscription. Provides access to GPT-5.x Codex models with extended context windows and reasoning capabilities. The library automatically handles session-based prompt caching when `sessionId` is provided in stream options. You can set `transport` in stream options to `"sse"`, `"websocket"`, or `"auto"` for Codex Responses transport selection. When using WebSocket with a `sessionId`, connections are reused per session and expire after 5 minutes of inactivity.
+**OpenAI Codex**: Requires a ChatGPT Plus or Pro subscription. Grip's coding agent discovers available models for the signed-in account at runtime; the standalone AI package does not bundle an account-specific catalog. The library automatically handles session-based prompt caching when `sessionId` is provided in stream options. You can set `transport` in stream options to `"sse"`, `"websocket"`, or `"auto"` for Codex Responses transport selection. When using WebSocket with a `sessionId`, connections are reused per session and expire after 5 minutes of inactivity.
 
 **Azure OpenAI (Responses)**: Uses the Responses API only. Set `AZURE_OPENAI_API_KEY` and either `AZURE_OPENAI_BASE_URL` or `AZURE_OPENAI_RESOURCE_NAME`. `AZURE_OPENAI_BASE_URL` supports both `https://<resource>.openai.azure.com` and `https://<resource>.cognitiveservices.azure.com`; root endpoints are normalized to `.../openai/v1` automatically. Use `AZURE_OPENAI_API_VERSION` (defaults to `v1`) to override the API version if needed. Deployment names are treated as model IDs by default, override with `azureDeploymentName` or `AZURE_OPENAI_DEPLOYMENT_NAME_MAP` using comma-separated `model-id=deployment` pairs (for example `gpt-4o-mini=my-deployment,gpt-4o=prod`). Legacy deployment-based URLs are intentionally unsupported.
 
@@ -1322,13 +1322,12 @@ Create a new provider file (for example `amazon-bedrock.ts`) that exports:
 - Add credential detection in `env-api-keys.ts` for the new provider
 - Ensure `streamSimple` handles auth lookup via `getEnvApiKey()` or provider-specific auth
 
-#### 4. Model Generation (`scripts/generate-models.ts`, `scripts/generate-image-models.ts`)
+#### 4. Runtime Model Catalog (`src/model-catalog-generator.ts`, `src/image-models.ts`)
 
 - Add logic to fetch and parse models from the provider's source (e.g., models.dev API)
-- Map chat/tool-capable provider model data to the standardized `Model` interface via `scripts/generate-models.ts`
-- Map image-generation provider model data to the standardized `ImagesModel` interface via `scripts/generate-image-models.ts`
+- Normalize chat/tool-capable model data in `src/model-catalog-generator.ts` and image models in `src/image-models.ts`
 - Handle provider-specific quirks (pricing format, capability flags, model ID transformations)
-
+- Do not generate catalogs at build time: Grip downloads and caches validated catalogs on startup or `/model --refresh`
 #### 5. Tests (`test/`)
 
 Create or update test files to cover the new provider:

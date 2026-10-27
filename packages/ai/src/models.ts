@@ -1,4 +1,4 @@
-import { MODELS } from "./models.generated.ts";
+import { generateModelCatalog } from "./model-catalog-generator.ts";
 import type { Api, KnownProvider, Model, ModelThinkingLevel, Usage, UsageCost } from "./types.ts";
 
 const MODEL_CATALOG_SCHEMA_VERSION = 1;
@@ -27,7 +27,7 @@ interface CachedModelCatalog {
 export interface ModelCatalogRefreshOptions {
 	/** URL of the upstream models/v1/index.json catalog index. Defaults to GRIP_MODEL_CATALOG_URL. */
 	indexUrl?: string;
-	/** Persistent cache file. Defaults to GRIP_MODEL_CATALOG_CACHE_PATH or ~/.cache/grip/model-catalog.json. */
+	/** Persistent cache file. Defaults to GRIP_MODEL_CATALOG_CACHE_PATH or ~/.grip/agent/model-catalog.json. */
 	cachePath?: string;
 	/** Reuse cache without a network request while it is this fresh. Default: 6 hours. */
 	ttlMs?: number;
@@ -62,6 +62,7 @@ type NodeFs = {
 	mkdirSync(path: string, options: NodeDirectoryCreationOptions): void;
 	readFileSync(path: string, encoding: BufferEncoding): string;
 	writeFileSync(path: string, content: string): void;
+	renameSync(oldPath: string, newPath: string): void;
 };
 
 type NodeOs = { homedir(): string };
@@ -79,7 +80,10 @@ function getNodeModelCatalogCachePath(): string | undefined {
 	const os = getNodeBuiltin<NodeOs>("os");
 	const path = getNodeBuiltin<NodePath>("path");
 	if (!os || !path) return undefined;
-	return path.join(os.homedir(), ".cache", "grip", "model-catalog.json");
+	return path.join(
+		process.env.GRIP_CODING_AGENT_DIR || path.join(os.homedir(), ".grip", "agent"),
+		"model-catalog.json",
+	);
 }
 
 const modelRegistry: Map<string, Map<string, Model<Api>>> = new Map();
@@ -109,7 +113,7 @@ function isModel(value: unknown, provider: string, id: string): value is Model<A
 	if (value.id !== id || value.provider !== provider) return false;
 	if (typeof value.name !== "string" || value.name.length === 0) return false;
 	if (typeof value.api !== "string" || value.api.length === 0) return false;
-	if (typeof value.baseUrl !== "string" || value.baseUrl.length === 0) return false;
+	if (typeof value.baseUrl !== "string" || (!value.baseUrl && provider !== "azure-openai-responses")) return false;
 	if (typeof value.reasoning !== "boolean") return false;
 	if (!isModelInput(value.input)) return false;
 	if (!isModelCost(value.cost)) return false;
@@ -128,6 +132,9 @@ function validateCatalogModels(value: unknown): Record<string, Record<string, Mo
 		}
 		providers[provider] = models;
 	}
+	if (Object.values(providers).every((models) => Object.keys(models).length === 0)) {
+		throw new Error("Model catalog is empty");
+	}
 	return providers;
 }
 
@@ -138,12 +145,9 @@ function countCatalogModels(models: Record<string, Record<string, Model<Api>>>):
 }
 
 function applyCatalogModels(models: Record<string, Record<string, Model<Api>>>): void {
+	modelRegistry.clear();
 	for (const [provider, providerModels] of Object.entries(models)) {
-		const registryProviderModels = modelRegistry.get(provider) ?? new Map<string, Model<Api>>();
-		for (const [id, model] of Object.entries(providerModels)) {
-			registryProviderModels.set(id, model);
-		}
-		modelRegistry.set(provider, registryProviderModels);
+		modelRegistry.set(provider, new Map(Object.entries(providerModels)));
 	}
 }
 
@@ -178,7 +182,9 @@ function writeCachedCatalog(cachePath: string | undefined, catalog: CachedModelC
 	const path = getNodeBuiltin<NodePath>("path");
 	if (!cachePath || !fs || !path) return;
 	fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-	fs.writeFileSync(cachePath, `${JSON.stringify(catalog, null, 2)}\n`);
+	const temporary = `${cachePath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+	fs.writeFileSync(temporary, `${JSON.stringify(catalog)}\n`);
+	fs.renameSync(temporary, cachePath);
 }
 
 function getCachePath(options?: Pick<ModelCatalogRefreshOptions, "cachePath">): string | undefined {
@@ -251,21 +257,9 @@ function validateCatalogIndex(value: unknown): ModelCatalogIndex {
 
 function initializeStaticRegistry(): void {
 	modelRegistry.clear();
-	for (const [provider, models] of Object.entries(MODELS)) {
-		const providerModels = new Map<string, Model<Api>>();
-		for (const [id, model] of Object.entries(models)) {
-			providerModels.set(id, model as Model<Api>);
-		}
-		modelRegistry.set(provider, providerModels);
-	}
 }
 
-initializeStaticRegistry();
-
-/**
- * Load a previously refreshed model catalog from disk and overlay it on the generated catalog.
- * This is synchronous so callers can update built-in model lists before constructing registries.
- */
+/** Load a previously validated catalog from disk before constructing registries. */
 export function loadCachedModelCatalog(
 	options: Pick<ModelCatalogRefreshOptions, "cachePath" | "indexUrl"> = {},
 ): ModelCatalogRefreshResult {
@@ -285,15 +279,35 @@ export function resetModelCatalog(): void {
 	initializeStaticRegistry();
 }
 
-/**
- * Fetch an upstream model catalog index, cache the selected revision, and overlay it on generated models.
- * The upstream format matches the catalog produced by the publish-model-catalog workflow.
- */
+/** Generate a validated snapshot locally instead of relying on a catalog publisher. */
+async function refreshFromProviders(
+	cachePath: string | undefined,
+	cached: CachedModelCatalog | undefined,
+	now: number,
+): Promise<ModelCatalogRefreshResult> {
+	try {
+		const models = validateCatalogModels(await generateModelCatalog());
+		const nextCached: CachedModelCatalog = {
+			schemaVersion: MODEL_CATALOG_SCHEMA_VERSION,
+			indexUrl: "",
+			revision: "runtime",
+			fetchedAt: now,
+			models,
+		};
+		writeCachedCatalog(cachePath, nextCached);
+		applyCatalogModels(models);
+		return createResult(models, { loaded: true, updated: true, fromCache: false, revision: "runtime" });
+	} catch (error) {
+		if (cached) applyCatalogModels(cached.models);
+		throw error;
+	}
+}
+
+/** Refresh the catalog from upstream providers (or an explicitly configured hosted index). */
 export async function refreshModelCatalog(
 	options: ModelCatalogRefreshOptions = {},
 ): Promise<ModelCatalogRefreshResult> {
 	const indexUrl = getIndexUrl(options);
-	if (!indexUrl) return createResult(undefined, { loaded: false, updated: false, fromCache: false });
 	const cachePath = getCachePath(options);
 	const cached = readCachedCatalog(cachePath, indexUrl);
 	const now = options.now?.() ?? Date.now();
@@ -308,7 +322,7 @@ export async function refreshModelCatalog(
 			revision: freshCache.revision,
 		});
 	}
-
+	if (!indexUrl) return refreshFromProviders(cachePath, cached, now);
 	const fetchImpl = options.fetch ?? fetch;
 	const headers = createConditionalCatalogHeaders(options, cached);
 	const indexResponse = await fetchImpl(indexUrl, { headers, signal: options.signal });
@@ -338,24 +352,43 @@ export async function refreshModelCatalog(
 	return createResult(models, { loaded: true, updated: true, fromCache: false, revision });
 }
 
-type ModelId<TProvider extends KnownProvider> = TProvider extends keyof typeof MODELS
-	? keyof (typeof MODELS)[TProvider]
-	: string;
+/** Dynamic model IDs are strings; known single-protocol providers retain their API type. */
+type ModelApi<TProvider extends KnownProvider, TModelId extends string> = TProvider extends
+	| "anthropic"
+	| "fireworks"
+	| "kimi-coding"
+	? "anthropic-messages"
+	: TProvider extends "amazon-bedrock"
+		? "bedrock-converse-stream"
+		: TProvider extends "google"
+			? "google-generative-ai"
+			: TProvider extends "google-vertex"
+				? "google-vertex"
+				: TProvider extends "mistral"
+					? "mistral-conversations"
+					: TProvider extends "openai-codex"
+						? "openai-codex-responses"
+						: TProvider extends "azure-openai-responses"
+							? "azure-openai-responses"
+							: TProvider extends "github-copilot"
+								? TModelId extends `claude-${string}`
+									? "anthropic-messages"
+									: "openai-responses"
+								: TProvider extends "openai"
+									? "openai-responses"
+									: TProvider extends
+												| "zai"
+												| "together"
+												| "openrouter"
+												| "groq"
+												| "cerebras"
+												| "deepseek"
+												| "xiaomi"
+												| `xiaomi-token-plan-${string}`
+										? "openai-completions"
+										: Api;
 
-type ModelApi<
-	TProvider extends KnownProvider,
-	TModelId extends ModelId<TProvider>,
-> = TProvider extends keyof typeof MODELS
-	? TModelId extends keyof (typeof MODELS)[TProvider]
-		? (typeof MODELS)[TProvider][TModelId] extends { api: infer TApi }
-			? TApi extends Api
-				? TApi
-				: never
-			: never
-		: Api
-	: Api;
-
-export function getModel<TProvider extends KnownProvider, TModelId extends ModelId<TProvider>>(
+export function getModel<TProvider extends KnownProvider, TModelId extends string>(
 	provider: TProvider,
 	modelId: TModelId,
 ): Model<ModelApi<TProvider, TModelId>> {
@@ -367,11 +400,9 @@ export function getProviders(): KnownProvider[] {
 	return Array.from(modelRegistry.keys()) as KnownProvider[];
 }
 
-export function getModels<TProvider extends KnownProvider>(
-	provider: TProvider,
-): Model<ModelApi<TProvider, ModelId<TProvider>>>[] {
+export function getModels<TProvider extends KnownProvider>(provider: TProvider): Model<ModelApi<TProvider, string>>[] {
 	const models = modelRegistry.get(provider);
-	return models ? (Array.from(models.values()) as Model<ModelApi<TProvider, ModelId<TProvider>>>[]) : [];
+	return models ? (Array.from(models.values()) as Model<ModelApi<TProvider, string>>[]) : [];
 }
 
 export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage): UsageCost {

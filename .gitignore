@@ -23,7 +23,9 @@ packages/*/dist-firefox/
 *.swo
 *~
 
-# Package specific
+# Local model probe output (account-specific; never commit)
+/models.json
+
 .npm/
 coverage/
 .nyc_output/

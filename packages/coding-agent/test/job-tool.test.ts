@@ -1,14 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	type Api,
-	fauxAssistantMessage,
-	fauxToolCall,
-	getModel,
-	type Model,
-	registerFauxProvider,
-} from "@greppleai/grip-ai";
+import { type Api, fauxAssistantMessage, fauxToolCall, type Model, registerFauxProvider } from "@greppleai/grip-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ENV_AGENT_DIR } from "../src/config.ts";
 import { DEFAULT_ACTIVE_TOOL_NAMES, getDefaultActiveToolNames } from "../src/core/agent-session.ts";
@@ -232,13 +225,25 @@ describe("job tool", () => {
 		});
 		process.env.GRIP_DEFAULT_JOB_MODEL = "env/model";
 		settings.setJobModel("global/model");
-		const ctx = context(cwd, getModel("openai-codex", "gpt-5.6"));
+		const parentModel: Model<"openai-completions"> = {
+			id: "parent-model",
+			name: "Parent",
+			api: "openai-completions",
+			provider: "faux",
+			baseUrl: "https://models.example",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 8192,
+			maxTokens: 4096,
+		};
+		const ctx = context(cwd, parentModel);
 		await definition.execute("one", { task: "one" }, undefined, undefined, ctx);
 		settings.setJobModel(undefined);
 		await definition.execute("two", { task: "two" }, undefined, undefined, ctx);
 		delete process.env.GRIP_DEFAULT_JOB_MODEL;
 		await definition.execute("three", { task: "three" }, undefined, undefined, ctx);
-		expect(received).toEqual(["global/model", "env/model", "openai-codex/gpt-5.6"]);
+		expect(received).toEqual(["global/model", "env/model", "faux/parent-model"]);
 	});
 
 	it("bounds retained messages and cancels queued parallel tasks after abort", async () => {

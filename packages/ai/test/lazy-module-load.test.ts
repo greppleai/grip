@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const aiEntryUrl = new URL("../src/index.ts", import.meta.url).href;
+const catalogFixturePath = fileURLToPath(new URL("./data/model-catalog-fixture.json", import.meta.url));
 
 const SDK_SPECIFIERS = [
 	"@anthropic-ai/sdk",
@@ -89,6 +90,7 @@ describe("lazy provider module loading", () => {
 
 	it("loads only the Anthropic SDK when dispatching through streamSimple", () => {
 		const result = runProbe(`
+			mod.loadCachedModelCatalog({ cachePath: ${JSON.stringify(catalogFixturePath)} });
 			const model = mod.getModel("anthropic", "claude-sonnet-4-6");
 			const context = { messages: [{ role: "user", content: "hi" }] };
 			await mod.streamSimple(model, context).result();

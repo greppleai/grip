@@ -1,6 +1,6 @@
 # Providers
 
-Grip supports subscription-based providers via OAuth and API key providers via environment variables or an auth file. For each provider, Grip knows all available models. The list is updated with every Grip release.
+Grip supports subscription-based providers via OAuth and API key providers via environment variables or an auth file. Grip generates the general model catalog on first startup and caches it locally. Once you log into Codex, Grip fetches the models available to your ChatGPT account from Codex's authenticated model endpoint and caches them separately per account under `~/.grip/agent/codex-models/`. When an OpenRouter API key is configured, Grip fetches the models permitted by your OpenRouter preferences and guardrails and caches the eligible IDs separately per key under `~/.grip/agent/openrouter-models/`. `/model --refresh` updates these catalogs; failed requests retain the last good results. First use needs network access.
 
 ## Table of Contents
 
@@ -24,6 +24,8 @@ Use `/logout` to clear credentials. Tokens are stored in `~/.grip/agent/auth.jso
 ### OpenAI Codex
 
 - Requires ChatGPT Plus or Pro subscription
+- Models are discovered for your signed-in ChatGPT account at startup, after `/login`, and with `/model --refresh`. Only listed models appear in the picker. Cached models are available offline.
+- The Codex catalog does not publish output-token limits or per-token pricing; Grip uses a conservative output limit and shows zero token cost for subscription requests.
 - Officially endorsed by OpenAI: [Codex for OSS](https://developers.openai.com/community/codex-for-oss)
 
 ### Claude Pro/Max
@@ -75,7 +77,7 @@ grip
 | Xiaomi MiMo Token Plan (Amsterdam) | `XIAOMI_TOKEN_PLAN_AMS_API_KEY` | `xiaomi-token-plan-ams` |
 | Xiaomi MiMo Token Plan (Singapore) | `XIAOMI_TOKEN_PLAN_SGP_API_KEY` | `xiaomi-token-plan-sgp` |
 
-OpenRouter browser sign-in (`/login` → Sign in (subscriptions or OpenRouter credits) → OpenRouter) uses PKCE to request a durable API key on your OpenRouter account. Requests are billed to your OpenRouter credits; this is **not** a subscription login and OpenRouter does not issue a refresh token. Grip stores the resulting key in `auth.json` as an API key. If it is revoked, sign in again. You can still paste an existing API key or set `OPENROUTER_API_KEY` instead.
+OpenRouter browser sign-in (`/login` → Sign in (subscriptions or OpenRouter credits) → OpenRouter) uses OAuth/PKCE to exchange an authorization code for a **durable API key**, not an access/refresh token pair ([OpenRouter OAuth documentation](https://openrouter.ai/docs/guides/overview/auth/oauth)). Requests are billed to your OpenRouter credits; this is **not** a subscription login. Grip stores `{ "type": "api_key", "key": "...", "obtainedVia": "oauth" }` in `auth.json` after browser sign-in so `/login` can distinguish it from a manually supplied API key; no refresh token is issued or stored. Keys saved before this distinction was added cannot be identified retroactively: sign in through `/login` again to label one as browser-authorized. If the key is revoked, sign in again. You can still paste an existing API key or set `OPENROUTER_API_KEY` instead. With a key configured, Grip loads tool-capable models and metadata directly from [OpenRouter's user-filtered models endpoint](https://openrouter.ai/docs/api/api-reference/models/list-models-filtered-by-user-provider-preferences-privacy-settings-and-guardrails), even if the general catalog is unavailable. Explicit custom models in `models.json` are unaffected. A key with no cached response requires network access to show OpenRouter built-in models.
 
 Reference for environment variables and `auth.json` keys: [`const envMap`](../../ai/src/env-api-keys.ts) in `packages/ai/src/env-api-keys.ts`.
 

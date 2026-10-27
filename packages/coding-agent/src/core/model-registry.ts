@@ -2,6 +2,7 @@
  * Model registry - manages built-in and custom models, provides API key resolution.
  */
 
+import { createHash } from "node:crypto";
 import {
 	type AnthropicMessagesCompat,
 	type Api,
@@ -23,7 +24,7 @@ import {
 } from "@greppleai/grip-ai";
 import { registerOAuthProvider, resetOAuthProviders } from "@greppleai/grip-ai/oauth";
 import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { dirname, join } from "path";
 import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { TLocalizedValidationError } from "typebox/error";
@@ -32,6 +33,8 @@ import { warnDeprecation } from "../utils/deprecation.ts";
 import { stripJsonComments } from "../utils/json.ts";
 import { normalizePath } from "../utils/paths.ts";
 import type { AuthStatus, AuthStorage } from "./auth-storage.ts";
+import { loadCachedCodexModelCatalog, refreshCodexModelCatalog } from "./codex-model-catalog.ts";
+import { refreshOpenRouterModelCatalog } from "./openrouter-model-catalog.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "./provider-display-names.ts";
 import {
 	clearConfigValueCache,
@@ -231,6 +234,16 @@ function formatValidationPath(error: TLocalizedValidationError): string {
 interface ProviderOverride {
 	baseUrl?: string;
 	compat?: Model<Api>["compat"];
+}
+
+interface ScopedModelRefreshOptions {
+	force?: boolean;
+	offline?: boolean;
+}
+
+interface ScopedModelRefreshResult {
+	count: number;
+	error?: Error;
 }
 
 interface ProviderRequestConfig {
@@ -479,16 +492,33 @@ export class ModelRegistry {
 	private loadError: string | undefined = undefined;
 	readonly authStorage: AuthStorage;
 	private modelsJsonPath: string | undefined;
+	readonly catalogCachePath: string;
+	readonly imageCatalogCachePath: string;
+	readonly codexCatalogCacheDir: string;
+	readonly openRouterCatalogCacheDir: string;
+	private codexModels: Model<"openai-codex-responses">[] = [];
+	private codexAccountId: string | undefined;
+	private openRouterAllowedIds: Set<string> | undefined;
+	private openRouterModels: Model<"openai-completions">[] = [];
+	private openRouterKeyHash: string | undefined;
 
-	private constructor(authStorage: AuthStorage, modelsJsonPath: string | undefined) {
+	private constructor(authStorage: AuthStorage, modelsJsonPath: string | undefined, catalogCachePath?: string) {
 		this.authStorage = authStorage;
 		this.modelsJsonPath = modelsJsonPath ? normalizePath(modelsJsonPath) : undefined;
-		loadCachedModelCatalog();
+		this.catalogCachePath =
+			process.env.GRIP_MODEL_CATALOG_CACHE_PATH ?? catalogCachePath ?? join(getAgentDir(), "model-catalog.json");
+		this.imageCatalogCachePath = join(modelsJsonPath ? dirname(modelsJsonPath) : getAgentDir(), "image-models.json");
+		this.codexCatalogCacheDir = join(modelsJsonPath ? dirname(modelsJsonPath) : getAgentDir(), "codex-models");
+		this.openRouterCatalogCacheDir = join(
+			modelsJsonPath ? dirname(modelsJsonPath) : getAgentDir(),
+			"openrouter-models",
+		);
+		loadCachedModelCatalog({ cachePath: this.catalogCachePath });
 		this.loadModels();
 	}
 
 	static create(authStorage: AuthStorage, modelsJsonPath: string = join(getAgentDir(), "models.json")): ModelRegistry {
-		return new ModelRegistry(authStorage, modelsJsonPath);
+		return new ModelRegistry(authStorage, modelsJsonPath, join(dirname(modelsJsonPath), "model-catalog.json"));
 	}
 
 	static inMemory(authStorage: AuthStorage): ModelRegistry {
@@ -514,6 +544,103 @@ export class ModelRegistry {
 		}
 	}
 
+	/** Discover Codex models only for the authenticated ChatGPT account. */
+	async refreshCodexModels(options: ScopedModelRefreshOptions = {}): Promise<ScopedModelRefreshResult> {
+		const credential = this.authStorage.get("openai-codex");
+		if (credential?.type !== "oauth" || typeof credential.accountId !== "string" || !credential.accountId) {
+			this.codexModels = [];
+			this.codexAccountId = undefined;
+			this.refresh();
+			return { count: 0 };
+		}
+		const accountId = credential.accountId;
+		let models: Model<"openai-codex-responses">[];
+		let error: Error | undefined;
+		if (options.offline) {
+			models = await loadCachedCodexModelCatalog(accountId, this.codexCatalogCacheDir);
+		} else {
+			// AuthStorage handles locked token refresh; never use a CLI/API-key override for this endpoint.
+			let accessToken: string | undefined;
+			try {
+				accessToken = await this.authStorage.getApiKey("openai-codex", { includeFallback: false });
+			} catch {
+				// Auth refresh failures must not block startup or expose credential-bearing errors.
+			}
+			const current = this.authStorage.get("openai-codex");
+			if (
+				current?.type === "oauth" &&
+				current.accountId === accountId &&
+				current.access === accessToken &&
+				accessToken
+			) {
+				const result = await refreshCodexModelCatalog({
+					accessToken,
+					accountId,
+					cacheDir: this.codexCatalogCacheDir,
+					force: options.force,
+				});
+				models = result.models;
+				error = result.error;
+			} else {
+				models = await loadCachedCodexModelCatalog(accountId, this.codexCatalogCacheDir);
+				error = new Error("Unable to refresh Codex OAuth token");
+			}
+		}
+		if (error && models.length === 0 && this.codexAccountId === accountId) models = this.codexModels;
+		// Authentication may change while the catalog request is in flight.
+		const latest = this.authStorage.get("openai-codex");
+		if (latest?.type !== "oauth" || latest.accountId !== accountId) return { count: 0 };
+		this.codexAccountId = accountId;
+		this.codexModels = models;
+		this.refresh();
+		return { count: models.length, ...(error ? { error } : {}) };
+	}
+
+	/** Filter the public OpenRouter metadata to models enabled for this API key. */
+	async refreshOpenRouterModels(options: ScopedModelRefreshOptions = {}): Promise<ScopedModelRefreshResult> {
+		let apiKey: string | undefined;
+		try {
+			apiKey = await this.getApiKeyForProvider("openrouter");
+		} catch {
+			// Never expose credentials in auth resolution errors.
+		}
+		if (!apiKey) {
+			this.openRouterAllowedIds = undefined;
+			this.openRouterModels = [];
+			this.openRouterKeyHash = undefined;
+			this.refresh();
+			return { count: 0 };
+		}
+		const keyHash = createHash("sha256").update(apiKey).digest("hex");
+		const result = await refreshOpenRouterModelCatalog({
+			apiKey,
+			cacheDir: this.openRouterCatalogCacheDir,
+			force: options.force,
+			offline: options.offline,
+		});
+		// Auth may be replaced while the request is in flight.
+		let currentKey: string | undefined;
+		try {
+			currentKey = await this.getApiKeyForProvider("openrouter");
+		} catch {
+			return { count: 0 };
+		}
+		if (currentKey !== apiKey) return { count: 0 };
+		let ids = result.ids;
+		let models = result.models;
+		if (result.error && ids.length === 0 && this.openRouterKeyHash === keyHash && this.openRouterAllowedIds) {
+			ids = [...this.openRouterAllowedIds];
+			models = this.openRouterModels;
+		}
+		this.openRouterKeyHash = keyHash;
+		this.openRouterAllowedIds = new Set(ids);
+		this.openRouterModels = models;
+		this.refresh();
+		return {
+			count: this.getAll().filter((model) => model.provider === "openrouter").length,
+			...(result.error ? { error: result.error } : {}),
+		};
+	}
 	/**
 	 * Get any error from loading models.json (undefined if no error).
 	 */
@@ -554,8 +681,31 @@ export class ModelRegistry {
 		overrides: Map<string, ProviderOverride>,
 		modelOverrides: Map<string, Map<string, ModelOverride>>,
 	): Model<Api>[] {
-		return getProviders().flatMap((provider) => {
-			const models = getModels(provider as KnownProvider) as Model<Api>[];
+		const credential = this.authStorage.get("openai-codex");
+		const accountId = credential?.type === "oauth" ? credential.accountId : undefined;
+		const codexModels = accountId === this.codexAccountId ? this.codexModels : [];
+		const openRouterBaseModels = getModels("openrouter") as Model<Api>[];
+		const openRouterBaseIds = new Set(openRouterBaseModels.map((model) => model.id));
+		const openRouterAccountOnlyModels = this.openRouterAllowedIds
+			? this.openRouterModels.filter(
+					(model) => this.openRouterAllowedIds?.has(model.id) && !openRouterBaseIds.has(model.id),
+				)
+			: [];
+		return [...new Set([...getProviders(), "openai-codex" as const, "openrouter" as const])].flatMap((provider) => {
+			// The shared catalog is account-independent; Codex discovery replaces any generic entries.
+			const baseModels =
+				provider === "openai-codex"
+					? codexModels
+					: provider === "openrouter"
+						? openRouterBaseModels
+						: (getModels(provider as KnownProvider) as Model<Api>[]);
+			const models =
+				provider === "openrouter" && this.openRouterAllowedIds
+					? [
+							...baseModels.filter((model) => this.openRouterAllowedIds?.has(model.id)),
+							...openRouterAccountOnlyModels,
+						]
+					: baseModels;
 			const providerOverride = overrides.get(provider);
 			const perModelOverrides = modelOverrides.get(provider);
 

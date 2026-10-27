@@ -30,6 +30,8 @@ import { resolveConfigValue } from "./resolve-config-value.ts";
 export type ApiKeyCredential = {
 	type: "api_key";
 	key: string;
+	/** An OAuth/PKCE browser exchange produced this durable key (not refreshable tokens). */
+	obtainedVia?: "oauth";
 };
 
 export type OAuthCredential = {
@@ -528,7 +530,7 @@ export class AuthStorage {
 		this.set(
 			providerId,
 			provider.storeAsApiKey
-				? { type: "api_key", key: provider.getApiKey(credentials) }
+				? { type: "api_key", key: provider.getApiKey(credentials), obtainedVia: "oauth" }
 				: { type: "oauth", ...credentials },
 		);
 	}

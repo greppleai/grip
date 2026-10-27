@@ -6,6 +6,7 @@ import {
 	type ImageContent,
 	type Message,
 	type Model,
+	refreshImageModels,
 	refreshModelCatalog,
 	streamSimple,
 	type TextContent,
@@ -531,13 +532,35 @@ export class GripAgent {
 		return stdinContent;
 	}
 
+	private async refreshStartupModelCatalog(): Promise<void> {
+		if (this.options.modelRegistry || /^(1|true|yes)$/i.test(process.env.GRIP_OFFLINE ?? "")) return;
+		const cachePath = process.env.GRIP_MODEL_CATALOG_CACHE_PATH ?? join(this.agentDir, "model-catalog.json");
+		try {
+			await refreshModelCatalog({ cachePath });
+		} catch (error) {
+			if (this._mode !== "rpc")
+				console.error(`Model catalog refresh failed; using cached or custom models: ${error}`);
+		}
+		void refreshImageModels({ cachePath: join(this.agentDir, "image-models.json") }).catch(() => undefined);
+	}
+
+	private async refreshStartupAccountModels(modelRegistry: ModelRegistry): Promise<void> {
+		if (this.options.modelRegistry) return;
+		const offline = /^(1|true|yes)$/i.test(process.env.GRIP_OFFLINE ?? "");
+		const codex = await modelRegistry.refreshCodexModels({ offline });
+		if (codex.error && this._mode !== "rpc")
+			console.error(`Codex catalog: ${codex.error.message}; using cached models`);
+		const openRouter = await modelRegistry.refreshOpenRouterModels({ offline });
+		if (openRouter.error && this._mode !== "rpc")
+			console.error(`OpenRouter catalog: ${openRouter.error.message}; using cached models`);
+	}
+
 	private async createServices(cwd: string): Promise<GripAgentServices> {
 		const settingsManager = this.options.settingsManager ?? SettingsManager.create(cwd, this.agentDir);
-		if (process.env.GRIP_MODEL_CATALOG_URL) {
-			await refreshModelCatalog().catch(() => undefined);
-		}
+		await this.refreshStartupModelCatalog();
 		const modelRegistry =
 			this.options.modelRegistry ?? ModelRegistry.create(this.authStorage, join(this.agentDir, "models.json"));
+		await this.refreshStartupAccountModels(modelRegistry);
 		const diagnostics: GripAgentDiagnostic[] = [];
 		let resourceLoader = this.options.resourceLoader;
 		if (!resourceLoader) {
