@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createEventBus, type EventBusController } from "../../../src/core/event-bus.ts";
+import { createExtensionInventory } from "../../../src/core/extension-inventory.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../../../src/core/extensions/loader.ts";
 import type {
 	ExtensionAPI,
@@ -39,6 +40,14 @@ async function createReloadableResourceLoader(factory: ExtensionFactory, eventBu
 
 	const resourceLoader: ResourceLoader = {
 		getExtensions: () => extensionsResult,
+		getExtensionInventory: async () =>
+			createExtensionInventory({
+				configuredPackages: [],
+				resources: [],
+				diagnostics: [],
+				result: extensionsResult,
+				noExtensions: false,
+			}),
 		getSkills: () => ({ skills, diagnostics: [] }),
 		getRules: () => ({ rules, diagnostics: [] }),
 		getPrompts: () => ({ prompts: [], diagnostics: [] }),

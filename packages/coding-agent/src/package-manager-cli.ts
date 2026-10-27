@@ -108,11 +108,14 @@ function printPackageCommandHelp(command: PackageCommand): void {
   ${getPackageCommandUsage("install")}
 
 Install a package and add it to settings.
+Official sources (official:<id>) install published compatible stable releases globally;
+-l/--local is not supported for official sources. Git and npm are not required.
 
 Options:
   -l, --local    Install project-locally (.grip/settings.json)
 
 Examples:
+  ${APP_NAME} install official:<id>
   ${APP_NAME} install npm:@foo/bar
   ${APP_NAME} install git:github.com/user/repo
   ${APP_NAME} install git:git@github.com:user/repo
@@ -127,12 +130,15 @@ Examples:
   ${getPackageCommandUsage("remove")}
 
 Remove a package and its source from settings.
+Official sources are global-only. Removing one deselects it but retains immutable
+code for running processes; manual extensions and user data are not removed.
 Alias: ${APP_NAME} uninstall <source> [-l]
 
 Options:
   -l, --local    Remove from project settings (.grip/settings.json)
 
 Examples:
+  ${APP_NAME} remove official:<id>
   ${APP_NAME} remove npm:@foo/bar
   ${APP_NAME} uninstall npm:@foo/bar
 `);
@@ -143,6 +149,7 @@ Examples:
   ${getPackageCommandUsage("update")}
 
 Update grip and installed packages.
+Official sources update independently to the newest compatible published stable release.
 
 Options:
   --self                  Update grip only
@@ -154,6 +161,7 @@ Short forms:
   ${APP_NAME} update                Update grip and all extensions
   ${APP_NAME} update <source>       Update one package
   ${APP_NAME} update grip           Update grip only (self works as alias to grip)
+  ${APP_NAME} update official:<id>  Update one official extension, not grip itself
 `);
 			return;
 
@@ -161,7 +169,8 @@ Short forms:
 			console.log(`${chalk.bold("Usage:")}
   ${getPackageCommandUsage("list")}
 
-List installed packages from user and project settings.
+List configured packages from user and project settings, including missing or failed
+installations. Official entries include their validated installed version.
 `);
 			return;
 	}
@@ -432,10 +441,13 @@ function printConfiguredPackage(pkg: ConfiguredPackage): void {
 	const display = pkg.filtered ? `${pkg.source} (filtered)` : pkg.source;
 	console.log(`  ${display}`);
 	if (pkg.installedPath) console.log(chalk.dim(`    ${pkg.installedPath}`));
+	if (pkg.version) console.log(chalk.dim(`    v${pkg.version}`));
+	if (pkg.error) console.log(chalk.red(`    ${pkg.error}`));
+	if (!pkg.installedPath && !pkg.error) console.log(chalk.dim("    Not installed"));
 }
 
-function listConfiguredPackages(packageManager: DefaultPackageManager): void {
-	const configuredPackages = packageManager.listConfiguredPackages();
+async function listConfiguredPackages(packageManager: DefaultPackageManager): Promise<void> {
+	const configuredPackages = await packageManager.listConfiguredPackages();
 	const userPackages = configuredPackages.filter((pkg) => pkg.scope === "user");
 	const projectPackages = configuredPackages.filter((pkg) => pkg.scope === "project");
 	if (configuredPackages.length === 0) {
@@ -517,7 +529,7 @@ async function executePackageCommand(
 			return true;
 		}
 		case "list":
-			listConfiguredPackages(packageManager);
+			await listConfiguredPackages(packageManager);
 			return true;
 		case "update": {
 			const target = options.updateTarget ?? { type: "all" };

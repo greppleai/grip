@@ -1,6 +1,8 @@
 import { Container } from "@greppleai/grip-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import type { AgentSession } from "../src/core/agent-session.ts";
 import type { ToolBackendInfo } from "../src/core/tools/operations.ts";
+import { ExtensionManagerReloadCoordinator } from "../src/modes/interactive/extension-manager-reload.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 
@@ -16,9 +18,11 @@ function createReloadMode(backend: () => ToolBackendInfo, reload: () => Promise<
 	const mode = Object.assign(Object.create(InteractiveMode.prototype), {
 		runtimeHost: {
 			session: {
+				isIdle: true,
 				isStreaming: false,
 				isCompacting: false,
 				reload,
+				waitForIdle: vi.fn(async () => {}),
 				getToolBackendInfo: backend,
 				resourceLoader: { getThemes: () => ({ themes: [] }) },
 				extensionRunner: {},
@@ -60,6 +64,14 @@ function createReloadMode(backend: () => ToolBackendInfo, reload: () => Promise<
 		showStatus: vi.fn(),
 		showError: vi.fn(),
 	}) as InteractiveMode;
+	const reloadResources = Reflect.get(mode, "reloadResources") as (session: AgentSession) => Promise<void>;
+	Object.assign(mode, {
+		extensionManagerReload: new ExtensionManagerReloadCoordinator({
+			getSession: () => Reflect.get(mode, "session") as AgentSession,
+			reload: (session) => reloadResources.call(mode, session),
+			onStatus: vi.fn(),
+		}),
+	});
 	return { mode, statuses };
 }
 
@@ -82,9 +94,9 @@ describe("InteractiveMode /reload backend status", () => {
 				statuses.set("extension", "reloaded");
 			},
 		);
-		const reload = Reflect.get(mode, "handleReloadCommand") as (this: InteractiveMode) => Promise<void>;
+		const reload = Reflect.get(mode, "handleReloadCommand") as (this: InteractiveMode) => Promise<boolean>;
 
-		await reload.call(mode);
+		expect(await reload.call(mode)).toBe(true);
 
 		expect(statuses.get("toolBackend")).toContain("tools: remote grip+ws://127.0.0.1:8787/grip/workspace /workspace");
 		expect(statuses.get("extension")).toBe("reloaded");
@@ -97,9 +109,9 @@ describe("InteractiveMode /reload backend status", () => {
 				throw new Error("reload failed");
 			},
 		);
-		const reload = Reflect.get(mode, "handleReloadCommand") as (this: InteractiveMode) => Promise<void>;
+		const reload = Reflect.get(mode, "handleReloadCommand") as (this: InteractiveMode) => Promise<boolean>;
 
-		await reload.call(mode);
+		expect(await reload.call(mode)).toBe(false);
 
 		expect(statuses.get("toolBackend")).toContain("tools: local /workspace");
 		expect(statuses.has("extension")).toBe(false);

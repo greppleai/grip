@@ -1586,6 +1586,8 @@ export interface PendingProviderRegistration {
 export interface LoadExtensionError {
 	path: string;
 	error: string;
+	/** Package ownership and verified version when known; synthetic provenance otherwise. */
+	sourceInfo: SourceInfo;
 }
 
 /** Configuration for registering a provider via grip.registerProvider(). */

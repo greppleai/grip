@@ -5,6 +5,11 @@ export type SourceScope = "user" | "project" | "temporary";
 export type SourceOrigin = "package" | "top-level";
 type SourceBackend = "local" | "remote";
 
+export interface OfficialPackageInfo {
+	id: string;
+	version: string;
+}
+
 export interface SourceInfo {
 	path: string;
 	source: string;
@@ -12,6 +17,7 @@ export interface SourceInfo {
 	origin: SourceOrigin;
 	baseDir?: string;
 	workspace?: WorkspaceIdentity;
+	official?: OfficialPackageInfo;
 }
 
 export interface SyntheticSourceInfoOptions {
@@ -30,6 +36,7 @@ export function createSourceInfo(path: string, metadata: PathMetadata): SourceIn
 		origin: metadata.origin,
 		baseDir: metadata.baseDir,
 		workspace: metadata.workspace,
+		official: metadata.official,
 	};
 }
 

@@ -66,6 +66,13 @@ export {
 } from "./core/compaction/compaction.ts";
 export { type FileOperations, serializeConversation } from "./core/compaction/utils.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
+export {
+	createExtensionInventory,
+	type ExtensionInventoryEntry,
+	type ExtensionInventoryInput,
+	type ExtensionInventoryStatus,
+	type InstalledExtension,
+} from "./core/extension-inventory.ts";
 export { createExtensionRuntime, discoverAndLoadExtensions } from "./core/extensions/loader.ts";
 export { ExtensionRunner } from "./core/extensions/runner.ts";
 // Extension system
@@ -120,6 +127,7 @@ export type {
 	InputSource,
 	JobToolCallEvent,
 	KeybindingsManager,
+	LoadExtensionError,
 	LoadExtensionsResult,
 	LsToolCallEvent,
 	MarkdownTransformContext,
@@ -201,8 +209,24 @@ export {
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export type { ScopedModel } from "./core/model-resolver.ts";
+export type { OfficialManifest, OfficialUpdatePolicy } from "./core/official-catalog.ts";
+export type { OfficialCatalogItem, OfficialCatalogView } from "./core/official-catalog-view.ts";
 export type {
+	OfficialOperationOptions,
+	OfficialProgressEvent,
+	OfficialProgressPhase,
+	OfficialStartupDiagnostic,
+	OfficialStartupResult,
+} from "./core/official-installer.ts";
+export { OfficialExtensionError } from "./core/official-transport.ts";
+export type {
+	ConfiguredPackage,
+	ConfiguredPackageTarget,
+	InstalledSourceScope,
 	PackageManager,
+	PackageMutationOptions,
+	PackageResolutionDiagnostic,
+	PackageScopeOptions,
 	PathMetadata,
 	ProgressCallback,
 	ProgressEvent,
@@ -303,7 +327,7 @@ export {
 	SkillLoader,
 } from "./core/skills.ts";
 export type { SlashCommandInfo, SlashCommandSource } from "./core/slash-commands.ts";
-export type { SourceInfo, SyntheticSourceInfoOptions } from "./core/source-info.ts";
+export type { OfficialPackageInfo, SourceInfo, SyntheticSourceInfoOptions } from "./core/source-info.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 // Tools
 export {

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
 	QueueMode,
 	CompactionSettings as ResolvedCompactionSettings,
@@ -5,12 +6,25 @@ import type {
 } from "@greppleai/grip-agent-core";
 import type { Api, Model, RetryPolicy, ThinkingBudgets, Transport } from "@greppleai/grip-ai";
 import type { ScrollViewScrollbar, TuiMode } from "@greppleai/grip-tui";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "fs";
-import { dirname, isAbsolute, join, relative, sep } from "path";
+import {
+	closeSync,
+	existsSync,
+	fsyncSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "fs";
+import { basename, dirname, isAbsolute, join, relative, sep } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
+import { type OfficialUpdatePolicy, officialObject, validateOfficialId } from "./official-catalog.ts";
 import type { SandboxCleanupBehavior } from "./sandbox/config.ts";
 
 // grip-ignore noNearIdenticalDataStructures: Persisted overrides permit omitted fields so settings layering can apply defaults independently of the fully resolved harness runtime contract.
@@ -119,7 +133,9 @@ export interface Settings {
 	npmCommand?: string[]; // Command used for npm package lookup/install operations, argv-style (e.g., ["mise", "exec", "node@20", "--", "npm"])
 	collapseChangelog?: boolean; // Show condensed changelog after update (use /changelog for full)
 	enableInstallTelemetry?: boolean; // default: true - anonymous version/update ping after changelog-detected updates
-	packages?: PackageSource[]; // Array of npm/git package sources (string or object with filtering)
+	packages?: PackageSource[]; // Array of npm/git/official package sources (string or object with filtering)
+	/** Global-only official startup update policy; omitted fields use bounded defaults. */
+	officialExtensions?: Partial<OfficialUpdatePolicy>;
 	extensions?: string[]; // Array of local extension file paths or directories
 	skills?: string[]; // Array of local skill file paths or directories
 	rules?: string[]; // Array of local rule file paths or directories
@@ -360,8 +376,8 @@ function mergeModifiedNestedSetting(
 ): Record<string, unknown> {
 	const before = original[field];
 	const after = snapshot[field];
-	const oldValues = isMergeableObject(before) ? before : {};
-	const newValues = isMergeableObject(after) ? after : {};
+	const oldValues: Record<string, unknown> = isMergeableObject(before) ? before : {};
+	const newValues: Record<string, unknown> = isMergeableObject(after) ? after : {};
 	const merged = { ...oldValues };
 	for (const key of keys) {
 		const value =
@@ -376,6 +392,7 @@ function mergeModifiedNestedSetting(
 export type SettingsScope = "global" | "project";
 
 export interface SettingsStorage {
+	read(scope: SettingsScope): string | undefined;
 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void;
 }
 
@@ -432,31 +449,40 @@ export class FileSettingsStorage implements SettingsStorage {
 		throw (lastError as Error) ?? new Error("Failed to acquire settings lock");
 	}
 
-	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void {
+	read(scope: SettingsScope): string | undefined {
 		const path = scope === "global" ? this.globalSettingsPath : this.projectSettingsPath;
-		const dir = dirname(path);
+		return existsSync(path) ? readFileSync(path, "utf-8") : undefined;
+	}
 
-		let release: (() => void) | undefined;
+	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void {
+		const configured = scope === "global" ? this.globalSettingsPath : this.projectSettingsPath;
+		mkdirSync(dirname(configured), { recursive: true });
+		// Preserve intentionally symlinked settings, and coordinate aliases at the canonical target.
+		const path = existsSync(configured)
+			? realpathSync(configured)
+			: join(realpathSync(dirname(configured)), basename(configured));
+		const release = this.acquireLockSyncWithRetry(path);
+		let temporary: string | null = null;
 		try {
-			// Only create directory and lock if file exists or we need to write
-			const fileExists = existsSync(path);
-			if (fileExists) {
-				release = this.acquireLockSyncWithRetry(path);
-			}
-			const current = fileExists ? readFileSync(path, "utf-8") : undefined;
+			// The read must happen after locking, including the first creation of settings.json.
+			const current = existsSync(path) ? readFileSync(path, "utf-8") : undefined;
 			const next = fn(current);
 			if (next !== undefined) {
-				// Only create directory when we actually need to write
-				if (!existsSync(dir)) {
-					mkdirSync(dir, { recursive: true });
+				temporary = join(dirname(path), `.settings-${randomUUID()}.tmp`);
+				const fd = openSync(temporary, "wx", existsSync(path) ? statSync(path).mode & 0o777 : 0o600);
+				try {
+					writeFileSync(fd, next, "utf-8");
+					fsyncSync(fd);
+				} finally {
+					closeSync(fd);
 				}
-				if (!release) {
-					release = this.acquireLockSyncWithRetry(path);
-				}
-				writeFileSync(path, next, "utf-8");
+				renameSync(temporary, path);
+				temporary = null;
 			}
 		} finally {
-			if (release) {
+			try {
+				if (temporary) unlinkSync(temporary);
+			} finally {
 				release();
 			}
 		}
@@ -464,6 +490,9 @@ export class FileSettingsStorage implements SettingsStorage {
 }
 
 export class InMemorySettingsStorage implements SettingsStorage {
+	read(scope: SettingsScope): string | undefined {
+		return scope === "global" ? this.global : this.project;
+	}
 	private global: string | undefined;
 	private project: string | undefined;
 
@@ -606,11 +635,7 @@ export class SettingsManager {
 	}
 
 	private static loadFromStorage(storage: SettingsStorage, scope: SettingsScope): Settings {
-		let content: string | undefined;
-		storage.withLock(scope, (current) => {
-			content = current;
-			return undefined;
-		});
+		const content = storage.read(scope);
 
 		if (!content) {
 			return {};
@@ -1329,6 +1354,39 @@ export class SettingsManager {
 
 	getPackages(): PackageSource[] {
 		return [...(this.settings.packages ?? [])];
+	}
+
+	/** Read (null) or commit one official membership under the storage lock; failures reject. */
+	officialPackageMembership(id: string, desired: boolean | null): Promise<boolean> {
+		const source = `official:${validateOfficialId(id)}`;
+		let present = false;
+		const operation = this.writeQueue.then(() => {
+			let packages: PackageSource[] = [];
+			this.storage.withLock("global", (current) => {
+				const settings = current === undefined ? {} : officialObject(JSON.parse(current), "global settings");
+				const raw = settings.packages ?? [];
+				if (
+					!Array.isArray(raw) ||
+					!raw.every(
+						(entry) =>
+							typeof entry === "string" || (isMergeableObject(entry) && typeof entry.source === "string"),
+					)
+				)
+					throw new Error("Invalid global packages settings");
+				packages = raw as PackageSource[];
+				const matches = (entry: PackageSource) => (typeof entry === "string" ? entry : entry.source) === source;
+				present = packages.some(matches);
+				if (desired === null || desired === present) return undefined;
+				packages = desired ? [...packages, source] : packages.filter((entry) => !matches(entry));
+				settings.packages = packages;
+				present = desired;
+				return JSON.stringify(settings, null, 2);
+			});
+			this.globalSettings.packages = structuredClone(packages);
+			this.recomputeSettings();
+		});
+		this.writeQueue = operation.catch((error) => this.recordError("global", error));
+		return operation.then(() => present);
 	}
 
 	setPackages(packages: PackageSource[]): void {
