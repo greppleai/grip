@@ -28,7 +28,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "cd", description: "Change the working directory" },
 	{ name: "settings", description: "Open settings menu" },
 	{ name: "model", description: "Switch models" },
-	{ name: "job", description: "Show or configure the global job model" },
+	{ name: "job", description: "Show or configure the active profile's job model" },
 	{ name: "system-prompt", description: "View the effective system prompt without sending it to a model" },
 	{
 		name: "context-compression",
@@ -37,7 +37,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "compress-detection", description: "Enable or disable background compression detection for this session" },
 	{ name: "compress-detection-model", description: "Choose or clear the background compression detection model" },
 	{ name: "scoped-models", description: "Enable/disable models for Ctrl+P cycling" },
-	{ name: "profile", description: "Create or use a scoped-model profile" },
+	{ name: "profile", description: "List, create, switch, or assign settings profiles" },
 	{ name: "export", description: "Export session (HTML default, or specify path: .html/.jsonl)" },
 	{ name: "import", description: "Import and resume a session from a JSONL file" },
 	{ name: "share", description: "Share session as a secret GitHub gist" },

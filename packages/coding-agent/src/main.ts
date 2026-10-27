@@ -407,7 +407,24 @@ function applyCliToolSelection(parsed: Args, options: GripAgentSessionOptions): 
 	if (parsed.tools) options.tools = [...parsed.tools];
 }
 
-function buildSessionOptions(
+function applyExistingProfileSelection(
+	parsed: Args,
+	options: GripAgentSessionOptions,
+	hasExistingSession: boolean,
+	modelRegistry: ModelRegistry,
+	settingsManager: SettingsManager,
+): void {
+	if (!hasExistingSession || !settingsManager.getActiveProfile()) return;
+	if (!options.model) {
+		const provider = settingsManager.getDefaultProvider();
+		const modelId = settingsManager.getDefaultModel();
+		const preferred = provider && modelId ? modelRegistry.find(provider, modelId) : undefined;
+		if (preferred && modelRegistry.hasConfiguredAuth(preferred)) options.model = preferred;
+	}
+	if (!options.thinkingLevel && !parsed.thinking) options.thinkingLevel = settingsManager.getDefaultThinkingLevel();
+}
+
+export function buildSessionOptions(
 	parsed: Args,
 	scopedModels: ScopedModel[],
 	hasExistingSession: boolean,
@@ -422,11 +439,12 @@ function buildSessionOptions(
 	applyCliModelSelection(parsed, modelRegistry, resolution);
 	const { options } = resolution;
 
-	if (!options.model && scopedModels.length > 0 && !hasExistingSession) {
+	if (!options.model && scopedModels.length > 0 && (!hasExistingSession || settingsManager.getActiveProfile())) {
 		const selected = selectDefaultScopedModel(scopedModels, modelRegistry, settingsManager);
 		options.model = selected.model;
 		if (!parsed.thinking && selected.thinkingLevel) options.thinkingLevel = selected.thinkingLevel;
 	}
+	applyExistingProfileSelection(parsed, options, hasExistingSession, modelRegistry, settingsManager);
 
 	if (parsed.thinking) options.thinkingLevel = parsed.thinking;
 	if (scopedModels.length > 0) {

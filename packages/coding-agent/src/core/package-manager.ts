@@ -936,7 +936,7 @@ export class DefaultPackageManager implements PackageManager {
 	addSourceToSettings(source: string, options?: PackageScopeOptions): boolean {
 		const scope: SourceScope = options?.local ? "project" : "user";
 		const currentSettings =
-			scope === "project" ? this.settingsManager.getProjectSettings() : this.settingsManager.getGlobalSettings();
+			scope === "project" ? this.settingsManager.getProjectSettings() : this.settingsManager.getUserSettings();
 		const currentPackages = currentSettings.packages ?? [];
 		const normalizedSource = this.normalizePackageSourceForSettings(source, scope);
 		const matchIndex = currentPackages.findIndex((existing) => this.packageSourcesMatch(existing, source, scope));
@@ -967,7 +967,7 @@ export class DefaultPackageManager implements PackageManager {
 	removeSourceFromSettings(source: string, options?: PackageScopeOptions): boolean {
 		const scope: SourceScope = options?.local ? "project" : "user";
 		const currentSettings =
-			scope === "project" ? this.settingsManager.getProjectSettings() : this.settingsManager.getGlobalSettings();
+			scope === "project" ? this.settingsManager.getProjectSettings() : this.settingsManager.getUserSettings();
 		const currentPackages = currentSettings.packages ?? [];
 		const nextPackages = currentPackages.filter((existing) => !this.packageSourcesMatch(existing, source, scope));
 		const changed = nextPackages.length !== currentPackages.length;
@@ -1023,7 +1023,7 @@ export class DefaultPackageManager implements PackageManager {
 
 	async resolve(onMissing?: (source: string) => Promise<MissingSourceAction>): Promise<ResolvedPaths> {
 		const accumulator = this.createAccumulator();
-		const globalSettings = this.settingsManager.getGlobalSettings();
+		const userSettings = this.settingsManager.getUserSettings();
 		const projectSettings = this.settingsManager.getProjectSettings();
 
 		// Collect all packages with scope (project first so cwd resources win collisions)
@@ -1031,11 +1031,11 @@ export class DefaultPackageManager implements PackageManager {
 		for (const pkg of projectSettings.packages ?? []) {
 			allPackages.push({ pkg, scope: "project" });
 		}
-		for (const pkg of globalSettings.packages ?? []) {
+		for (const pkg of userSettings.packages ?? []) {
 			allPackages.push({ pkg, scope: "user" });
 		}
 
-		// Dedupe: project scope wins over global for same package identity
+		// Dedupe: project scope wins over user for the same package identity
 		const packageSources = this.dedupePackages(allPackages);
 		await this.resolvePackageSources(packageSources, accumulator, onMissing);
 
@@ -1044,7 +1044,7 @@ export class DefaultPackageManager implements PackageManager {
 
 		for (const resourceType of RESOURCE_TYPES) {
 			const target = this.getTargetMap(accumulator, resourceType);
-			const globalEntries = (globalSettings[resourceType] ?? []) as string[];
+			const globalEntries = (userSettings[resourceType] ?? []) as string[];
 			const projectEntries = (projectSettings[resourceType] ?? []) as string[];
 			this.resolveLocalEntries(
 				projectEntries,
@@ -1070,7 +1070,7 @@ export class DefaultPackageManager implements PackageManager {
 			);
 		}
 
-		this.addAutoDiscoveredResources(accumulator, globalSettings, projectSettings, globalBaseDir, projectBaseDir);
+		this.addAutoDiscoveredResources(accumulator, userSettings, projectSettings, globalBaseDir, projectBaseDir);
 
 		return this.toResolvedPaths(accumulator);
 	}
@@ -1087,11 +1087,11 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	listConfiguredPackages(): ConfiguredPackage[] {
-		const globalSettings = this.settingsManager.getGlobalSettings();
+		const userSettings = this.settingsManager.getUserSettings();
 		const projectSettings = this.settingsManager.getProjectSettings();
 		const configuredPackages: ConfiguredPackage[] = [];
 
-		for (const pkg of globalSettings.packages ?? []) {
+		for (const pkg of userSettings.packages ?? []) {
 			const source = typeof pkg === "string" ? pkg : pkg.source;
 			configuredPackages.push({
 				source,
@@ -1181,18 +1181,18 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	async update(source?: string): Promise<void> {
-		const globalSettings = this.settingsManager.getGlobalSettings();
+		const userSettings = this.settingsManager.getUserSettings();
 		const projectSettings = this.settingsManager.getProjectSettings();
-		const globalPackages = globalSettings.packages ?? [];
+		const userPackages = userSettings.packages ?? [];
 		const projectPackages = projectSettings.packages ?? [];
 		const identity = source ? this.getPackageIdentity(source) : undefined;
 		const updateSources = [
-			...this.collectConfiguredUpdateSources(globalPackages, "user", identity),
+			...this.collectConfiguredUpdateSources(userPackages, "user", identity),
 			...this.collectConfiguredUpdateSources(projectPackages, "project", identity),
 		];
 
 		if (source && updateSources.length === 0) {
-			throw new Error(this.buildNoMatchingPackageMessage(source, [...globalPackages, ...projectPackages]));
+			throw new Error(this.buildNoMatchingPackageMessage(source, [...userPackages, ...projectPackages]));
 		}
 		await this.updateConfiguredSources(updateSources);
 	}
@@ -1319,13 +1319,13 @@ export class DefaultPackageManager implements PackageManager {
 			return [];
 		}
 
-		const globalSettings = this.settingsManager.getGlobalSettings();
+		const userSettings = this.settingsManager.getUserSettings();
 		const projectSettings = this.settingsManager.getProjectSettings();
 		const allPackages: ScopedPackageSource[] = [];
 		for (const pkg of projectSettings.packages ?? []) {
 			allPackages.push({ pkg, scope: "project" });
 		}
-		for (const pkg of globalSettings.packages ?? []) {
+		for (const pkg of userSettings.packages ?? []) {
 			allPackages.push({ pkg, scope: "user" });
 		}
 
