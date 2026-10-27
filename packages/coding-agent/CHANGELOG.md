@@ -2,6 +2,22 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.1.11](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.10...@greppleai/grip-v0.1.11) (2026-10-27)
+
+
+### Bug Fixes
+
+* **sandbox:** sandbox-reattach - Preserve concurrent clients ([8f4d138](https://github.com/greppleai/grip/commit/8f4d138828998f6c653a307205caafbe80119834))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.1.10 to ^0.1.11
+    * @greppleai/grip-ai bumped from ^0.1.10 to ^0.1.11
+    * @greppleai/grip-tui bumped from ^0.1.10 to ^0.1.11
+
 ## [0.1.10](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.9...@greppleai/grip-v0.1.10) (2026-10-27)
 
 
