@@ -2,7 +2,7 @@
 
 # Grip Packages
 
-Grip packages bundle extensions, skills, rules, prompt templates, and themes so you can share them through npm or git. A package can declare resources in `package.json` under the `grip` key, or use conventional directories.
+Grip packages bundle extensions, skills, rules, prompt templates, and themes so you can share them through npm or git. A package can declare resources in `package.json` under the `grip` key, or use conventional directories. Independently published [official extensions](official-extensions.md) use a separate `official:<id>` source and bundled artifacts.
 
 ## Table of Contents
 
@@ -38,9 +38,9 @@ grip update --extension npm:@foo/bar
 
 These commands manage Grip packages, not the Grip CLI installation. To uninstall Grip itself, see [Quickstart](quickstart.md#uninstall). The `@foo/bar` and repository names above are placeholders, not verified published packages.
 
-By default, `install` and `remove` write to user settings (`~/.grip/agent/settings.json`). Use `-l` to write to project settings (`.grip/settings.json`) instead. Project settings can be shared with your team, and Grip installs any missing packages automatically on startup.
+By default, `install` and `remove` write to user settings (`~/.grip/agent/settings.json`). For npm/git/local packages, use `-l` to write to project settings (`.grip/settings.json`) instead. Project settings can be shared with your team, and Grip installs missing npm/git packages automatically on startup. Official sources are global-only and must be installed explicitly; a missing official selection is not automatically downloaded.
 
-To try a package without installing it, use `--extension` or `-e`. This installs to a temporary directory for the current run only:
+To try an npm/git package without installing it, use `--extension` or `-e`. This installs to a temporary directory for the current run only; official sources do not support temporary installation:
 
 ```bash
 grip -e npm:@foo/bar
@@ -49,7 +49,13 @@ grip -e git:github.com/user/repo
 
 ## Package Sources
 
-Grip accepts three source types in settings and `grip install`.
+Grip accepts official, npm, git and local source types in settings and `grip install`.
+
+### Official
+
+Use `official:<id>` for a curated, published stable extension. Browse/install/uninstall with `/extensions`, or use `grip install official:<id>` and `grip remove official:<id>`. Official installations are global-only, do not require target-machine Git/npm, and update independently at startup to newer compatible stable versions. They never execute unpublished `main` or unselected catalog entries. The production catalog is initially empty pending maintainer selection/publication.
+
+See [official extensions](official-extensions.md) for full-access trust, live reload, immutable retained versions, offline/recovery behavior and automatic-update opt-out. The npm/git dependency-install instructions below do not apply to official artifacts.
 
 ### npm
 
@@ -221,8 +227,9 @@ Use `grip config` to enable or disable extensions, skills, rules, prompt templat
 
 ## Scope and Deduplication
 
-Packages can appear in both global and project settings. If the same package appears in both, the project entry wins. Identity is determined by:
+Npm/git/local packages can appear in both global and project settings. If the same package appears in both, the project entry wins. Official sources are user/global-only; project official selections are rejected rather than shadowing a global installation. Identity is determined by:
 
+- official: validated extension ID (no version/ref suffix)
 - npm: package name
 - git: repository URL without ref
 - local: resolved absolute path

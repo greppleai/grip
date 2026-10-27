@@ -79,9 +79,14 @@ All notable changes to Grip are documented in this file.
 - Added `/websearch login` to choose a web search engine and save per-provider API keys in credential storage.
 - Added settings profiles with session-only model and job-model switching, directory-prefix startup rules, `/profile sandbox` VM-name completion and combined `--name`/`--autoconnect` controls, and an active-profile footer indicator.
 
+### Added
+
+- Added built-in `/extensions` browsing and managed install/uninstall for independently published, global-only `official:<id>` extensions, with bundled dependencies/assets, compatible startup updates, offline fallback and `officialExtensions` opt-out settings. The production catalog starts empty pending maintainer selection/publication.
+
 ### Breaking Changes
 
 - Removed the built-in LSP client and tools, language-server configuration, daemon protocol support, and SDK/extension LSP APIs.
+- Package/resource hosts must await `getInstalledPath()` and `listConfiguredPackages()`, implement official catalog/startup methods and `ResourceLoader.getExtensionInventory()`, and include `ResolvedPaths.diagnostics`. Official mutations require transactional `installAndPersist()` / `removeAndPersist()`; see [official extension integration](docs/official-extensions.md#sdk-and-custom-loader-integration).
 
 ### Fixed
 
