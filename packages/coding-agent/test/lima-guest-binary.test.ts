@@ -139,6 +139,9 @@ it("uses the local binary on an existing named legacy VM before launching its da
 					}),
 				};
 			}
+			if (args.at(-1)?.includes("GRIP_SANDBOX_ABSENT")) {
+				return { exitCode: 0, stdout: "GRIP_SANDBOX_ABSENT\n", stderr: "" };
+			}
 			return {
 				exitCode: 0,
 				stderr: "",
@@ -158,7 +161,7 @@ it("uses the local binary on an existing named legacy VM before launching its da
 			token: "dev-token",
 		});
 		const copyIndex = runner.calls.findIndex((args) => args[0] === "copy");
-		const launchIndex = runner.calls.findIndex((args) => args.at(-1)?.includes("GRIP_SANDBOX_TOKEN=%s"));
+		const launchIndex = runner.calls.findIndex((args) => args.at(-1)?.includes("nohup env GRIP_DAEMON_TOKEN="));
 		expect(copyIndex).toBeGreaterThan(0);
 		expect(launchIndex).toBeGreaterThan(copyIndex);
 		expect(runner.calls[launchIndex]?.at(-1)).toContain("$HOME/.local/bin/grip");

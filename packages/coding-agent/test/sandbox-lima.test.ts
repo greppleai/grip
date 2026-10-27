@@ -40,6 +40,7 @@ class FakeLimaRunner implements SandboxRunner {
 	async run(command: string, args: string[], options?: SandboxCommandOptions): Promise<SandboxCommandResult> {
 		this.calls.push({ command, args, options });
 		if (args[0] === "shell" && args.at(-1)?.includes("GRIP_LEGACY_GUEST")) return this.modeProbeResult;
+		if (args[0] === "shell" && args.at(-1)?.includes("GRIP_SANDBOX_ABSENT")) return ok("GRIP_SANDBOX_ABSENT\n");
 		return this.results.shift() ?? { exitCode: 0, stdout: "", stderr: "" };
 	}
 }
@@ -105,14 +106,8 @@ describe("Lima sandbox core", () => {
 					token: "nested-token",
 				});
 				const daemonArgs = runner.calls.at(-1)?.args ?? [];
-				expect(daemonArgs.slice(0, 5)).toEqual([
-					"shell",
-					"--tty=false",
-					"--workdir",
-					"/mnt/projects/nested/project's files",
-					"nested-vm",
-				]);
-				expect(daemonArgs.at(-1)).toContain("--daemon-cwd '/mnt/projects/nested/project'\"'\"'s files'");
+				expect(daemonArgs.slice(0, 5)).toEqual(["shell", "--tty=false", "--workdir", "/mnt/projects", "nested-vm"]);
+				expect(daemonArgs.at(-1)).toContain("--daemon-cwd '/mnt/projects'");
 				expect(runner.calls.filter((call) => call.args[0] === "start").map((call) => call.args)).toEqual(
 					status === "Stopped" ? [["start", "--tty=false", "nested-vm"]] : [],
 				);
@@ -348,7 +343,7 @@ describe("Lima sandbox core", () => {
 		]);
 		const service = new LimaSandboxService({ runner });
 		await expect(service.start({ workspaceRoot: hostProject, name: "existing" })).rejects.toThrow();
-		expect(runner.calls).toHaveLength(5); // Includes the named guest-mode probe.
+		expect(runner.calls).toHaveLength(6); // Includes guest-mode and running-daemon probes.
 		expect(runner.calls.some((call) => call.args.at(-1)?.includes("--daemon --daemon-host"))).toBe(false);
 	});
 
@@ -686,7 +681,15 @@ describe("Lima sandbox core", () => {
 		await expect(service.start({ workspaceRoot: hostProject, name })).rejects.toThrow("readiness uncertain");
 		expect(tracked.size).toBe(0);
 		await expect(service.stop({ workspaceRoot: hostProject, target: name })).rejects.toThrow("ownership is unknown");
-		expect(runner.calls.map((call) => call.args[0])).toEqual(["list", "shell", "shell", "shell", "shell", "list"]);
+		expect(runner.calls.map((call) => call.args[0])).toEqual([
+			"list",
+			"shell",
+			"shell",
+			"shell",
+			"shell",
+			"shell",
+			"list",
+		]);
 	});
 
 	it("leaves a newly created named VM for inspection when provisioning fails", async () => {

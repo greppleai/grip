@@ -67,6 +67,10 @@ All notable changes to Grip are documented in this file.
 
 - Removed the built-in LSP client and tools, language-server configuration, daemon protocol support, and SDK/extension LSP APIs.
 
+### Fixed
+
+- Reuse running Lima sandbox daemons for clients in mounted subdirectories without rotating credentials or disconnecting other agents, and handle WebSocket errors during failed connection teardown.
+
 ## [0.1.7](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.6...@greppleai/grip-v0.1.7) (2026-10-23)
 
 
