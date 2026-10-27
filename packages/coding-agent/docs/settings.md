@@ -290,7 +290,7 @@ Paths in `~/.grip/agent/settings.json` resolve relative to `~/.grip/agent`. Path
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `packages` | array | `[]` | npm/git packages to load resources from |
+| `packages` | array | `[]` | npm/git/local package sources or global-only `official:<id>` selections |
 | `extensions` | string[] | `[]` | Local extension file paths or directories |
 | `skills` | string[] | `[]` | Local skill file paths or directories |
 | `rules` | string[] | `[]` | Local rule file paths or directories |
@@ -325,6 +325,20 @@ Object form filters which resources to load:
 ```
 
 See [packages.md](packages.md) for package management details. `pi-skills` above is an illustrative third-party package identifier, not a project-owned package name or Grip alias.
+
+### Official Extensions
+
+The global-only `officialExtensions` object controls startup updates of selected, installed official packages. Project settings do not override it. The default is `autoUpdate: true`; set it to `false` to opt out. `catalogMaxAgeMs` defaults to 21600000 (maximum 86400000), `requestTimeoutMs` to 3000 (maximum 30000), and `startupBudgetMs` to 8000 (maximum 60000). Numeric values must be positive safe integers in milliseconds.
+
+```json
+{
+  "officialExtensions": {
+    "autoUpdate": false
+  }
+}
+```
+
+Official sources must be installed explicitly with `/extensions` or `grip install official:<id>`; adding one to `packages` does not download missing code. They are global-only, with no project or temporary installation. `--offline` / `GRIP_OFFLINE=1` and `--no-extensions` skip automatic official updates. `GRIP_SKIP_VERSION_CHECK` controls only the core version check. Explicit management remains available when auto-update is disabled. See [official extensions](official-extensions.md) for bounded-update settings, full-access trust, retained versions, safe reload and recovery.
 
 ## Example
 
