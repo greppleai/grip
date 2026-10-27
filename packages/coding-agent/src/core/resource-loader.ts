@@ -9,10 +9,19 @@ export type { ResourceCollision, ResourceDiagnostic } from "./diagnostics.ts";
 
 import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
+import { createExtensionInventory, type InstalledExtension } from "./extension-inventory.ts";
 import { createExtensionRuntime, loadExtensionFromFactory, loadExtensions } from "./extensions/loader.ts";
-import type { Extension, ExtensionFactory, ExtensionRuntime, LoadExtensionsResult } from "./extensions/types.ts";
+import type {
+	Extension,
+	ExtensionFactory,
+	ExtensionRuntime,
+	LoadExtensionError,
+	LoadExtensionsResult,
+} from "./extensions/types.ts";
+import type { OfficialStartupResult } from "./official-installer.ts";
 import {
 	DefaultPackageManager,
+	type PackageResolutionDiagnostic,
 	type PathMetadata,
 	type ResolvedPaths,
 	type ResolvedResource,
@@ -145,6 +154,7 @@ export interface ResourceExtensionPaths {
 
 export interface ResourceLoader {
 	getExtensions(): LoadExtensionsResult;
+	getExtensionInventory(): Promise<InstalledExtension[]>;
 	getSkills(): LoadSkillsResult;
 	getRules(): LoadRulesResult;
 	getPrompts(): LoadPromptTemplatesResult;
@@ -410,6 +420,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private appendSystemPromptOverride?: (base: string[]) => string[];
 
 	private extensionsResult: LoadExtensionsResult;
+	private extensionResources: ResolvedResource[] = [];
+	private extensionResolutionDiagnostics: PackageResolutionDiagnostic[] = [];
 	private skills: Skill[];
 	private skillDiagnostics: ResourceDiagnostic[];
 	private rules: Rule[];
@@ -483,6 +495,21 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.extensionThemeSourceInfos = new Map();
 		this.lastPromptPaths = [];
 		this.lastThemePaths = [];
+	}
+
+	/** Call only before the first reload; injected loaders remain responsible for their own initialization. */
+	async prepareInitialLoad(): Promise<OfficialStartupResult> {
+		return this.packageManager.startupOfficialUpdates(this.noExtensions);
+	}
+
+	async getExtensionInventory(): Promise<InstalledExtension[]> {
+		return createExtensionInventory({
+			configuredPackages: await this.packageManager.listConfiguredPackages(),
+			resources: this.extensionResources,
+			diagnostics: this.extensionResolutionDiagnostics,
+			result: this.extensionsResult,
+			noExtensions: this.noExtensions,
+		});
 	}
 
 	getExtensions(): LoadExtensionsResult {
@@ -781,20 +808,46 @@ export class DefaultResourceLoader implements ResourceLoader {
 		};
 	}
 
-	private async reloadExtensions(extensionPaths: string[], metadataByPath: Map<string, PathMetadata>): Promise<void> {
+	private async reloadExtensions(
+		extensionPaths: string[],
+		metadataByPath: Map<string, PathMetadata>,
+		diagnostics: PackageResolutionDiagnostic[],
+	): Promise<void> {
 		const extensionsResult = await loadExtensions(extensionPaths, this.cwd, this.eventBus);
 		const inlineExtensions = await this.loadExtensionFactories(extensionsResult.runtime);
 		extensionsResult.extensions.push(...inlineExtensions.extensions);
 		extensionsResult.errors.push(...inlineExtensions.errors);
 		for (const conflict of this.detectExtensionConflicts(extensionsResult.extensions)) {
-			extensionsResult.errors.push({ path: conflict.path, error: conflict.message });
+			extensionsResult.errors.push({
+				path: conflict.path,
+				error: conflict.message,
+				sourceInfo: this.getDefaultSourceInfoForPath(conflict.path),
+			});
 		}
 		for (const path of this.additionalExtensionPaths) {
 			if (!isLocalPath(path)) continue;
 			const resolved = this.resolveResourcePath(path);
 			if (!existsSync(resolved)) {
-				extensionsResult.errors.push({ path: resolved, error: `Extension path does not exist: ${resolved}` });
+				extensionsResult.errors.push({
+					path: resolved,
+					error: `Extension path does not exist: ${resolved}`,
+					sourceInfo: createSyntheticSourceInfo(resolved, { source: "cli" }),
+				});
 			}
+		}
+		for (const error of extensionsResult.errors) {
+			error.sourceInfo = this.findSourceInfoForPath(error.path, undefined, metadataByPath) ?? error.sourceInfo;
+		}
+		for (const diagnostic of diagnostics) {
+			extensionsResult.errors.push({
+				path: diagnostic.source,
+				error: `${diagnostic.scope}: ${diagnostic.error}`,
+				sourceInfo: createSourceInfo(diagnostic.source, {
+					source: diagnostic.source,
+					scope: diagnostic.scope,
+					origin: "package",
+				}),
+			});
 		}
 		this.extensionsResult = this.extensionsOverride ? this.extensionsOverride(extensionsResult) : extensionsResult;
 		this.applyExtensionSourceInfo(this.extensionsResult.extensions, metadataByPath);
@@ -909,7 +962,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 			metadataByPath,
 			instructionOperations,
 		);
-		await this.reloadExtensions(paths.extensions, metadataByPath);
+		this.extensionResources = [...resolvedPaths.extensions, ...cliPaths.extensions];
+		this.extensionResolutionDiagnostics = [...resolvedPaths.diagnostics, ...cliPaths.diagnostics];
+		await this.reloadExtensions(paths.extensions, metadataByPath, this.extensionResolutionDiagnostics);
 		await this.reloadSkills(paths.skills, metadataByPath);
 		await this.reloadRules(paths.rules, metadataByPath);
 		await this.reloadPrompts(paths.prompts, metadataByPath);
@@ -1433,7 +1488,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	private async loadExtensionFactories(runtime: ExtensionRuntime): Promise<InlineExtensionLoadResult> {
 		const extensions: Extension[] = [];
-		const errors: Array<{ path: string; error: string }> = [];
+		const errors: LoadExtensionError[] = [];
 
 		for (const [index, factory] of this.extensionFactories.entries()) {
 			const extensionPath = `<inline:${index + 1}>`;
@@ -1442,7 +1497,11 @@ export class DefaultResourceLoader implements ResourceLoader {
 				extensions.push(extension);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "failed to load extension";
-				errors.push({ path: extensionPath, error: message });
+				errors.push({
+					path: extensionPath,
+					error: message,
+					sourceInfo: this.getDefaultSourceInfoForPath(extensionPath),
+				});
 			}
 		}
 

@@ -11,6 +11,7 @@ import { getOAuthApiKey } from "@greppleai/grip-ai/oauth";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { createEventBus } from "../src/core/event-bus.ts";
+import { createExtensionInventory } from "../src/core/extension-inventory.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.ts";
 import type { Extension, ExtensionFactory, LoadExtensionsResult } from "../src/core/extensions/types.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
@@ -218,6 +219,14 @@ export function createTestResourceLoader(options: CreateTestResourceLoaderOption
 
 	return {
 		getExtensions: () => extensionsResult,
+		getExtensionInventory: async () =>
+			createExtensionInventory({
+				configuredPackages: [],
+				resources: [],
+				diagnostics: [],
+				result: extensionsResult,
+				noExtensions: false,
+			}),
 		getSkills: () => ({ skills: [], diagnostics: [] }),
 		getRules: () => ({ rules: [], diagnostics: [] }),
 		getPrompts: () => ({ prompts: [], diagnostics: [] }),

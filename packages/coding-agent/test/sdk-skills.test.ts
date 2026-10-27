@@ -57,6 +57,7 @@ This is a test skill.
 	it("should have empty skills when resource loader returns none (--no-skills)", async () => {
 		const resourceLoader: ResourceLoader = {
 			getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
+			getExtensionInventory: async () => [],
 			getSkills: () => ({ skills: [], diagnostics: [] }),
 			getRules: () => ({ rules: [], diagnostics: [] }),
 			getPrompts: () => ({ prompts: [], diagnostics: [] }),
@@ -86,6 +87,7 @@ This is a test skill.
 
 		const resourceLoader: ResourceLoader = {
 			getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
+			getExtensionInventory: async () => [],
 			getSkills: () => ({ skills: [customSkill], diagnostics: [] }),
 			getRules: () => ({ rules: [], diagnostics: [] }),
 			getPrompts: () => ({ prompts: [], diagnostics: [] }),

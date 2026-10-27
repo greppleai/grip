@@ -38,6 +38,7 @@ import type {
 	ExtensionInstructionRegistration,
 	ExtensionPromptRegistration,
 	ExtensionRuntime,
+	LoadExtensionError,
 	LoadExtensionsResult,
 	MarkdownTransformer,
 	MessageRenderer,
@@ -573,7 +574,7 @@ export async function loadExtensionFromFactory(
  */
 export async function loadExtensions(paths: string[], cwd: string, eventBus?: EventBus): Promise<LoadExtensionsResult> {
 	const extensions: Extension[] = [];
-	const errors: Array<{ path: string; error: string }> = [];
+	const errors: LoadExtensionError[] = [];
 	const resolvedCwd = resolvePath(cwd);
 	const resolvedEventBus = eventBus ?? createEventBus();
 	const runtime = createExtensionRuntime();
@@ -582,7 +583,14 @@ export async function loadExtensions(paths: string[], cwd: string, eventBus?: Ev
 		const { extension, error } = await loadExtension(extPath, resolvedCwd, resolvedEventBus, runtime);
 
 		if (error) {
-			errors.push({ path: extPath, error });
+			errors.push({
+				path: extPath,
+				error,
+				sourceInfo: createSyntheticSourceInfo(extPath, {
+					source: "local",
+					baseDir: path.dirname(resolvePath(extPath, resolvedCwd, { normalizeUnicodeSpaces: true })),
+				}),
+			});
 			continue;
 		}
 

@@ -770,7 +770,7 @@ Content`,
 			expect(() => internals.parseSource("HTTPS://evil.example/a/../victim/repo")).toThrow(
 				"Unsafe or invalid Git package source",
 			);
-			expect(() => packageManager.getInstalledPath(unsafeSource, "user")).toThrow(
+			await expect(packageManager.getInstalledPath(unsafeSource, "user")).rejects.toThrow(
 				"Unsafe or invalid Git package source",
 			);
 			expect(() => packageManager.addSourceToSettings(unsafeSource)).toThrow("Unsafe or invalid Git package source");
@@ -778,7 +778,13 @@ Content`,
 			await expect(packageManager.remove(unsafeSource)).rejects.toThrow("Unsafe or invalid Git package source");
 			await expect(packageManager.update(unsafeSource)).rejects.toThrow("Unsafe or invalid Git package source");
 			settingsManager.setPackages([unsafeSource]);
-			await expect(packageManager.resolve()).rejects.toThrow("Unsafe or invalid Git package source");
+			expect((await packageManager.resolve()).diagnostics).toEqual([
+				{
+					source: unsafeSource,
+					scope: "user",
+					error: "Unsafe or invalid Git package source: https://evil.example/a/../victim/repo",
+				},
+			]);
 			expect(runCommandSpy).not.toHaveBeenCalled();
 		});
 
@@ -1209,7 +1215,7 @@ Content`,
 			});
 		});
 
-		it("should use npmCommand argv for npm root lookup and invalidate cached root when npmCommand changes", () => {
+		it("should use npmCommand argv for npm root lookup and invalidate cached root when npmCommand changes", async () => {
 			settingsManager = SettingsManager.inMemory({
 				npmCommand: ["mise", "exec", "node@20", "--", "npm"],
 			});
@@ -1239,12 +1245,12 @@ Content`,
 					throw new Error(`unexpected args ${args.join(" ")}`);
 				});
 
-			expect(packageManager.getInstalledPath("npm:@scope/pkg", "user")).toBe(join(root20, "@scope", "pkg"));
+			expect(await packageManager.getInstalledPath("npm:@scope/pkg", "user")).toBe(join(root20, "@scope", "pkg"));
 			expect(runCommandSyncSpy).toHaveBeenNthCalledWith(1, "mise", ["exec", "node@20", "--", "npm", "root", "-g"]);
 
 			settingsManager.setNpmCommand(["mise", "exec", "node@22", "--", "npm"]);
 
-			expect(packageManager.getInstalledPath("npm:@scope/pkg", "user")).toBeUndefined();
+			expect(await packageManager.getInstalledPath("npm:@scope/pkg", "user")).toBeUndefined();
 			expect(runCommandSyncSpy).toHaveBeenNthCalledWith(2, "mise", ["exec", "node@22", "--", "npm", "root", "-g"]);
 		});
 
@@ -1292,7 +1298,7 @@ Content`,
 				second.extensions.some((r) => r.path === join(packagePath, "extensions", "index.ts") && r.enabled),
 			).toBe(true);
 			expect(runCommandSpy).toHaveBeenCalledTimes(1);
-			expect(packageManager.getInstalledPath("npm:pnpm-pkg", "user")).toBe(packagePath);
+			expect(await packageManager.getInstalledPath("npm:pnpm-pkg", "user")).toBe(packagePath);
 		});
 
 		it("should load legacy pnpm global package paths from pnpm list output", async () => {
@@ -1335,10 +1341,10 @@ Content`,
 				result.extensions.some((r) => r.path === join(packagePath, "extensions", "index.ts") && r.enabled),
 			).toBe(true);
 			expect(runCommandSpy).not.toHaveBeenCalled();
-			expect(packageManager.getInstalledPath("npm:pnpm-pkg", "user")).toBe(packagePath);
+			expect(await packageManager.getInstalledPath("npm:pnpm-pkg", "user")).toBe(packagePath);
 		});
 
-		it("should resolve wrapped pnpm global package paths from pnpm list output", () => {
+		it("should resolve wrapped pnpm global package paths from pnpm list output", async () => {
 			settingsManager = SettingsManager.inMemory({
 				npmCommand: ["mise", "exec", "node@20", "--", "pnpm"],
 			});
@@ -1361,10 +1367,10 @@ Content`,
 				throw new Error(`unexpected args ${args.join(" ")}`);
 			});
 
-			expect(packageManager.getInstalledPath("npm:pnpm-pkg", "user")).toBe(packagePath);
+			expect(await packageManager.getInstalledPath("npm:pnpm-pkg", "user")).toBe(packagePath);
 		});
 
-		it("should ignore malformed legacy pnpm global package lists", () => {
+		it("should ignore malformed legacy pnpm global package lists", async () => {
 			settingsManager = SettingsManager.inMemory({
 				npmCommand: ["pnpm"],
 			});
@@ -1376,7 +1382,7 @@ Content`,
 
 			vi.spyOn(packageManager as any, "runCommandSync").mockReturnValue("not json");
 
-			expect(packageManager.getInstalledPath("npm:pnpm-pkg", "user")).toBeUndefined();
+			expect(await packageManager.getInstalledPath("npm:pnpm-pkg", "user")).toBeUndefined();
 		});
 	});
 
@@ -1385,7 +1391,10 @@ Content`,
 			const events: ProgressEvent[] = [];
 			packageManager.setProgressCallback((event) => events.push(event));
 
-			// Use public install method which emits progress events
+			vi.spyOn(packageManager as unknown as PackageManagerInternals, "runCommand").mockRejectedValue(
+				new Error("Fixture npm failure"),
+			);
+			// Use public install method with a deterministic subprocess failure.
 			try {
 				await packageManager.install("npm:nonexistent-package@1.0.0");
 			} catch {
@@ -1399,6 +1408,9 @@ Content`,
 		});
 
 		it("should recognize github URLs without git: prefix", async () => {
+			const command = vi
+				.spyOn(packageManager as unknown as PackageManagerInternals, "runCommand")
+				.mockRejectedValue(new Error("Fixture Git failure"));
 			const events: ProgressEvent[] = [];
 			packageManager.setProgressCallback((event) => events.push(event));
 			const previousGitTerminalPrompt = process.env.GIT_TERMINAL_PROMPT;
@@ -1421,6 +1433,11 @@ Content`,
 
 			// Should have attempted clone, not thrown unsupported error
 			expect(events.some((e) => e.type === "start" && e.action === "install")).toBe(true);
+			expect(command).toHaveBeenCalledWith("git", [
+				"clone",
+				"https://github.com/nonexistent/repo",
+				expect.any(String),
+			]);
 		});
 
 		it("should parse package source types from docs examples", () => {
@@ -2380,13 +2397,13 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 					);
 				});
 
-			expect(packageManager.getInstalledPath("npm:legacy-pkg", "user")).toBe(legacyPath);
+			expect(await packageManager.getInstalledPath("npm:legacy-pkg", "user")).toBe(legacyPath);
 
 			await packageManager.update("npm:legacy-pkg");
 
 			expect(runCommandCaptureSpy).not.toHaveBeenCalled();
 			expect(runCommandSpy).toHaveBeenCalledTimes(1);
-			expect(packageManager.getInstalledPath("npm:legacy-pkg", "user")).toBe(managedPath);
+			expect(await packageManager.getInstalledPath("npm:legacy-pkg", "user")).toBe(managedPath);
 		});
 
 		it("should batch npm updates per scope and run git updates in parallel while skipping pinned npm and current packages", async () => {

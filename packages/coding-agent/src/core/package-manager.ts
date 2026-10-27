@@ -38,14 +38,28 @@ import type { Readable } from "node:stream";
 import { globSync } from "glob";
 import ignore from "ignore";
 import { minimatch } from "minimatch";
-import { CONFIG_DIR_NAME } from "../config.ts";
+import { CONFIG_DIR_NAME, VERSION } from "../config.ts";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.ts";
 import { type GitSource, isSafeGitInstallPath, parseGitUrl } from "../utils/git.ts";
 import { canonicalizePath, isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
 import { type GripManifest, readGripManifest } from "./grip-manifest.ts";
+import {
+	assertOfficialScope,
+	type OfficialSource,
+	parseOfficialSource,
+	parseOfficialUpdatePolicy,
+} from "./official-catalog.ts";
+import { describeOfficialCatalog, type OfficialCatalogView } from "./official-catalog-view.ts";
+import {
+	OfficialExtensionInstaller,
+	type OfficialInstallation,
+	type OfficialInstallerDependencies,
+	type OfficialOperationOptions,
+	type OfficialStartupResult,
+} from "./official-installer.ts";
 import { isStdoutTakenOver } from "./output-guard.ts";
 import type { PackageSource, Settings, SettingsManager } from "./settings-manager.ts";
-import type { SourceOrigin, SourceScope } from "./source-info.ts";
+import type { OfficialPackageInfo, SourceOrigin, SourceScope } from "./source-info.ts";
 import type { WorkspaceIdentity } from "./workspace-identity.ts";
 
 const NETWORK_TIMEOUT_MS = 10000;
@@ -69,6 +83,7 @@ export interface PathMetadata {
 	origin: SourceOrigin;
 	baseDir?: string;
 	workspace?: WorkspaceIdentity;
+	official?: OfficialPackageInfo;
 }
 
 export interface ResolvedResource {
@@ -77,7 +92,14 @@ export interface ResolvedResource {
 	metadata: PathMetadata;
 }
 
+export interface PackageResolutionDiagnostic {
+	source: string;
+	scope: SourceScope;
+	error: string;
+}
+
 export interface ResolvedPaths {
+	diagnostics: PackageResolutionDiagnostic[];
 	extensions: ResolvedResource[];
 	skills: ResolvedResource[];
 	rules: ResolvedResource[];
@@ -109,11 +131,20 @@ export interface ConfiguredPackage {
 	source: string;
 	scope: InstalledSourceScope;
 	filtered: boolean;
+	identity: string | null;
+	managed: boolean;
 	installedPath?: string;
+	version: string | null;
+	error: string | null;
 }
 
 export interface PackageScopeOptions {
 	local?: boolean;
+}
+
+export interface PackageMutationOptions extends PackageScopeOptions {
+	/** Official installer controls; these do not promise cancellation of npm/Git subprocesses. */
+	official?: Partial<OfficialOperationOptions>;
 }
 
 export interface ExtensionSourceResolutionOptions extends PackageScopeOptions {
@@ -122,23 +153,26 @@ export interface ExtensionSourceResolutionOptions extends PackageScopeOptions {
 
 export interface PackageManager {
 	resolve(onMissing?: (source: string) => Promise<MissingSourceAction>): Promise<ResolvedPaths>;
-	install(source: string, options?: PackageScopeOptions): Promise<void>;
-	installAndPersist(source: string, options?: PackageScopeOptions): Promise<void>;
-	remove(source: string, options?: PackageScopeOptions): Promise<void>;
-	removeAndPersist(source: string, options?: PackageScopeOptions): Promise<boolean>;
+	install(source: string, options?: PackageMutationOptions): Promise<void>;
+	installAndPersist(source: string, options?: PackageMutationOptions): Promise<void>;
+	remove(source: string, options?: PackageMutationOptions): Promise<void>;
+	removeAndPersist(source: string, options?: PackageMutationOptions): Promise<boolean>;
 	update(source?: string): Promise<void>;
-	listConfiguredPackages(): ConfiguredPackage[];
+	startupOfficialUpdates(noExtensions: boolean): Promise<OfficialStartupResult>;
+	getOfficialCatalog(options?: Partial<OfficialOperationOptions>): Promise<OfficialCatalogView>;
+	listConfiguredPackages(): Promise<ConfiguredPackage[]>;
 	resolveExtensionSources(sources: string[], options?: ExtensionSourceResolutionOptions): Promise<ResolvedPaths>;
 	addSourceToSettings(source: string, options?: PackageScopeOptions): boolean;
 	removeSourceFromSettings(source: string, options?: PackageScopeOptions): boolean;
 	setProgressCallback(callback: ProgressCallback | undefined): void;
-	getInstalledPath(source: string, scope: InstalledSourceScope): string | undefined;
+	getInstalledPath(source: string, scope: InstalledSourceScope): Promise<string | undefined>;
 }
 
 interface PackageManagerOptions {
 	cwd: string;
 	agentDir: string;
 	settingsManager: SettingsManager;
+	officialDependencies?: Partial<OfficialInstallerDependencies>;
 }
 type NpmSource = {
 	type: "npm";
@@ -152,17 +186,17 @@ type LocalSource = {
 	path: string;
 };
 
-type ParsedSource = NpmSource | GitSource | LocalSource;
-interface ConfiguredUpdateSource {
+type ParsedSource = NpmSource | GitSource | LocalSource | OfficialSource;
+export interface ConfiguredPackageTarget {
 	source: string;
 	scope: InstalledSourceScope;
 }
 
-interface NpmUpdateTarget extends ConfiguredUpdateSource {
+interface NpmUpdateTarget extends ConfiguredPackageTarget {
 	parsed: NpmSource;
 }
 
-interface GitUpdateTarget extends ConfiguredUpdateSource {
+interface GitUpdateTarget extends ConfiguredPackageTarget {
 	parsed: GitSource;
 }
 
@@ -197,6 +231,7 @@ interface AccumulatedResource {
 type ResourceMap = Map<string, AccumulatedResource>;
 
 interface ResourceAccumulator {
+	diagnostics: PackageResolutionDiagnostic[];
 	extensions: ResourceMap;
 	skills: ResourceMap;
 	rules: ResourceMap;
@@ -916,17 +951,82 @@ function applyPatterns(allPaths: string[], patterns: string[], baseDir: string):
 }
 
 export class DefaultPackageManager implements PackageManager {
+	/** One phase per configured agent root, shared by session replacements and embedded runtimes. */
+	private static readonly officialStartup = new Map<string, Promise<OfficialStartupResult>>();
 	private cwd: string;
 	private agentDir: string;
 	private settingsManager: SettingsManager;
 	private globalNpmRoot: string | undefined;
 	private globalNpmRootCommandKey: string | undefined;
 	private progressCallback: ProgressCallback | undefined;
+	private readonly officialInstaller: OfficialExtensionInstaller;
 
 	constructor(options: PackageManagerOptions) {
 		this.cwd = resolvePath(options.cwd);
 		this.agentDir = resolvePath(options.agentDir);
 		this.settingsManager = options.settingsManager;
+		this.officialInstaller = new OfficialExtensionInstaller(
+			{ agentDir: this.agentDir, settingsManager: this.settingsManager, gripVersion: VERSION },
+			options.officialDependencies,
+		);
+	}
+
+	private officialOperationOptions(
+		options: Partial<OfficialOperationOptions> = {},
+	): Partial<OfficialOperationOptions> {
+		const policy = parseOfficialUpdatePolicy(this.settingsManager.getGlobalSettings().officialExtensions);
+		return {
+			timeoutMs: policy.requestTimeoutMs,
+			catalogMaxAgeMs: policy.catalogMaxAgeMs,
+			...options,
+			offline: isOfflineModeEnabled() || options.offline === true,
+		};
+	}
+
+	/** Read-only discovery; explicit management is independent of the startup update latch. */
+	async getOfficialCatalog(options: Partial<OfficialOperationOptions> = {}): Promise<OfficialCatalogView> {
+		const operation = this.officialOperationOptions(options);
+		const result = await this.officialInstaller.catalog(operation);
+		return describeOfficialCatalog({ result, gripVersion: VERSION, offline: operation.offline === true });
+	}
+
+	/** Explicit initial-load phase; resolution, reload, inventory and manual management never invoke it. */
+	async startupOfficialUpdates(noExtensions: boolean): Promise<OfficialStartupResult> {
+		const key = canonicalizePath(this.agentDir);
+		let startup = DefaultPackageManager.officialStartup.get(key);
+		if (!startup) {
+			startup = this.runOfficialStartupUpdates(noExtensions);
+			DefaultPackageManager.officialStartup.set(key, startup);
+		}
+		return structuredClone(await startup);
+	}
+
+	private async runOfficialStartupUpdates(noExtensions: boolean): Promise<OfficialStartupResult> {
+		const result: OfficialStartupResult = { updated: [], diagnostics: [] };
+		if (noExtensions || isOfflineModeEnabled()) return result;
+		try {
+			await this.settingsManager.reload();
+			if (this.settingsManager.getLoadError("global")) throw new Error("Unreadable global settings");
+			const settings = this.settingsManager.getGlobalSettings();
+			const ids: string[] = [];
+			for (const pkg of settings.packages ?? []) {
+				try {
+					const source = parseOfficialSource(typeof pkg === "string" ? pkg : pkg.source);
+					if (source) ids.push(source.id);
+				} catch {
+					// Configured-source resolution owns malformed selection diagnostics.
+				}
+			}
+			return await this.officialInstaller.startupUpdates(ids, { noExtensions, policy: settings.officialExtensions });
+		} catch {
+			result.diagnostics.push({
+				source: "official",
+				code: "settings",
+				message:
+					"Official startup updates could not run. Check global officialExtensions settings and run grip list to review installed extensions.",
+			});
+			return result;
+		}
 	}
 
 	setProgressCallback(callback: ProgressCallback | undefined): void {
@@ -935,6 +1035,10 @@ export class DefaultPackageManager implements PackageManager {
 
 	addSourceToSettings(source: string, options?: PackageScopeOptions): boolean {
 		const scope: SourceScope = options?.local ? "project" : "user";
+		if (parseOfficialSource(source)) {
+			assertOfficialScope(scope);
+			throw new Error("Official membership is transactional; use installAndPersist");
+		}
 		const currentSettings =
 			scope === "project" ? this.settingsManager.getProjectSettings() : this.settingsManager.getUserSettings();
 		const currentPackages = currentSettings.packages ?? [];
@@ -966,6 +1070,10 @@ export class DefaultPackageManager implements PackageManager {
 
 	removeSourceFromSettings(source: string, options?: PackageScopeOptions): boolean {
 		const scope: SourceScope = options?.local ? "project" : "user";
+		if (parseOfficialSource(source)) {
+			assertOfficialScope(scope);
+			throw new Error("Official membership is transactional; use removeAndPersist");
+		}
 		const currentSettings =
 			scope === "project" ? this.settingsManager.getProjectSettings() : this.settingsManager.getUserSettings();
 		const currentPackages = currentSettings.packages ?? [];
@@ -982,8 +1090,12 @@ export class DefaultPackageManager implements PackageManager {
 		return true;
 	}
 
-	getInstalledPath(source: string, scope: InstalledSourceScope): string | undefined {
+	async getInstalledPath(source: string, scope: InstalledSourceScope): Promise<string | undefined> {
 		const parsed = this.parseSource(source);
+		if (parsed.type === "official") {
+			assertOfficialScope(scope);
+			return (await this.officialInstaller.active(parsed.id))?.path;
+		}
 		if (parsed.type === "npm") {
 			const path = this.getNpmInstallPath(parsed, scope);
 			return existsSync(path) ? path : undefined;
@@ -1036,7 +1148,7 @@ export class DefaultPackageManager implements PackageManager {
 		}
 
 		// Dedupe: project scope wins over user for the same package identity
-		const packageSources = this.dedupePackages(allPackages);
+		const packageSources = this.dedupePackages(allPackages, accumulator.diagnostics);
 		await this.resolvePackageSources(packageSources, accumulator, onMissing);
 
 		const globalBaseDir = this.agentDir;
@@ -1086,38 +1198,63 @@ export class DefaultPackageManager implements PackageManager {
 		return this.toResolvedPaths(accumulator);
 	}
 
-	listConfiguredPackages(): ConfiguredPackage[] {
-		const userSettings = this.settingsManager.getUserSettings();
-		const projectSettings = this.settingsManager.getProjectSettings();
+	async listConfiguredPackages(): Promise<ConfiguredPackage[]> {
 		const configuredPackages: ConfiguredPackage[] = [];
-
-		for (const pkg of userSettings.packages ?? []) {
-			const source = typeof pkg === "string" ? pkg : pkg.source;
-			configuredPackages.push({
-				source,
-				scope: "user",
-				filtered: typeof pkg === "object",
-				installedPath: this.getInstalledPath(source, "user"),
-			});
+		for (const [settings, scope] of [
+			[this.settingsManager.getUserSettings(), "user"],
+			[this.settingsManager.getProjectSettings(), "project"],
+		] as const) {
+			for (const pkg of settings.packages ?? []) {
+				configuredPackages.push(await this.describeConfiguredPackage(pkg, scope));
+			}
 		}
-
-		for (const pkg of projectSettings.packages ?? []) {
-			const source = typeof pkg === "string" ? pkg : pkg.source;
-			configuredPackages.push({
-				source,
-				scope: "project",
-				filtered: typeof pkg === "object",
-				installedPath: this.getInstalledPath(source, "project"),
-			});
-		}
-
 		return configuredPackages;
 	}
 
-	async install(source: string, options?: PackageScopeOptions): Promise<void> {
+	private async describeConfiguredPackage(
+		pkg: PackageSource,
+		scope: InstalledSourceScope,
+	): Promise<ConfiguredPackage> {
+		const source = typeof pkg === "string" ? pkg : pkg.source;
+		const configured: ConfiguredPackage = {
+			source,
+			scope,
+			filtered: typeof pkg === "object",
+			identity: null,
+			managed: false,
+			version: null,
+			error: null,
+		};
+		try {
+			const parsed = this.parseSource(source);
+			configured.identity = this.getPackageIdentity(source, scope);
+			configured.managed = parsed.type !== "local";
+			if (parsed.type === "official") {
+				assertOfficialScope(scope);
+				const active = await this.officialInstaller.active(parsed.id);
+				configured.installedPath = active?.path;
+				configured.version = active?.installed.version ?? null;
+			} else {
+				configured.installedPath = await this.getInstalledPath(source, scope);
+				if (configured.installedPath && parsed.type !== "local") {
+					configured.version = this.getInstalledNpmVersion(configured.installedPath) ?? null;
+				}
+			}
+		} catch (error) {
+			configured.error = error instanceof Error ? error.message : String(error);
+		}
+		return configured;
+	}
+
+	async install(source: string, options?: PackageMutationOptions): Promise<void> {
 		const parsed = this.parseSource(source);
 		const scope: SourceScope = options?.local ? "project" : "user";
 		await this.withProgress("install", source, `Installing ${source}...`, async () => {
+			if (parsed.type === "official") {
+				assertOfficialScope(scope);
+				await this.officialInstaller.install(parsed.id, this.officialOperationOptions(options?.official));
+				return;
+			}
 			if (parsed.type === "npm") {
 				await this.installNpm(parsed, scope, false);
 				return;
@@ -1137,15 +1274,20 @@ export class DefaultPackageManager implements PackageManager {
 		});
 	}
 
-	async installAndPersist(source: string, options?: PackageScopeOptions): Promise<void> {
+	async installAndPersist(source: string, options?: PackageMutationOptions): Promise<void> {
 		await this.install(source, options);
-		this.addSourceToSettings(source, options);
+		if (!parseOfficialSource(source)) this.addSourceToSettings(source, options);
 	}
 
-	async remove(source: string, options?: PackageScopeOptions): Promise<void> {
+	async remove(source: string, options?: PackageMutationOptions): Promise<void> {
 		const parsed = this.parseSource(source);
 		const scope: SourceScope = options?.local ? "project" : "user";
 		await this.withProgress("remove", source, `Removing ${source}...`, async () => {
+			if (parsed.type === "official") {
+				assertOfficialScope(scope);
+				await this.officialInstaller.remove(parsed.id, this.officialOperationOptions(options?.official));
+				return;
+			}
 			if (parsed.type === "npm") {
 				await this.uninstallNpm(parsed, scope);
 				return;
@@ -1161,7 +1303,14 @@ export class DefaultPackageManager implements PackageManager {
 		});
 	}
 
-	async removeAndPersist(source: string, options?: PackageScopeOptions): Promise<boolean> {
+	async removeAndPersist(source: string, options?: PackageMutationOptions): Promise<boolean> {
+		const official = parseOfficialSource(source);
+		if (official) {
+			assertOfficialScope(options?.local ? "project" : "user");
+			const selected = await this.settingsManager.officialPackageMembership(official.id, null);
+			await this.remove(source, options);
+			return selected;
+		}
 		await this.remove(source, options);
 		return this.removeSourceFromSettings(source, options);
 	}
@@ -1170,8 +1319,8 @@ export class DefaultPackageManager implements PackageManager {
 		packages: PackageSource[],
 		scope: InstalledSourceScope,
 		identity: string | undefined,
-	): ConfiguredUpdateSource[] {
-		const sources: ConfiguredUpdateSource[] = [];
+	): ConfiguredPackageTarget[] {
+		const sources: ConfiguredPackageTarget[] = [];
 		for (const pkg of packages) {
 			const packageSource = typeof pkg === "string" ? pkg : pkg.source;
 			if (identity && this.getPackageIdentity(packageSource, scope) !== identity) continue;
@@ -1197,7 +1346,7 @@ export class DefaultPackageManager implements PackageManager {
 		await this.updateConfiguredSources(updateSources);
 	}
 
-	private classifyConfiguredUpdateSources(sources: ConfiguredUpdateSource[]): PackageUpdateCandidates {
+	private classifyConfiguredUpdateSources(sources: ConfiguredPackageTarget[]): PackageUpdateCandidates {
 		const candidates: PackageUpdateCandidates = { npm: [], git: [] };
 		for (const entry of sources) {
 			const parsed = this.parseSource(entry.source);
@@ -1212,11 +1361,18 @@ export class DefaultPackageManager implements PackageManager {
 		return candidates;
 	}
 
-	private async updateConfiguredSources(sources: ConfiguredUpdateSource[]): Promise<void> {
+	private async updateConfiguredSources(sources: ConfiguredPackageTarget[]): Promise<void> {
 		if (isOfflineModeEnabled() || sources.length === 0) {
 			return;
 		}
-
+		for (const entry of sources) {
+			const parsed = this.parseSource(entry.source);
+			if (parsed.type !== "official") continue;
+			assertOfficialScope(entry.scope);
+			await this.withProgress("update", entry.source, `Updating ${entry.source}...`, async () => {
+				await this.officialInstaller.update(parsed.id, { refresh: true, offline: isOfflineModeEnabled() });
+			});
+		}
 		const candidates = this.classifyConfiguredUpdateSources(sources);
 
 		const npmCheckTasks = candidates.npm.map((entry) => async () => ({
@@ -1335,13 +1491,34 @@ export class DefaultPackageManager implements PackageManager {
 			.map((entry) => async (): Promise<PackageUpdate | undefined> => {
 				const source = typeof entry.pkg === "string" ? entry.pkg : entry.pkg.source;
 				const parsed = this.parseSource(source);
-				if (parsed.type === "local" || parsed.pinned) return undefined;
+				if (parsed.type === "local" || parsed.type === "official" || parsed.pinned) return undefined;
 				if (parsed.type === "npm") return this.getAvailableNpmUpdate(source, parsed, entry.scope);
 				return this.getAvailableGitUpdate(source, parsed, entry.scope);
 			});
 
 		const results = await this.runWithConcurrency(checks, UPDATE_CHECK_CONCURRENCY);
 		return results.filter((result): result is PackageUpdate => result !== undefined);
+	}
+
+	private collectOfficialPackageResources(
+		installation: OfficialInstallation,
+		accumulator: ResourceAccumulator,
+		filter: PackageFilter | undefined,
+		metadata: PathMetadata,
+	): void {
+		for (const resourceType of RESOURCE_TYPES) {
+			const paths = installation.release.manifest.grip[resourceType].map((entry) => join(installation.path, entry));
+			const patterns = filter?.[resourceType];
+			const enabled = patterns === undefined ? new Set(paths) : applyPatterns(paths, patterns, installation.path);
+			for (const path of paths) {
+				this.addResource(
+					this.getTargetMap(accumulator, resourceType),
+					path,
+					metadata,
+					patterns?.length === 0 ? false : enabled.has(path),
+				);
+			}
+		}
 	}
 
 	private async resolvePackageSources(
@@ -1354,26 +1531,42 @@ export class DefaultPackageManager implements PackageManager {
 			const filter = typeof pkg === "object" ? pkg : undefined;
 			const parsed = this.parseSource(source);
 			const metadata: PathMetadata = { source, scope, origin: "package" };
-
+			const context: ManagedPackageResolutionContext = { source, scope, accumulator, filter, metadata, onMissing };
+			if (parsed.type === "official") {
+				await this.resolveOfficialPackageSource(parsed, context);
+				continue;
+			}
 			if (parsed.type === "local") {
 				const baseDir = this.getBaseDirForScope(scope);
 				this.resolveLocalExtensionSource(parsed, accumulator, filter, metadata, baseDir);
 				continue;
 			}
 
-			const context: ManagedPackageResolutionContext = {
-				source,
-				scope,
-				accumulator,
-				filter,
-				metadata,
-				onMissing,
-			};
 			if (parsed.type === "npm") {
 				await this.resolveNpmPackageSource(parsed, context);
 				continue;
 			}
 			await this.resolveGitPackageSource(parsed, context);
+		}
+	}
+
+	private async resolveOfficialPackageSource(
+		parsed: OfficialSource,
+		context: ManagedPackageResolutionContext,
+	): Promise<void> {
+		const { source, scope, accumulator, filter, metadata } = context;
+		assertOfficialScope(scope);
+		try {
+			const active = await this.officialInstaller.active(parsed.id);
+			if (!active) {
+				accumulator.diagnostics.push({ source, scope, error: `Official extension ${parsed.id} is not installed` });
+				return;
+			}
+			metadata.baseDir = active.path;
+			metadata.official = { id: parsed.id, version: active.installed.version };
+			this.collectOfficialPackageResources(active, accumulator, filter, metadata);
+		} catch (error) {
+			accumulator.diagnostics.push({ source, scope, error: error instanceof Error ? error.message : String(error) });
 		}
 	}
 
@@ -1474,6 +1667,7 @@ export class DefaultPackageManager implements PackageManager {
 		if (parsed.type === "git") {
 			return `git:${parsed.host}/${parsed.path}`;
 		}
+		if (parsed.type === "official") return `official:${parsed.id}`;
 		return `local:${this.resolvePath(parsed.path)}`;
 	}
 
@@ -1484,6 +1678,10 @@ export class DefaultPackageManager implements PackageManager {
 		}
 		if (parsed.type === "git") {
 			return `git:${parsed.host}/${parsed.path}`;
+		}
+		if (parsed.type === "official") {
+			assertOfficialScope(scope);
+			return `official:${parsed.id}`;
 		}
 		const baseDir = this.getBaseDirForScope(scope);
 		return `local:${this.resolvePathFromBase(parsed.path, baseDir)}`;
@@ -1534,6 +1732,8 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private parseSource(source: string): ParsedSource {
+		const official = parseOfficialSource(source);
+		if (official) return official;
 		if (source.startsWith("npm:")) {
 			const spec = source.slice("npm:".length).trim();
 			const { name, version } = this.parseNpmSpec(spec);
@@ -1779,6 +1979,10 @@ export class DefaultPackageManager implements PackageManager {
 			// Use host/path for identity to normalize SSH and HTTPS
 			return `git:${parsed.host}/${parsed.path}`;
 		}
+		if (parsed.type === "official") {
+			if (scope) assertOfficialScope(scope);
+			return `official:${parsed.id}`;
+		}
 		if (scope) {
 			const baseDir = this.getBaseDirForScope(scope);
 			return `local:${this.resolvePathFromBase(parsed.path, baseDir)}`;
@@ -1790,18 +1994,29 @@ export class DefaultPackageManager implements PackageManager {
 	 * Dedupe packages: if same package identity appears in both global and project,
 	 * keep only the project one (project wins).
 	 */
-	private dedupePackages(packages: ScopedPackageSource[]): ScopedPackageSource[] {
+	private dedupePackages(
+		packages: ScopedPackageSource[],
+		diagnostics?: PackageResolutionDiagnostic[],
+	): ScopedPackageSource[] {
 		const seen = new Map<string, ScopedPackageSource>();
 
 		for (const entry of packages) {
 			const sourceStr = typeof entry.pkg === "string" ? entry.pkg : entry.pkg.source;
-			const identity = this.getPackageIdentity(sourceStr, entry.scope);
+			let identity: string;
+			try {
+				identity = this.getPackageIdentity(sourceStr, entry.scope);
+			} catch (error) {
+				if (!diagnostics) throw error;
+				diagnostics.push({
+					source: sourceStr,
+					scope: entry.scope,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				continue;
+			}
 
 			const existing = seen.get(identity);
-			if (!existing) {
-				seen.set(identity, entry);
-			} else if (entry.scope === "project" && existing.scope === "user") {
-				// Project wins over user
+			if (!existing || (entry.scope === "project" && existing.scope === "user")) {
 				seen.set(identity, entry);
 			}
 			// If existing is project and new is global, keep existing (project)
@@ -2860,6 +3075,7 @@ export class DefaultPackageManager implements PackageManager {
 
 	private createAccumulator(): ResourceAccumulator {
 		return {
+			diagnostics: [],
 			extensions: new Map(),
 			skills: new Map(),
 			rules: new Map(),
@@ -2887,6 +3103,7 @@ export class DefaultPackageManager implements PackageManager {
 		};
 
 		return {
+			diagnostics: accumulator.diagnostics,
 			extensions: mapToResolved(accumulator.extensions),
 			skills: mapToResolved(accumulator.skills),
 			rules: mapToResolved(accumulator.rules),

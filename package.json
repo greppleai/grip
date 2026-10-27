@@ -29,6 +29,7 @@
 		"check:install-lock:coding-agent": "node scripts/generate-coding-agent-install-lock.mjs --check",
 		"check:ts-imports": "node scripts/check-ts-relative-imports.mjs",
 		"profile:tui": "node scripts/profile-coding-agent-node.mjs --mode tui",
+		"extensions:pack": "node scripts/official-extensions-cli.mjs pack",
 		"profile:rpc": "node scripts/profile-coding-agent-node.mjs --mode rpc",
 		"test": "npm run test:grip-config && npm run test --workspaces --if-present",
 		"test:grip-config": "node --test .grip/biome/*.test.mjs .grip/hooks/*.test.mjs",

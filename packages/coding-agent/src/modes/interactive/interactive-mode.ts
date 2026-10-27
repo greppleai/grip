@@ -35,6 +35,7 @@ import type {
 	Keybinding,
 	KeyId,
 	MarkdownTheme,
+	OverlayHandle,
 	OverlayOptions,
 	SlashCommand,
 	Terminal,
@@ -187,6 +188,7 @@ import { CustomMessageComponent } from "./components/custom-message.ts";
 import { DynamicBorder } from "./components/dynamic-border.ts";
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
+import { ExtensionManagerComponent } from "./components/extension-manager.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
 import { FooterComponent } from "./components/footer.ts";
 import { HookExecutionComponent } from "./components/hook-execution.ts";
@@ -203,6 +205,7 @@ import { ToolExecutionComponent } from "./components/tool-execution.ts";
 import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
+import { ExtensionManagerReloadCoordinator } from "./extension-manager-reload.ts";
 import {
 	getAvailableThemes,
 	getAvailableThemesWithPaths,
@@ -601,6 +604,10 @@ export class InteractiveMode {
 	private footerDataProvider: FooterDataProvider;
 	// Stored so the same manager can be injected into custom editors, selectors, and extension UI.
 	private keybindings: KeybindingsManager;
+	private extensionManager: { component: ExtensionManagerComponent; handle: OverlayHandle } | undefined;
+	private extensionManagerDisposal: Promise<void> = Promise.resolve();
+	private readonly extensionManagerReload: ExtensionManagerReloadCoordinator;
+	private extensionManagerInvalidating = false;
 	private version: string;
 	private isInitialized = false;
 	private transcriptRendered = false;
@@ -733,12 +740,34 @@ export class InteractiveMode {
 			getMode: () => this.settingsManager.getMermaidRenderingMode(),
 			theme,
 		});
-		this.runtimeHost.setBeforeSessionInvalidate(() => {
-			this.resetExtensionUI();
+		this.extensionManagerReload = new ExtensionManagerReloadCoordinator({
+			getSession: () => this.session,
+			reload: (session) => this.reloadResources(session),
+			onStatus: (status) => {
+				if (this.isShuttingDown || this.extensionManagerInvalidating) return;
+				if (status.phase === "restart-required") this.showWarning(status.message);
+				else this.showStatus(status.message);
+			},
+		});
+		this.runtimeHost.setBeforeSessionInvalidate(async () => {
+			this.extensionManagerReload.invalidate();
+			this.extensionManagerInvalidating = true;
+			try {
+				await this.disposeExtensionManager();
+				this.resetExtensionUI();
+			} catch (error) {
+				this.extensionManagerInvalidating = false;
+				throw error;
+			}
 		});
 		this.runtimeHost.setRebindSession(async () => {
-			await this.restoreCurrentSessionSandbox();
-			await this.rebindCurrentSession();
+			try {
+				await this.restoreCurrentSessionSandbox();
+				await this.rebindCurrentSession();
+			} finally {
+				this.extensionManagerInvalidating = false;
+				this.recordExtensionManagerChanges(this.extensionManagerReload.reloadRequired);
+			}
 		});
 		this.version = VERSION;
 		this.renderer = createInteractiveTui({
@@ -840,6 +869,7 @@ export class InteractiveMode {
 	private createBaseAutocompleteProvider(): AutocompleteProvider {
 		// Commands without arguments remain selectable after a trailing space (e.g. /quit ).
 		const noArgumentCommands = new Set([
+			"extensions",
 			"settings",
 			"scoped-models",
 			"share",
@@ -1412,9 +1442,14 @@ export class InteractiveMode {
 		void this.maybeWarnAboutAnthropicSubscriptionAuth();
 	}
 
+	/** Track command lifetimes without changing AgentSession's prompt-admission semantics. */
+	private async promptSession(message: string, options?: PromptOptions): Promise<void> {
+		await this.extensionManagerReload.trackCommand(() => this.session.prompt(message, options));
+	}
+
 	private async promptAndReportError(message: string, options?: PromptOptions): Promise<void> {
 		try {
-			await this.session.prompt(message, options);
+			await this.promptSession(message, options);
 		} catch (error: unknown) {
 			this.showError(error instanceof Error ? error.message : "Unknown error occurred");
 		}
@@ -2315,9 +2350,16 @@ export class InteractiveMode {
 				// Cast to KeyId - extension shortcuts use the same format
 				if (matchesKey(data, shortcutStr as KeyId)) {
 					// Run handler async, don't block input
-					Promise.resolve(shortcut.handler(createContext())).catch((err) => {
-						this.showError(`Shortcut handler error: ${err instanceof Error ? err.message : String(err)}`);
-					});
+					this.extensionManagerReload
+						.trackCommand(async () => {
+							if (this.session.extensionRunner !== extensionRunner) {
+								throw new Error("Extension shortcuts changed during reload; press the shortcut again.");
+							}
+							await shortcut.handler(createContext());
+						})
+						.catch((err) => {
+							this.showError(`Shortcut handler error: ${err instanceof Error ? err.message : String(err)}`);
+						});
 					return true;
 				}
 			}
@@ -2532,6 +2574,7 @@ export class InteractiveMode {
 	}
 
 	private resetExtensionUI(): void {
+		void this.disposeExtensionManager();
 		if (this.extensionSelector) {
 			this.hideExtensionSelector();
 		}
@@ -3528,6 +3571,12 @@ export class InteractiveMode {
 	}
 
 	private async handleBuiltInEditorCommand(text: string): Promise<boolean> {
+		if (this.matchesEditorCommand(text, "/extensions")) {
+			this.editor.setText("");
+			if (text === "/extensions") await this.showExtensionManager();
+			else this.showWarning("Usage: /extensions");
+			return true;
+		}
 		const action =
 			(this.matchesEditorCommand(text, "/system-prompt")
 				? {
@@ -3575,7 +3624,7 @@ export class InteractiveMode {
 		if (this.isExtensionCommand(text)) {
 			this.editor.addToHistory?.(text);
 			this.editor.setText("");
-			await this.session.prompt(text);
+			await this.promptSession(text);
 		} else {
 			this.queueCompactionMessage(text, "steer");
 		}
@@ -3586,7 +3635,7 @@ export class InteractiveMode {
 		if (!this.session.isStreaming) return false;
 		this.editor.addToHistory?.(text);
 		this.editor.setText("");
-		await this.session.prompt(text, { streamingBehavior: "steer" });
+		await this.promptSession(text, { streamingBehavior: "steer" });
 		this.updatePendingMessagesDisplay();
 		this.ui.requestRender();
 		return true;
@@ -3600,15 +3649,17 @@ export class InteractiveMode {
 	}
 
 	private async handleEditorSubmit(text: string): Promise<void> {
-		const submittedText = text.trim();
-		if (!submittedText) return;
-		// Keep attempted commands as well as accepted prompts available through editor history.
-		this.editor.addToHistory?.(submittedText);
-		if (await this.handleBuiltInEditorCommand(submittedText)) return;
-		if (await this.handleBashEditorSubmission(submittedText)) return;
-		if (await this.handleCompactingEditorSubmission(submittedText)) return;
-		if (await this.handleStreamingEditorSubmission(submittedText)) return;
-		this.submitEditorInput(submittedText);
+		await this.extensionManagerReload.trackCommand(async () => {
+			const submittedText = text.trim();
+			if (!submittedText) return;
+			// Keep attempted commands as well as accepted prompts available through editor history.
+			this.editor.addToHistory?.(submittedText);
+			if (await this.handleBuiltInEditorCommand(submittedText)) return;
+			if (await this.handleBashEditorSubmission(submittedText)) return;
+			if (await this.handleCompactingEditorSubmission(submittedText)) return;
+			if (await this.handleStreamingEditorSubmission(submittedText)) return;
+			this.submitEditorInput(submittedText);
+		});
 	}
 
 	private setupEditorSubmitHandler(): void {
@@ -4430,7 +4481,9 @@ export class InteractiveMode {
 	private async shutdown(options?: ShutdownOptions): Promise<void> {
 		if (this.isShuttingDown) return;
 		this.isShuttingDown = true;
+		this.extensionManagerReload.dispose();
 		this.unregisterSignalHandlers();
+		await this.disposeExtensionManager();
 
 		if (options?.fromSignal) {
 			// Signal-triggered shutdown (SIGTERM/SIGHUP). Emit extension cleanup
@@ -4592,35 +4645,37 @@ export class InteractiveMode {
 	}
 
 	private async handleFollowUp(): Promise<void> {
-		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
-		if (!text) return;
+		await this.extensionManagerReload.trackCommand(async () => {
+			const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
+			if (!text) return;
 
-		// Queue input during compaction (extension commands execute immediately)
-		if (this.session.isCompacting) {
-			if (this.isExtensionCommand(text)) {
+			// Queue input during compaction (extension commands execute immediately)
+			if (this.session.isCompacting) {
+				if (this.isExtensionCommand(text)) {
+					this.editor.addToHistory?.(text);
+					this.editor.setText("");
+					await this.promptSession(text);
+				} else {
+					this.queueCompactionMessage(text, "followUp");
+				}
+				return;
+			}
+
+			// Alt+Enter queues a follow-up message (waits until agent finishes)
+			// This handles extension commands (execute immediately), prompt template expansion, and queueing
+			if (this.session.isStreaming) {
 				this.editor.addToHistory?.(text);
 				this.editor.setText("");
-				await this.session.prompt(text);
-			} else {
-				this.queueCompactionMessage(text, "followUp");
+				await this.promptSession(text, { streamingBehavior: "followUp" });
+				this.updatePendingMessagesDisplay();
+				this.ui.requestRender();
 			}
-			return;
-		}
-
-		// Alt+Enter queues a follow-up message (waits until agent finishes)
-		// This handles extension commands (execute immediately), prompt template expansion, and queueing
-		if (this.session.isStreaming) {
-			this.editor.addToHistory?.(text);
-			this.editor.setText("");
-			await this.session.prompt(text, { streamingBehavior: "followUp" });
-			this.updatePendingMessagesDisplay();
-			this.ui.requestRender();
-		}
-		// If not streaming, Alt+Enter acts like regular Enter (trigger onSubmit)
-		else if (this.editor.onSubmit) {
-			this.editor.setText("");
-			this.editor.onSubmit(text);
-		}
+			// If not streaming, Alt+Enter acts like regular Enter (trigger onSubmit)
+			else if (this.editor.onSubmit) {
+				this.editor.setText("");
+				await this.editor.onSubmit(text);
+			}
+		});
 	}
 
 	private handleDequeue(): void {
@@ -4934,11 +4989,11 @@ export class InteractiveMode {
 
 	private async sendQueuedCompactionMessage(message: CompactionQueuedMessage): Promise<void> {
 		if (this.isExtensionCommand(message.text)) {
-			await this.session.prompt(message.text);
+			await this.promptSession(message.text);
 		} else if (message.mode === "followUp") {
-			await this.session.followUp(message.text);
+			await this.extensionManagerReload.trackCommand(() => this.session.followUp(message.text));
 		} else {
-			await this.session.steer(message.text);
+			await this.extensionManagerReload.trackCommand(() => this.session.steer(message.text));
 		}
 	}
 
@@ -4956,14 +5011,14 @@ export class InteractiveMode {
 	private async flushNewCompactionQueue(queuedMessages: CompactionQueuedMessage[]): Promise<void> {
 		const firstPromptIndex = queuedMessages.findIndex((message) => !this.isExtensionCommand(message.text));
 		if (firstPromptIndex === -1) {
-			for (const message of queuedMessages) await this.session.prompt(message.text);
+			for (const message of queuedMessages) await this.promptSession(message.text);
 			return;
 		}
 		const preCommands = queuedMessages.slice(0, firstPromptIndex);
 		const firstPrompt = queuedMessages[firstPromptIndex];
 		const rest = queuedMessages.slice(firstPromptIndex + 1);
-		for (const message of preCommands) await this.session.prompt(message.text);
-		const promptPromise = this.session.prompt(firstPrompt.text).catch((error) => {
+		for (const message of preCommands) await this.promptSession(message.text);
+		const promptPromise = this.promptSession(firstPrompt.text).catch((error) => {
 			this.restoreCompactionQueue(queuedMessages, error);
 		});
 		for (const message of rest) await this.sendQueuedCompactionMessage(message);
@@ -5001,6 +5056,61 @@ export class InteractiveMode {
 	// =========================================================================
 	// Selectors
 	// =========================================================================
+
+	/** Mount the built-in manager independently of extension factory loading. */
+	private async showExtensionManager(): Promise<void> {
+		const session = this.session;
+		await this.extensionManagerDisposal;
+		if (this.isShuttingDown || this.extensionManagerInvalidating || this.session !== session) return;
+		if (this.extensionManager) {
+			this.extensionManager.handle.focus();
+			return;
+		}
+		const component = new ExtensionManagerComponent({
+			packageManager: new DefaultPackageManager({
+				cwd: this.activeSession.getCwd(),
+				agentDir: this.runtimeHost.services.agentDir,
+				settingsManager: this.settingsManager,
+			}),
+			resourceLoader: session.resourceLoader,
+			keybindings: this.keybindings,
+			getTheme: () => theme,
+			requestRender: () => {
+				if (this.extensionManager?.component === component) this.ui.requestRender();
+			},
+			onClose: (reloadRequired) => {
+				const view = this.extensionManager;
+				if (view?.component !== component) return;
+				this.extensionManager = undefined;
+				view.handle.hide();
+				this.recordExtensionManagerChanges(reloadRequired);
+			},
+		});
+		const handle = this.ui.showOverlay(component, { width: "90%", maxHeight: "90%" });
+		this.extensionManager = { component, handle };
+		await component.initialize();
+	}
+
+	private recordExtensionManagerChanges(reloadRequired: boolean): void {
+		if (!reloadRequired) return;
+		if (this.isShuttingDown || this.extensionManagerInvalidating) {
+			this.extensionManagerReload.markRequired();
+		} else {
+			void this.extensionManagerReload.request();
+		}
+	}
+
+	private disposeExtensionManager(): Promise<void> {
+		const view = this.extensionManager;
+		if (!view) return this.extensionManagerDisposal;
+		this.extensionManager = undefined;
+		view.handle.hide();
+		const disposal = view.component.dispose();
+		this.extensionManagerDisposal = Promise.all([this.extensionManagerDisposal, disposal]).then(([, required]) => {
+			this.recordExtensionManagerChanges(required);
+		});
+		return this.extensionManagerDisposal;
+	}
 
 	/**
 	 * Shows a selector component in place of the editor.
@@ -6517,15 +6627,35 @@ export class InteractiveMode {
 	// =========================================================================
 
 	private async handleReloadCommand(): Promise<boolean> {
-		if (this.session.isStreaming) {
+		const session = this.session;
+		if (session.isStreaming) {
 			this.showWarning("Wait for the current response to finish before reloading.");
 			return false;
 		}
-		if (this.session.isCompacting) {
+		if (session.isCompacting) {
 			this.showWarning("Wait for compaction to finish before reloading.");
 			return false;
 		}
+		await this.disposeExtensionManager();
+		if (this.isShuttingDown || this.extensionManagerInvalidating || this.session !== session) return false;
+		this.extensionManagerReload.invalidate();
+		try {
+			await session.waitForIdle();
+			if (this.isShuttingDown || this.extensionManagerInvalidating || this.session !== session) return false;
+			await this.extensionManagerReload.reload(session);
+			return !this.isShuttingDown && !this.extensionManagerInvalidating && this.session === session;
+		} catch (error) {
+			if (!this.isShuttingDown && !this.extensionManagerInvalidating && this.session === session) {
+				this.showError(`Reload failed: ${error instanceof Error ? error.message : String(error)}`);
+			}
+			return false;
+		}
+	}
 
+	private async reloadResources(session: AgentSession): Promise<void> {
+		await this.disposeExtensionManager();
+		const current = () => !this.isShuttingDown && !this.extensionManagerInvalidating && this.session === session;
+		if (!current() || !session.isIdle) throw new Error("Wait for the current session to be idle before reloading.");
 		this.resetExtensionUI();
 
 		const reloadBox = new Container();
@@ -6558,7 +6688,9 @@ export class InteractiveMode {
 		};
 
 		try {
-			await this.session.reload();
+			if (!current() || !session.isIdle) throw new Error("Session changed or became busy before reload.");
+			await session.reload();
+			if (!current()) throw new Error("Session changed during reload.");
 			this.keybindings.reload();
 			const activeHeader = this.customHeader ?? this.builtInHeader;
 			if (isExpandable(activeHeader)) {
@@ -6597,11 +6729,9 @@ export class InteractiveMode {
 				this.showError(`models.json error: ${modelsJsonError}`);
 			}
 			this.showStatus("Reloaded keybindings, hooks, extensions, skills, rules, prompts, themes");
-			return true;
 		} catch (error) {
-			dismissReloadBox(previousEditor as Component);
-			this.showError(`Reload failed: ${error instanceof Error ? error.message : String(error)}`);
-			return false;
+			if (current()) dismissReloadBox(previousEditor as Component);
+			throw error;
 		}
 	}
 
@@ -7656,6 +7786,8 @@ export class InteractiveMode {
 	}
 
 	stop(fullscreenExitOutput = this.settingsManager.getFullscreenExitOutput()): void {
+		this.extensionManagerReload.dispose();
+		void this.disposeExtensionManager();
 		this.unregisterSignalHandlers();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);

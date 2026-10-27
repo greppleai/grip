@@ -261,7 +261,8 @@ export interface GripAgentRuntimeHost {
 	readonly diagnostics: readonly GripAgentDiagnostic[];
 	readonly modelFallbackMessage: string | undefined;
 	setRebindSession(rebindSession?: (session: AgentSession) => Promise<void>): void;
-	setBeforeSessionInvalidate(beforeSessionInvalidate?: () => void): void;
+	/** Await host UI/mutation teardown before disposing or replacing the active session. */
+	setBeforeSessionInvalidate(beforeSessionInvalidate?: () => void | Promise<void>): void;
 	changeDirectory(cwd: string): Promise<ExtensionSessionActionResult>;
 	switchSession(sessionPath: string, options?: GripAgentSwitchSessionOptions): Promise<ExtensionSessionActionResult>;
 	newSession(options?: ExtensionNewSessionOptions): Promise<ExtensionSessionActionResult>;
@@ -469,7 +470,7 @@ export class GripAgent {
 	private _hookRuntimeDiagnostics: GripAgentDiagnostic[] = [];
 	private _modelFallbackMessage?: string;
 	private rebindSession?: (session: AgentSession) => Promise<void>;
-	private beforeSessionInvalidate?: () => void;
+	private beforeSessionInvalidate?: () => void | Promise<void>;
 	private readonly borrowedToolOperations: BorrowedToolOperations | undefined;
 	private toolOperationsDisposed = false;
 	private disposePromise: Promise<void> | undefined;
@@ -537,10 +538,11 @@ export class GripAgent {
 		}
 		const modelRegistry =
 			this.options.modelRegistry ?? ModelRegistry.create(this.authStorage, join(this.agentDir, "models.json"));
-		const resourceLoader =
-			this.options.resourceLoader ??
-			new DefaultResourceLoader({
-				...(this.options.resourceLoaderOptions ?? {}),
+		const diagnostics: GripAgentDiagnostic[] = [];
+		let resourceLoader = this.options.resourceLoader;
+		if (!resourceLoader) {
+			const loader = new DefaultResourceLoader({
+				...this.options.resourceLoaderOptions,
 				cwd,
 				agentDir: this.agentDir,
 				settingsManager,
@@ -548,9 +550,15 @@ export class GripAgent {
 					? borrowToolOperations(this.options.resourceLoaderOptions.toolOperations)
 					: this.borrowedToolOperations,
 			});
+			const startup = await loader.prepareInitialLoad();
+			for (const diagnostic of startup.diagnostics) {
+				diagnostics.push({ type: "warning", fatal: false, message: diagnostic.message });
+			}
+			resourceLoader = loader;
+		}
+		// A host-supplied loader may already have executed factories; never auto-update behind it.
 		await resourceLoader.reload();
 
-		const diagnostics: GripAgentDiagnostic[] = [];
 		const extensionsResult = resourceLoader.getExtensions();
 		for (const { name, config, extensionPath } of extensionsResult.runtime.pendingProviderRegistrations) {
 			try {
@@ -1185,7 +1193,7 @@ export class GripAgent {
 		this.rebindSession = rebindSession;
 	}
 
-	setBeforeSessionInvalidate(beforeSessionInvalidate?: () => void): void {
+	setBeforeSessionInvalidate(beforeSessionInvalidate?: () => void | Promise<void>): void {
 		this.beforeSessionInvalidate = beforeSessionInvalidate;
 	}
 
@@ -1249,7 +1257,7 @@ export class GripAgent {
 				targetSessionFile: targetSessionReference,
 			});
 			await this.flushSession(previousSession);
-			this.beforeSessionInvalidate?.();
+			await this.beforeSessionInvalidate?.();
 		} catch (error) {
 			await result.session.dispose();
 			throw error;
@@ -1501,7 +1509,7 @@ export class GripAgent {
 					reason: "quit",
 				});
 				await this.flushSession(this.session);
-				this.beforeSessionInvalidate?.();
+				await this.beforeSessionInvalidate?.();
 				await this.session.dispose();
 				this._session = undefined;
 			}
