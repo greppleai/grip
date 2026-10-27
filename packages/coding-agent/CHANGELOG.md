@@ -2,6 +2,22 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.1.10](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.9...@greppleai/grip-v0.1.10) (2026-10-27)
+
+
+### Features
+
+* **sandbox:** sandbox-workspace - Add workspace selection ([29a1e6d](https://github.com/greppleai/grip/commit/29a1e6d82df11f9a7430a620c7c43360394f6fa5))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.1.9 to ^0.1.10
+    * @greppleai/grip-ai bumped from ^0.1.9 to ^0.1.10
+    * @greppleai/grip-tui bumped from ^0.1.9 to ^0.1.10
+
 ## [0.1.9](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.8...@greppleai/grip-v0.1.9) (2026-10-27)
 
 
