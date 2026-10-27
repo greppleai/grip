@@ -117,7 +117,12 @@ import {
 import { completeJobCommand, JOB_COMMAND_USAGE, parseJobCommand } from "../../core/job-command.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
-import { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.ts";
+import {
+	defaultModelPerProvider,
+	findExactModelReferenceMatch,
+	resolveModelScope,
+	type ScopedModel,
+} from "../../core/model-resolver.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.ts";
 import type {
@@ -347,6 +352,11 @@ export interface InteractiveModeOptions {
 	verbose?: boolean;
 	/** Initial renderer choice. Defaults to the persisted mode and can be changed during the session. */
 	tuiMode?: TuiMode;
+}
+
+interface ProfileSelection {
+	scopedModels: ScopedModel[];
+	selected?: ScopedModel["model"];
 }
 
 interface InteractiveTuiOptions {
@@ -954,19 +964,24 @@ export class InteractiveMode {
 
 		const profileCommand = slashCommands.find((command) => command.name === "profile");
 		if (profileCommand) {
-			profileCommand.argumentHint = "use <name> | create <name>";
+			profileCommand.argumentHint =
+				"list | use <name> | create <name> | directory <name> <path> | sandbox <name> ...";
 			profileCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
 				if (!prefix.includes(" ")) {
-					return fuzzyFilter(["create", "use"], prefix, (action) => action).map((action) => ({
-						value: `${action} `,
-						label: action,
-					}));
+					return fuzzyFilter(["create", "use", "list", "directory", "sandbox"], prefix, (action) => action).map(
+						(action) => ({
+							value: `${action} `,
+							label: action,
+						}),
+					);
 				}
-				const useMatch = prefix.match(/^use\s+(.*)$/);
-				if (!useMatch) return null;
+				const sandboxAction = prefix.match(/^sandbox\s+(\S+)\s+(.*)$/);
+				if (sandboxAction) return this.completeProfileSandboxOptions(sandboxAction[1]!, sandboxAction[2] ?? "");
+				const nameMatch = prefix.match(/^(use|sandbox)\s+(\S*)$/);
+				if (!nameMatch) return null;
 				const profileNames = Object.keys(this.settingsManager.getModelProfiles());
-				const matches = fuzzyFilter(profileNames, useMatch[1] ?? "", (name) => name);
-				return matches.map((name) => ({ value: `use ${name}`, label: name }));
+				const matches = fuzzyFilter(profileNames, nameMatch[2] ?? "", (name) => name);
+				return matches.map((name) => ({ value: `${nameMatch[1]} ${name}`, label: name }));
 			};
 		}
 
@@ -1020,7 +1035,11 @@ export class InteractiveMode {
 		const provider: AutocompleteProvider = {
 			getSuggestions: async (lines, cursorLine, cursorCol, options) => {
 				const beforeCursor = (lines[cursorLine] ?? "").slice(0, cursorCol);
-				const nameMatch = beforeCursor.match(/^\/sandbox[ \t]+(start[ \t]+--name(?:[ \t]+([^\s]*))?)$/);
+				const sandboxNameMatch = beforeCursor.match(/^\/sandbox[ \t]+((start[ \t]+--name)(?:[ \t]+([^\s]*))?)$/);
+				const profileNameMatch = beforeCursor.match(
+					/^\/profile[ \t]+((sandbox[ \t]+\S+[ \t]+(?:--autoconnect[ \t]+(?:on|off)[ \t]+)?--name)(?:[ \t]+([^\s]*))?)$/,
+				);
+				const nameMatch = profileNameMatch ?? sandboxNameMatch;
 				if (!nameMatch) return base.getSuggestions(lines, cursorLine, cursorCol, options);
 				if (options.signal.aborted) return null;
 				try {
@@ -1029,11 +1048,11 @@ export class InteractiveMode {
 						allWorkspaces: true,
 					});
 					if (options.signal.aborted) return null;
-					const prefix = nameMatch[2] ?? "";
+					const prefix = nameMatch[3] ?? "";
 					const items = instances
 						.filter((instance) => /^[a-z0-9][a-z0-9-]*$/.test(instance.name) && instance.name.startsWith(prefix))
 						.map((instance) => ({
-							value: `start --name ${instance.name}`,
+							value: `${nameMatch[2]} ${instance.name}`,
 							label: instance.name,
 							description: instance.status,
 						}));
@@ -1051,6 +1070,37 @@ export class InteractiveMode {
 		return provider;
 	}
 
+	private completeProfileSandboxOptions(name: string, input: string): AutocompleteItem[] {
+		if (/^--name \S+ --autoconnect (?:on|off)\s+$/.test(input)) return [];
+		const autoconnectValue = input.match(/^(?:(--name \S+\s+))?--autoconnect\s+(\S*)$/);
+		if (autoconnectValue) {
+			return fuzzyFilter(["on", "off"], autoconnectValue[2] ?? "", (value) => value).map((value) => ({
+				value: `sandbox ${name} ${autoconnectValue[1] ?? ""}--autoconnect ${value}`,
+				label: value,
+			}));
+		}
+		const afterName = input.match(/^(--name \S+\s+)(.*)$/);
+		const afterAutoConnect = input.match(/^(--autoconnect (?:on|off)\s+)(.*)$/);
+		const actions = afterName
+			? ["--autoconnect on", "--autoconnect off"]
+			: afterAutoConnect
+				? ["--name "]
+				: [
+						"status",
+						"--name ",
+						"--autoconnect on",
+						"--autoconnect off",
+						"auto-connect on",
+						"auto-connect off",
+						"clear",
+					];
+		const optionPrefix = afterName?.[2] ?? afterAutoConnect?.[2] ?? input;
+		const previousOptions = afterName?.[1] ?? afterAutoConnect?.[1] ?? "";
+		return fuzzyFilter(actions, optionPrefix, (action) => action).map((action) => ({
+			value: `sandbox ${name} ${previousOptions}${action}`,
+			label: action,
+		}));
+	}
 	private setupAutocompleteProvider(): void {
 		let provider = this.createBaseAutocompleteProvider();
 		for (const wrapProvider of this.autocompleteProviderWrappers) {
@@ -3423,7 +3473,7 @@ export class InteractiveMode {
 		}
 		this.settingsManager.setJobModel(undefined);
 		await this.settingsManager.flush();
-		this.showStatus("Global job model cleared");
+		this.showStatus(`${this.settingsManager.getActiveProfile() ? "Profile" : "Global"} job model cleared`);
 	}
 
 	private async handleJobModelSet(model: string): Promise<void> {
@@ -3442,7 +3492,9 @@ export class InteractiveMode {
 		const reference = `${selected.provider}/${selected.id}`;
 		this.settingsManager.setJobModel(reference);
 		await this.settingsManager.flush();
-		this.showStatus(`Global job model set to ${reference}`);
+		this.showStatus(
+			`${this.settingsManager.getActiveProfile() ? "Profile" : "Global"} job model set to ${reference}`,
+		);
 	}
 
 	private resolveWebsearchEditorCommand(text: string): EditorCommandAction | undefined {
@@ -6276,65 +6328,202 @@ export class InteractiveMode {
 	}
 
 	private async handleProfileCommand(text: string): Promise<void> {
-		const match = text.match(/^\/profile\s+(create|use)\s+(\S+)$/);
-		if (!match) {
-			this.showError("Usage: /profile create <name> | /profile use <name>");
+		const usage =
+			"Usage: /profile list | create <name> | use <name> | directory <name> <absolute-path> | directory clear <absolute-path> | sandbox <name> [status|--name <vm> [--autoconnect on|off]|--autoconnect on|off [--name <vm>]|auto-connect on|off|clear]";
+		if (text === "/profile list") {
+			const names = Object.keys(this.settingsManager.getModelProfiles());
+			this.showStatus(
+				`Profiles: ${names.length ? names.join(", ") : "(none)"} • active: ${this.settingsManager.getActiveProfile() ?? "default"}`,
+			);
 			return;
 		}
-		const action = match[1];
-		const name = match[2]!;
-		if (!isValidModelProfileName(name)) {
+		const directory = text.match(/^\/profile directory (\S+)\s+(.+)$/);
+		const sandbox = text.match(/^\/profile sandbox (\S+)(?:\s+(.+))?$/);
+		const match = text.match(/^\/profile\s+(create|use)\s+(\S+)$/);
+		if (!directory && !sandbox && !match) {
+			this.showError(usage);
+			return;
+		}
+		const name = directory?.[1] ?? sandbox?.[1] ?? match?.[2];
+		if (name !== "clear" && (!name || !isValidModelProfileName(name))) {
 			this.showError("Profile names must be 1-64 letters, numbers, dots, underscores, or hyphens.");
 			return;
 		}
-
-		if (action === "create") {
-			const currentScope = this.session.scopedModels;
-			const patterns =
-				currentScope.length > 0
-					? currentScope.map(
-							(scoped) =>
-								`${scoped.model.provider}/${scoped.model.id}${scoped.thinkingLevel ? `:${scoped.thinkingLevel}` : ""}`,
-						)
-					: this.session.modelRegistry.getAvailable().map((model) => `${model.provider}/${model.id}`);
-			if (patterns.length === 0) {
-				this.showError("Cannot create a profile because no models are available.");
-				return;
-			}
-			const exists = Object.hasOwn(this.settingsManager.getModelProfiles(), name);
-			this.settingsManager.setModelProfile(name, patterns);
-			this.showStatus(`${exists ? "Updated" : "Created"} profile "${name}" with ${patterns.length} models`);
+		const loadError = this.settingsManager.getLoadError("global");
+		if (loadError) {
+			this.showError(`Cannot change profiles: ${loadError.message}`);
 			return;
 		}
+		if (sandbox) {
+			await this.handleProfileSandbox(name!, sandbox[2]?.trim());
+			return;
+		}
+		if (directory) {
+			await this.handleProfileDirectory(directory);
+			return;
+		}
+		if (match?.[1] === "create") await this.handleProfileCreate(name!);
+		else await this.handleProfileUse(name!);
+	}
 
-		const profiles = this.settingsManager.getModelProfiles();
-		if (!Object.hasOwn(profiles, name)) {
+	private async handleProfileSandbox(name: string, action: string | undefined): Promise<void> {
+		const profile = this.settingsManager.getProfile(name);
+		if (!profile) {
 			this.showError(`Unknown profile: ${name}`);
 			return;
 		}
-		const patterns = profiles[name]!;
-		const scopedModels = await resolveModelScope(patterns, this.session.modelRegistry);
-		if (scopedModels.length === 0) {
-			this.showError(`Profile "${name}" has no available models`);
+		if (!action || action === "status") {
+			this.showStatus(
+				`Profile "${name}" sandbox: ${profile.defaultSandbox ?? "(none)"} • auto-connect: ${profile.autoConnectSandbox === false ? "off" : "on"}`,
+			);
 			return;
 		}
-		this.session.setScopedModels(scopedModels);
-		this.settingsManager.setEnabledModels([...patterns]);
-		await this.updateAvailableProviderCount();
-		this.ui.requestRender();
-		this.showStatus(`Using profile "${name}" with ${scopedModels.length} models`);
+		try {
+			await this.applyProfileSandboxAction(name, action);
+			await this.settingsManager.flush();
+			const updated = this.settingsManager.getProfile(name);
+			this.showStatus(
+				`Profile "${name}" sandbox: ${updated?.defaultSandbox ?? "(none)"} • auto-connect: ${updated?.autoConnectSandbox === false ? "off" : "on"} (next startup)`,
+			);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private async applyProfileSandboxAction(name: string, action: string): Promise<void> {
+		const combined =
+			action.match(/^--name ([a-z0-9][a-z0-9-]*) --autoconnect (on|off)$/) ??
+			action.match(/^--autoconnect (on|off) --name ([a-z0-9][a-z0-9-]*)$/);
+		if (combined) {
+			const nameFirst = action.startsWith("--name ");
+			const vm = combined[nameFirst ? 1 : 2]!;
+			const enabled = combined[nameFirst ? 2 : 1] === "on";
+			await this.requireNamedSandbox(this.createLimaSandboxService(), this.activeSession.getCwd(), vm);
+			this.settingsManager.setProfileSandboxOptions(name, { defaultSandbox: vm, autoConnectSandbox: enabled });
+			return;
+		}
+		const named = action.match(/^--name ([a-z0-9][a-z0-9-]*)$/);
+		if (named) {
+			const vm = named[1]!;
+			await this.requireNamedSandbox(this.createLimaSandboxService(), this.activeSession.getCwd(), vm);
+			this.settingsManager.setProfileSandbox(name, vm);
+			return;
+		}
+		const autoConnect = action.match(/^(?:--autoconnect|auto-connect) (on|off)$/);
+		if (autoConnect) {
+			this.settingsManager.setProfileSandboxAutoConnect(name, autoConnect[1] === "on");
+			return;
+		}
+		if (action === "clear") {
+			this.settingsManager.setProfileSandbox(name, undefined);
+			return;
+		}
+		throw new Error(
+			"Usage: /profile sandbox <name> [status|--name <vm> [--autoconnect on|off]|--autoconnect on|off [--name <vm>]|auto-connect on|off|clear]",
+		);
+	}
+
+	private async handleProfileDirectory(command: RegExpMatchArray): Promise<void> {
+		try {
+			this.settingsManager.setProfileDirectory(command[2]!, command[1] === "clear" ? undefined : command[1]);
+			await this.settingsManager.flush();
+			this.showStatus(`Profile directory ${command[1] === "clear" ? "removed" : "set"}: ${command[2]}`);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private async handleProfileCreate(name: string): Promise<void> {
+		const patterns = this.session.scopedModels.map(
+			(scoped) =>
+				`${scoped.model.provider}/${scoped.model.id}${scoped.thinkingLevel ? `:${scoped.thinkingLevel}` : ""}`,
+		);
+		if (!patterns.length && !this.session.modelRegistry.getAvailable().length) {
+			this.showError("Cannot create a profile because no models are available.");
+			return;
+		}
+		const exists = this.settingsManager.getProfile(name) !== undefined;
+		this.settingsManager.setModelProfile(name, patterns, this.session.model);
+		await this.settingsManager.flush();
+		this.showStatus(
+			`${exists ? "Updated" : "Created"} profile "${name}"${patterns.length ? ` with ${patterns.length} models` : ""}`,
+		);
+	}
+
+	private async prepareProfileSelection(name: string): Promise<ProfileSelection | undefined> {
+		const profile = this.settingsManager.getProfile(name);
+		if (!profile) {
+			this.showError(`Unknown profile: ${name}`);
+			return undefined;
+		}
+		const patterns = profile.enabledModels ?? [];
+		const scopedModels = patterns.length ? await resolveModelScope(patterns, this.session.modelRegistry) : [];
+		if (patterns.length && !scopedModels.length) {
+			this.showError(`Profile "${name}" has no available models`);
+			return undefined;
+		}
+		const project = this.settingsManager.getProjectSettings();
+		const global = this.settingsManager.getGlobalSettings();
+		const provider = project.defaultProvider ?? profile.defaultProvider ?? global.defaultProvider;
+		const modelId = project.defaultModel ?? profile.defaultModel ?? global.defaultModel;
+		const preferred =
+			provider && modelId
+				? this.session.modelRegistry
+						.getAvailable()
+						.find((model) => model.provider === provider && model.id === modelId)
+				: undefined;
+		if (!scopedModels.length && profile.defaultProvider && profile.defaultModel && !preferred) {
+			this.showError(`Profile "${name}" default model is unavailable: ${provider}/${modelId}`);
+			return undefined;
+		}
+		const selected = scopedModels.length
+			? (scopedModels.find((scoped) => scoped.model.provider === provider && scoped.model.id === modelId)?.model ??
+				scopedModels[0]?.model)
+			: preferred;
+		return { scopedModels, selected };
+	}
+
+	private async handleProfileUse(name: string): Promise<void> {
+		if (this.session.isStreaming || this.session.isCompacting) {
+			this.showWarning("Wait for the current response to finish before switching profiles.");
+			return;
+		}
+		const selection = await this.prepareProfileSelection(name);
+		if (!selection) return;
+		const { scopedModels, selected } = selection;
+		try {
+			this.settingsManager.useProfile(name);
+			const thinkingLevel = this.settingsManager.getDefaultThinkingLevel();
+			await this.settingsManager.flush();
+			if (!(await this.handleReloadCommand())) return;
+			this.session.setScopedModels(scopedModels);
+			await this.settingsManager.withTransientModelSelection(async () => {
+				if (
+					selected &&
+					(this.session.model?.provider !== selected.provider || this.session.model?.id !== selected.id)
+				) {
+					await this.session.setModel(selected);
+				}
+				if (thinkingLevel) this.session.setThinkingLevel(thinkingLevel);
+			});
+			await this.updateAvailableProviderCount();
+			this.ui.requestRender();
+			this.showStatus(`Using profile "${name}"${selected ? ` (${selected.provider}/${selected.id})` : ""}`);
+		} catch (error) {
+			this.showError(`Failed to use profile "${name}": ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	// =========================================================================
 
-	private async handleReloadCommand(): Promise<void> {
+	private async handleReloadCommand(): Promise<boolean> {
 		if (this.session.isStreaming) {
 			this.showWarning("Wait for the current response to finish before reloading.");
-			return;
+			return false;
 		}
 		if (this.session.isCompacting) {
 			this.showWarning("Wait for compaction to finish before reloading.");
-			return;
+			return false;
 		}
 
 		this.resetExtensionUI();
@@ -6408,9 +6597,11 @@ export class InteractiveMode {
 				this.showError(`models.json error: ${modelsJsonError}`);
 			}
 			this.showStatus("Reloaded keybindings, hooks, extensions, skills, rules, prompts, themes");
+			return true;
 		} catch (error) {
 			dismissReloadBox(previousEditor as Component);
 			this.showError(`Reload failed: ${error instanceof Error ? error.message : String(error)}`);
+			return false;
 		}
 	}
 
@@ -6677,7 +6868,7 @@ export class InteractiveMode {
 		const workspaceRoot = this.activeSession.getCwd();
 		let name: string | undefined;
 		try {
-			name = this.settingsManager.getDefaultSandbox(workspaceRoot);
+			name = this.settingsManager.getAutoConnectSandbox(workspaceRoot);
 			if (!name) return;
 			const sessionKey = getSessionSandboxKey(this.activeSession);
 			if (this.session.getToolBackendInfo().type !== "local" || this.hasSandboxActivationConflict(sessionKey)) {

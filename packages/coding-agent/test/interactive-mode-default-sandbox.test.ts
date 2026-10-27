@@ -2,14 +2,21 @@ import { realpathSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { SandboxStartUserCommand } from "../src/core/sandbox/command.ts";
 import type { SandboxService, SandboxStartResult } from "../src/core/sandbox/config.ts";
-import { SettingsManager } from "../src/core/settings-manager.ts";
+import { type ProfileSettings, SettingsManager } from "../src/core/settings-manager.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 type WorkspaceBackend = "local" | "remote";
 
-function createMode(name?: string, backend: WorkspaceBackend = "local") {
+function createMode(name?: string, backend: WorkspaceBackend = "local", profile?: ProfileSettings) {
 	const cwd = realpathSync(process.cwd());
-	const settingsManager = SettingsManager.inMemory(name ? { defaultSandboxes: { [cwd]: name } } : {});
+	const settingsManager = SettingsManager.inMemory(
+		{
+			defaultSandboxes: name ? { [cwd]: name } : undefined,
+			profiles: profile ? { work: profile } : undefined,
+			profileDirectories: profile ? { [cwd]: "work" } : undefined,
+		},
+		cwd,
+	);
 	const service = {
 		list: vi.fn(async () => [{ name: "my-vm" }]),
 	};
@@ -172,5 +179,35 @@ describe("directory default sandboxes", () => {
 			`${cwd}\0session`,
 			false,
 		);
+	});
+	it("connects the selected profile VM ahead of a directory default", async () => {
+		const { connect, settingsManager, startSandboxBackend, cwd } = createMode("directory-vm", "local", {
+			defaultSandbox: "my-vm",
+			autoConnectSandbox: true,
+		});
+		expect(settingsManager.getDefaultSandbox(cwd)).toBe("directory-vm");
+		await connect();
+		expect(startSandboxBackend).toHaveBeenCalledWith(
+			{ subcommand: "start", name: "my-vm" },
+			expect.anything(),
+			cwd,
+			`${cwd}\0session`,
+		);
+	});
+
+	it("auto-connects a profile VM by default, but respects a profile opt-out and remote backend", async () => {
+		const enabled = createMode(undefined, "local", { defaultSandbox: "my-vm" });
+		await enabled.connect();
+		expect(enabled.startSandboxBackend).toHaveBeenCalledOnce();
+
+		const disabled = createMode("my-vm", "local", { defaultSandbox: "my-vm", autoConnectSandbox: false });
+		await disabled.connect();
+		expect(disabled.service.list).not.toHaveBeenCalled();
+		expect(disabled.startSandboxBackend).not.toHaveBeenCalled();
+
+		const remote = createMode(undefined, "remote", { defaultSandbox: "my-vm" });
+		await remote.connect();
+		expect(remote.startSandboxBackend).not.toHaveBeenCalled();
+		expect(remote.showWarning).toHaveBeenCalledWith(expect.stringContaining("already active"));
 	});
 });

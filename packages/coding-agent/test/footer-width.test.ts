@@ -35,6 +35,7 @@ interface FooterSessionFixtureOptions {
 	detectionModel?: string;
 	detectionCost?: number;
 	subscription?: boolean;
+	profile?: string;
 	branchEntries?: SessionEntry[];
 	sessionEntries?: SessionEntry[];
 }
@@ -77,7 +78,10 @@ function createSession(options: FooterSessionFixtureOptions): AgentSession {
 		}),
 		getCompressionDetectionCounts: () => options.detectionCounts ?? { keep: 0, compress: 0 },
 		getCompressionDetectionCost: () => options.detectionCost ?? 0,
-		settingsManager: { getCompressionDetectionModel: () => options.detectionModel },
+		settingsManager: {
+			getCompressionDetectionModel: () => options.detectionModel,
+			getActiveProfile: () => options.profile,
+		},
 		modelRegistry: {
 			isUsingOAuth: () => options.subscription ?? false,
 		},
@@ -110,6 +114,18 @@ describe("formatCwdForFooter", () => {
 		expect(formatCwdForFooter("/home/user/project", "/home/user")).toBe("~/project");
 	});
 });
+
+describe("FooterComponent active profile", () => {
+	beforeAll(() => initTheme(undefined, false));
+	it("shows active and default profiles at the bottom", () => {
+		const active = new FooterComponent(createSession({ sessionName: "", profile: "work" }), createFooterData(1));
+		expect(active.render(80).at(-1)).toContain("profile: work");
+		const plain = new FooterComponent(createSession({ sessionName: "" }), createFooterData(1));
+		expect(plain.render(80).at(-1)).toContain("profile: default");
+		for (const line of active.render(8)) expect(visibleWidth(line)).toBeLessThanOrEqual(8);
+	});
+});
+
 describe("FooterComponent workspace location", () => {
 	beforeAll(() => initTheme(undefined, false));
 	it("shows the active guest cwd instead of the host session cwd", () => {

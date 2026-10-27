@@ -28,6 +28,7 @@ All notable changes to Grip are documented in this file.
 ### Features
 
 - Added `/websearch login` to choose a web search engine and save per-provider API keys in credential storage.
+- Added settings profiles with session-only model and job-model switching, directory-prefix startup rules, `/profile sandbox` VM-name completion and combined `--name`/`--autoconnect` controls, and an active-profile footer indicator.
 
 ### Breaking Changes
 

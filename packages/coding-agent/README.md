@@ -145,7 +145,7 @@ The interface from top to bottom:
 - **Startup header** - Shows shortcuts (`/hotkeys` for all), loaded AGENTS.md files, prompt templates, skills, and extensions
 - **Messages** - Your messages, assistant responses, tool calls and results, notifications, errors, and extension UI
 - **Editor** - Where you type; border color indicates thinking level
-- **Footer** - Working directory, session name, total token/cache usage, cost, context usage, current model
+- **Footer** - Working directory, session name, total token/cache usage, cost, context usage, current model, active profile
 
 The editor can be temporarily replaced by other UI, like built-in `/settings` or custom UI from extensions (e.g., a Q&A tool that lets the user answer model questions in a structured format). [Extensions](#extensions) can also replace the editor, add widgets above/below it, a status line, custom footer, or overlays.
 
@@ -170,7 +170,10 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/login`, `/logout` | Manage model-provider credentials |
 | `/websearch login` | Choose a web search engine and configure its API key |
 | `/model` | Switch models |
-| `/job model show`, `/job model set --model <provider/model-id>`, `/job model clear` | Inspect, set, or clear the single global job model |
+| `/job model show`, `/job model set --model <provider/model-id>`, `/job model clear` | Inspect, set, or clear the active profile's job model (global without a profile) |
+| `/profile list`, `/profile create <name>`, `/profile use <name>` | List, snapshot, or switch named settings profiles (switching is session-only) |
+| `/profile directory <name> <absolute-path>`, `/profile directory clear <absolute-path>` | Assign or remove a directory-prefix profile rule |
+| `/profile sandbox <name> --name <vm> [--autoconnect on\|off]` | Choose an existing VM with name completion and set startup auto-connection in one command; options also work separately |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
@@ -522,7 +525,7 @@ Grip is aggressively extensible so it does not have to dictate your workflow. Fe
 
 **No MCP.** Build CLI tools with READMEs (see [Skills](#skills)), or build an extension that adds MCP support. [Why?](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)
 
-**Focused jobs.** The built-in `job` tool is enabled by default and offloads bounded tasks to fresh in-memory sessions with isolated conversations and shared authentication. Each child uses the main agent's normal prompt builder, including current project instructions and available skills, with a bounded-job overlay; the parent verifies results and owns the final answer. Pass `task` for one job, `tasks` for independent parallel jobs, or `chain` for sequential jobs with `{previous}` handoff. Each task can specify `tools`, `skills`, `cwd`, and `responseFormat`. Run `/job model set --model provider/model-id` to persist one global model for jobs, `/job model show` to inspect it, or `/job model clear` to restore the fallback: `GRIP_DEFAULT_JOB_MODEL`, then the parent model. Extensions and packages can provide other orchestration models.
+**Focused jobs.** The built-in `job` tool is enabled by default and offloads bounded tasks to fresh in-memory sessions with isolated conversations and shared authentication. Each child uses the main agent's normal prompt builder, including current project instructions and available skills, with a bounded-job overlay; the parent verifies results and owns the final answer. Pass `task` for one job, `tasks` for independent parallel jobs, or `chain` for sequential jobs with `{previous}` handoff. Each task can specify `tools`, `skills`, `cwd`, and `responseFormat`. Run `/job model set --model provider/model-id` to set a job model for the active profile (or globally when no profile is active); `/job model clear` restores `GRIP_DEFAULT_JOB_MODEL`, then the parent model. Extensions and packages can provide other orchestration models.
 
 **No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
 
@@ -705,7 +708,7 @@ grip --thinking high "Solve this complex problem"
 | `GRIP_CONTEXT_COMPRESSION` | Set to `1` to enable `compress_context` by default for all agents. Detection remains off |
 | `GRIP_CONTEXT_COMPRESSION_DETECTION` | Set to `1` to enable background detection and `compress_context` for all agents. Requires a configured `compressionDetectionModel` |
 | `GRIP_CACHE_RETENTION` | Set to `long` for extended prompt cache (Anthropic: 1h, OpenAI: 24h) |
-| `GRIP_DEFAULT_JOB_MODEL` | Optional `provider/model-id` used for built-in jobs unless global `jobModel` is set; unset inherits the parent model. An invalid/unavailable model fails the job rather than silently falling back |
+| `GRIP_DEFAULT_JOB_MODEL` | Optional `provider/model-id` used for built-in jobs unless trusted global or profile `jobModel` is set; unset inherits the parent model. An invalid/unavailable model fails the job rather than silently falling back |
 | `VISUAL`, `EDITOR` | External editor for Ctrl+G |
 | `GRIP_DAEMON_HOST`, `GRIP_DAEMON_PORT`, `GRIP_DAEMON_CWD`, `GRIP_DAEMON_TOKEN` | Integrated daemon bind address, port, workspace root, and bearer token |
 | `GRIP_DAEMON_TEMP_ROOT` | Optional additional confined daemon temporary root; the default sandbox image uses `/tmp` |

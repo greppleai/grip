@@ -250,6 +250,8 @@ export class FooterComponent implements Component {
 		if (savings) lines.push(theme.fg("dim", truncateToWidth(savings, width, "...")));
 		const extensionStatuses = this.formatExtensionStatuses(width);
 		if (extensionStatuses !== undefined) lines.push(extensionStatuses);
+		const profile = this.session.settingsManager.getActiveProfile() ?? "default";
+		lines.push(theme.fg("dim", truncateToWidth(`profile: ${profile}`, width, "...")));
 		return lines;
 	}
 }

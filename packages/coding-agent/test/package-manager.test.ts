@@ -108,6 +108,25 @@ describe("DefaultPackageManager", () => {
 	});
 
 	describe("resolve", () => {
+		it("resolves extensions configured in the active user profile", async () => {
+			const profileResources = join(agentDir, "profile-resources");
+			mkdirSync(profileResources, { recursive: true });
+			const profileExtension = join(profileResources, "profile.ts");
+			writeFileSync(profileExtension, "export default function() {}");
+			settingsManager = SettingsManager.inMemory(
+				{
+					profiles: { work: { extensions: ["profile-resources/profile.ts"] } },
+					profileDirectories: { [tempDir]: "work" },
+				},
+				tempDir,
+			);
+			packageManager = new DefaultPackageManager({ cwd: tempDir, agentDir, settingsManager });
+			const result = await packageManager.resolve();
+			expect(result.extensions.some((resource) => resource.path === profileExtension && resource.enabled)).toBe(
+				true,
+			);
+		});
+
 		it("should return no package-sourced paths when no sources configured", async () => {
 			const result = await packageManager.resolve();
 			expect(result.extensions).toEqual([]);

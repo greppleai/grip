@@ -92,6 +92,75 @@ describe("/sandbox start --name autocomplete", () => {
 	});
 });
 
+describe("/profile sandbox autocomplete", () => {
+	it("suggests VM names with status for --name in either option order", async () => {
+		const list = vi.fn().mockResolvedValue([
+			{ name: "grip-one", status: "Running" },
+			{ name: "grip-two", status: "Stopped" },
+			{ name: "not-matching", status: "Running" },
+		]);
+		const provider = createProvider(list);
+		for (const text of [
+			"/profile sandbox work --name grip-",
+			"/profile sandbox work --autoconnect off --name grip-",
+		]) {
+			const suggestions = await automaticSuggestions(provider, text);
+			expect(list).toHaveBeenCalledWith({ workspaceRoot: process.cwd(), allWorkspaces: true });
+			expect(suggestions?.prefix).toBe(text.slice("/profile ".length));
+			expect(suggestions?.items).toEqual([
+				{
+					value: `${text.slice("/profile ".length, -"grip-".length)}grip-one`,
+					label: "grip-one",
+					description: "Running",
+				},
+				{
+					value: `${text.slice("/profile ".length, -"grip-".length)}grip-two`,
+					label: "grip-two",
+					description: "Stopped",
+				},
+			]);
+			if (suggestions) {
+				expect(
+					provider.applyCompletion([text], 0, text.length, suggestions.items[0]!, suggestions.prefix).lines,
+				).toEqual([text.replace(/grip-$/, "grip-one")]);
+			}
+		}
+	});
+
+	it("offers --autoconnect and --name arguments without suggesting files for missing VMs", async () => {
+		const list = vi.fn().mockResolvedValue([{ name: "grip-dev", status: "Running" }]);
+		const provider = createProvider(list);
+		for (const text of ["/profile sandbox work --name", "/profile sandbox work --name "]) {
+			const suggestions = await automaticSuggestions(provider, text);
+			expect(suggestions?.items[0]?.label).toBe("grip-dev");
+			if (suggestions) {
+				expect(
+					provider.applyCompletion([text], 0, text.length, suggestions.items[0]!, suggestions.prefix).lines,
+				).toEqual(["/profile sandbox work --name grip-dev"]);
+			}
+		}
+		expect(
+			(await automaticSuggestions(provider, "/profile sandbox work --name grip-dev "))?.items.map(
+				(item) => item.label,
+			),
+		).toEqual(["--autoconnect on", "--autoconnect off"]);
+		expect(
+			(await automaticSuggestions(provider, "/profile sandbox work --autoconnect "))?.items.map(
+				(item) => item.label,
+			),
+		).toEqual(["on", "off"]);
+		expect(
+			(await automaticSuggestions(provider, "/profile sandbox work --autoconnect off "))?.items.map(
+				(item) => item.label,
+			),
+		).toEqual(["--name "]);
+		list.mockResolvedValueOnce([]);
+		expect(await suggestionsFor(provider, "/profile sandbox work --name ")).toBeNull();
+		list.mockRejectedValueOnce(new Error("Lima unavailable"));
+		expect(await suggestionsFor(provider, "/profile sandbox work --name ")).toBeNull();
+	});
+});
+
 describe("built-in slash command argument choices", () => {
 	it("keeps no-argument commands selectable after a space", async () => {
 		const provider = createProvider(async () => []);

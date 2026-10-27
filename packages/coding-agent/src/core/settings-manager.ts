@@ -3,10 +3,10 @@ import type {
 	CompactionSettings as ResolvedCompactionSettings,
 	ThinkingLevel,
 } from "@greppleai/grip-agent-core";
-import type { RetryPolicy, ThinkingBudgets, Transport } from "@greppleai/grip-ai";
+import type { Api, Model, RetryPolicy, ThinkingBudgets, Transport } from "@greppleai/grip-ai";
 import type { ScrollViewScrollbar, TuiMode } from "@greppleai/grip-tui";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
+import { dirname, isAbsolute, join, relative, sep } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
@@ -102,7 +102,7 @@ export interface Settings {
 	lastChangelogVersion?: string;
 	defaultProvider?: string;
 	defaultModel?: string;
-	compressionDetectionModel?: string; // provider/model ID; unset disables background detection
+	compressionDetectionModel?: string | null; // trusted global/profile provider/model ID; null disables it
 	defaultThinkingLevel?: ThinkingLevel;
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: QueueMode;
@@ -127,11 +127,15 @@ export interface Settings {
 	themes?: string[]; // Array of local theme file paths or directories
 	enableSkillCommands?: boolean; // default: true - register skills and rules as /skill:name and /rule:name commands
 	enableJobs?: boolean; // default: true - expose built-in job tools
-	jobModel?: string; // Global provider/model ID used for jobs
+	jobModel?: string | null; // trusted global/profile provider/model ID; null defers to environment or parent
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
-	modelProfiles?: Record<string, string[]>; // Named snapshots of scoped model patterns
+	modelProfiles?: Record<string, string[]>; // Legacy named model snapshots
+	profiles?: Record<string, ProfileSettings>; // Named settings overlays; global only
+	/** Obsolete persisted profile selection; ignored on startup and removed on the next manual switch. */
+	activeProfile?: string;
+	profileDirectories?: Record<string, string>; // Absolute directory prefix -> profile name; global only
 	doubleEscapeAction?: DoubleEscapeAction; // Action for double-escape with empty editor (default: "tree")
 	treeFilterMode?: TreeFilterMode; // Default filter when opening /tree
 	thinkingBudgets?: ThinkingBudgetsSettings; // Custom token budgets for thinking levels
@@ -153,9 +157,58 @@ export interface Settings {
 	fullscreenScrollbar?: ScrollViewScrollbar; // default: "auto"; no effect in regular TUI mode
 }
 
+/** Every ordinary setting may be overridden by a profile. Profile management stays global. */
+export type ProfileSettings = Omit<
+	Settings,
+	"profiles" | "modelProfiles" | "activeProfile" | "profileDirectories" | "defaultSandboxes" | "lastChangelogVersion"
+> & {
+	/** Existing named Lima VM for this profile; only trusted user profiles may select it. */
+	defaultSandbox?: string;
+	/** Whether to connect the profile/default directory VM on startup; defaults to true. */
+	autoConnectSandbox?: boolean;
+};
+
 export function isValidModelProfileName(name: string): boolean {
 	return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name);
 }
+
+type ProfileModelSelection = Pick<Model<Api>, "provider" | "id">;
+type TrustedModelSettingKey = "jobModel" | "compressionDetectionModel";
+
+interface ProfileSandboxOptions {
+	defaultSandbox?: string | undefined;
+	autoConnectSandbox?: boolean;
+}
+type ProfileSandboxSettingKey = keyof ProfileSandboxOptions;
+type ProfileField = keyof Settings | ProfileSandboxSettingKey;
+type ProfileChanges = Map<string, Map<ProfileField, Set<string> | undefined>>;
+
+function profilePatterns(value: unknown): string[] | undefined {
+	return Array.isArray(value) && value.every((pattern) => typeof pattern === "string") ? [...value] : undefined;
+}
+
+function canonicalProfileDirectory(path: string): string {
+	const resolved = resolvePath(path);
+	try {
+		return realpathSync(resolved);
+	} catch {
+		return resolved;
+	}
+}
+
+function isDirectoryAncestor(path: string, cwd: string): boolean {
+	const suffix = relative(path, cwd);
+	return suffix === "" || (suffix !== ".." && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix));
+}
+
+const GLOBAL_ONLY_PROFILE_SETTINGS = new Set<keyof Settings>([
+	"profiles",
+	"modelProfiles",
+	"activeProfile",
+	"profileDirectories",
+	"defaultSandboxes",
+	"lastChangelogVersion",
+]);
 
 const RECURSIVELY_MERGED_SETTINGS = new Set<keyof Settings>([
 	"compaction",
@@ -175,6 +228,32 @@ function isMergeableObject(value: unknown): value is Record<string, unknown> {
 
 function setOwnValue(target: Record<string, unknown>, key: string, value: unknown): void {
 	Object.defineProperty(target, key, { value, enumerable: true, configurable: true, writable: true });
+}
+
+function setProfileField(
+	profile: Record<string, unknown>,
+	field: keyof Settings,
+	value: unknown,
+	nestedKey?: string,
+): void {
+	if (nestedKey && isMergeableObject(value)) {
+		const next = { ...(isMergeableObject(profile[field]) ? profile[field] : {}) };
+		setOwnValue(next, nestedKey, value[nestedKey]);
+		setOwnValue(profile, field, next);
+	} else
+		setOwnValue(
+			profile,
+			field,
+			(field === "jobModel" || field === "compressionDetectionModel") && value === undefined ? null : value,
+		);
+}
+
+function collectModelProfiles(result: Record<string, string[]>, source: unknown, fullProfile: boolean): void {
+	if (!isMergeableObject(source)) return;
+	for (const [name, value] of Object.entries(source)) {
+		const patterns = profilePatterns(fullProfile && isMergeableObject(value) ? (value.enabledModels ?? []) : value);
+		if (isValidModelProfileName(name) && patterns) setOwnValue(result, name, patterns);
+	}
 }
 
 function deepMergeObjects(base: Record<string, unknown>, overrides: Record<string, unknown>): Record<string, unknown> {
@@ -250,6 +329,48 @@ function parseTimeoutSetting(value: unknown, settingName: string): number | unde
 		throw new Error(`Invalid ${settingName} setting: ${String(value)}`);
 	}
 	return undefined;
+}
+
+function mergeProfileChanges(
+	before: unknown,
+	after: unknown,
+	changes: Map<ProfileField, Set<string> | undefined>,
+): Record<string, unknown> {
+	const original = isMergeableObject(before) ? before : {};
+	const replacement = isMergeableObject(after) ? after : {};
+	const updated = { ...original };
+	for (const [key, subkeys] of changes) {
+		const value = replacement[key];
+		if (subkeys && isMergeableObject(value)) {
+			const nested = { ...(isMergeableObject(original[key]) ? original[key] : {}) };
+			for (const subkey of subkeys) setOwnValue(nested, subkey, value[subkey]);
+			setOwnValue(updated, key, nested);
+		} else if (value === undefined) delete updated[key];
+		else setOwnValue(updated, key, value);
+	}
+	return updated;
+}
+
+function mergeModifiedNestedSetting(
+	field: keyof Settings,
+	original: Settings,
+	snapshot: Settings,
+	keys: Set<string>,
+	profileChanges: ProfileChanges,
+): Record<string, unknown> {
+	const before = original[field];
+	const after = snapshot[field];
+	const oldValues = isMergeableObject(before) ? before : {};
+	const newValues = isMergeableObject(after) ? after : {};
+	const merged = { ...oldValues };
+	for (const key of keys) {
+		const value =
+			field === "profiles" && profileChanges.has(key)
+				? mergeProfileChanges(oldValues[key], newValues[key], profileChanges.get(key)!)
+				: newValues[key];
+		setOwnValue(merged, key, value);
+	}
+	return merged;
 }
 
 export type SettingsScope = "global" | "project";
@@ -421,6 +542,11 @@ export class SettingsManager {
 	private projectSettingsLoadError: Error | null = null; // Track if project settings file had parse errors
 	private writeQueue: Promise<void> = Promise.resolve();
 	private errors: SettingsError[];
+	private readonly cwd: string;
+	private sessionProfileOverride: string | null | undefined;
+	private baseGlobalSettings: Settings;
+	private modifiedProfileFields: ProfileChanges = new Map();
+	private transientModelSelections = 0;
 
 	private constructor(
 		storage: SettingsStorage,
@@ -429,9 +555,12 @@ export class SettingsManager {
 		globalLoadError: Error | null = null,
 		projectLoadError: Error | null = null,
 		initialErrors: SettingsError[] = [],
+		cwd: string = process.cwd(),
 	) {
 		this.storage = storage;
+		this.cwd = resolvePath(cwd);
 		this.globalSettings = initialGlobal;
+		this.baseGlobalSettings = structuredClone(initialGlobal);
 		this.projectSettings = initialProject;
 		this.globalSettingsLoadError = globalLoadError;
 		this.projectSettingsLoadError = projectLoadError;
@@ -442,11 +571,11 @@ export class SettingsManager {
 	/** Create a SettingsManager that loads from files */
 	static create(cwd: string, agentDir: string = getAgentDir()): SettingsManager {
 		const storage = new FileSettingsStorage(cwd, agentDir);
-		return SettingsManager.fromStorage(storage);
+		return SettingsManager.fromStorage(storage, cwd);
 	}
 
 	/** Create a SettingsManager from an arbitrary storage backend */
-	static fromStorage(storage: SettingsStorage): SettingsManager {
+	static fromStorage(storage: SettingsStorage, cwd: string = process.cwd()): SettingsManager {
 		const globalLoad = SettingsManager.tryLoadFromStorage(storage, "global");
 		const projectLoad = SettingsManager.tryLoadFromStorage(storage, "project");
 		const initialErrors: SettingsError[] = [];
@@ -464,15 +593,16 @@ export class SettingsManager {
 			globalLoad.error,
 			projectLoad.error,
 			initialErrors,
+			cwd,
 		);
 	}
 
 	/** Create an in-memory SettingsManager (no file I/O) */
-	static inMemory(settings: Partial<Settings> = {}): SettingsManager {
+	static inMemory(settings: Partial<Settings> = {}, cwd: string = process.cwd()): SettingsManager {
 		const storage = new InMemorySettingsStorage();
 		const initialSettings = SettingsManager.migrateSettings(structuredClone(settings) as Record<string, unknown>);
 		storage.withLock("global", () => JSON.stringify(initialSettings, null, 2));
-		return SettingsManager.fromStorage(storage);
+		return SettingsManager.fromStorage(storage, cwd);
 	}
 
 	private static loadFromStorage(storage: SettingsStorage, scope: SettingsScope): Settings {
@@ -510,6 +640,12 @@ export class SettingsManager {
 		return structuredClone(this.globalSettings);
 	}
 
+	/** Global settings with the selected profile, without project or runtime overrides. */
+	getUserSettings(): Settings {
+		const name = this.getActiveProfile();
+		return structuredClone(deepMergeSettings(this.globalSettings, name ? (this.getProfile(name) ?? {}) : {}));
+	}
+
 	getProjectSettings(): Settings {
 		return structuredClone(this.projectSettings);
 	}
@@ -519,6 +655,7 @@ export class SettingsManager {
 		const globalLoad = SettingsManager.tryLoadFromStorage(this.storage, "global");
 		if (!globalLoad.error) {
 			this.globalSettings = globalLoad.settings;
+			this.baseGlobalSettings = structuredClone(globalLoad.settings);
 			this.globalSettingsLoadError = null;
 		} else {
 			this.globalSettingsLoadError = globalLoad.error;
@@ -527,6 +664,7 @@ export class SettingsManager {
 
 		this.modifiedFields.clear();
 		this.modifiedNestedFields.clear();
+		this.modifiedProfileFields.clear();
 		this.modifiedProjectFields.clear();
 		this.modifiedProjectNestedFields.clear();
 
@@ -543,10 +681,124 @@ export class SettingsManager {
 	}
 
 	private recomputeSettings(): void {
+		const name = this.getActiveProfile();
+		const profile = name ? this.getProfile(name) : undefined;
 		this.settings = deepMergeSettings(
-			deepMergeSettings(this.globalSettings, this.projectSettings),
+			deepMergeSettings(deepMergeSettings(this.globalSettings, profile ?? {}), this.projectSettings),
 			this.runtimeOverrides,
 		);
+	}
+
+	/** Manual selection is session-only; directory rules select profiles on startup. */
+	getActiveProfile(): string | undefined {
+		if (this.sessionProfileOverride !== undefined) return this.sessionProfileOverride ?? undefined;
+		return this.getDirectoryProfile();
+	}
+
+	private getDirectoryProfile(): string | undefined {
+		const directories = this.globalSettings.profileDirectories;
+		if (!isMergeableObject(directories)) return undefined;
+		const cwd = canonicalProfileDirectory(this.cwd);
+		let best: { name: string; length: number } | undefined;
+		for (const [prefix, name] of Object.entries(directories)) {
+			if (typeof name !== "string" || !isAbsolute(normalizePath(prefix)) || !this.getProfile(name)) continue;
+			const path = canonicalProfileDirectory(prefix);
+			if (isDirectoryAncestor(path, cwd) && (!best || path.length > best.length)) {
+				best = { name, length: path.length };
+			}
+		}
+		return best?.name;
+	}
+
+	getProfile(name: string): ProfileSettings | undefined {
+		if (!isValidModelProfileName(name)) return undefined;
+		const profiles = this.globalSettings.profiles;
+		if (isMergeableObject(profiles) && Object.hasOwn(profiles, name) && isMergeableObject(profiles[name])) {
+			const {
+				profiles: _profiles,
+				activeProfile: _active,
+				profileDirectories: _directories,
+				modelProfiles: _legacy,
+				defaultSandboxes: _sandboxes,
+				lastChangelogVersion: _changelog,
+				...settings
+			} = profiles[name] as Settings;
+			return structuredClone(settings);
+		}
+		const legacy = this.globalSettings.modelProfiles;
+		const patterns =
+			isMergeableObject(legacy) && Object.hasOwn(legacy, name) ? profilePatterns(legacy[name]) : undefined;
+		return patterns ? { enabledModels: patterns } : undefined;
+	}
+
+	useProfile(name: string): void {
+		const profile = this.getProfile(name);
+		if (!profile) throw new Error(`Unknown profile: ${name}`);
+		this.globalSettings.profiles ??= {};
+		let shouldSave = false;
+		if (!Object.hasOwn(this.globalSettings.profiles, name)) {
+			setOwnValue(this.globalSettings.profiles, name, profile);
+			this.markModified("profiles", name);
+			shouldSave = true;
+		}
+		// Discard an old persisted selection without writing the current selection back.
+		if (Object.hasOwn(this.globalSettings, "activeProfile")) {
+			delete this.globalSettings.activeProfile;
+			this.markModified("activeProfile");
+			shouldSave = true;
+		}
+		this.sessionProfileOverride = name;
+		if (shouldSave) this.save();
+		else this.recomputeSettings();
+	}
+
+	setProfileSandbox(name: string, vmName: string | undefined): void {
+		this.setProfileSandboxOptions(name, { defaultSandbox: vmName });
+	}
+
+	setProfileSandboxAutoConnect(name: string, enabled: boolean): void {
+		this.setProfileSandboxOptions(name, { autoConnectSandbox: enabled });
+	}
+
+	/** Apply both sandbox preferences in a single settings write. */
+	setProfileSandboxOptions(name: string, options: ProfileSandboxOptions): void {
+		if (options.defaultSandbox !== undefined && !/^[a-z0-9][a-z0-9-]*$/.test(options.defaultSandbox)) {
+			throw new Error(
+				"Profile sandbox must be an existing Lima VM name containing only lowercase letters, digits, or hyphens",
+			);
+		}
+		const profile = this.getProfile(name);
+		if (!profile) throw new Error(`Unknown profile: ${name}`);
+		const changedKeys = Object.keys(options) as ProfileSandboxSettingKey[];
+		if (changedKeys.length === 0) return;
+		this.globalSettings.profiles ??= {};
+		const promoted = !Object.hasOwn(this.globalSettings.profiles, name);
+		for (const key of changedKeys) {
+			const value = options[key];
+			if (value === undefined) delete profile[key];
+			else setOwnValue(profile, key, value);
+		}
+		setOwnValue(this.globalSettings.profiles, name, profile);
+		if (promoted) this.markModified("profiles", name);
+		else for (const key of changedKeys) this.markProfileEntryModified(name, key);
+		this.save();
+	}
+
+	setProfileDirectory(prefix: string, name: string | undefined): void {
+		const path = normalizePath(prefix);
+		if (!isAbsolute(path)) throw new Error("Profile directory must be an absolute path");
+		if (name !== undefined && !this.getProfile(name)) throw new Error(`Unknown profile: ${name}`);
+		const canonical = canonicalProfileDirectory(path);
+		const current = this.getActiveProfile();
+		const directories = this.globalSettings.profileDirectories;
+		if (directories !== undefined && !isMergeableObject(directories))
+			throw new Error("Invalid profileDirectories setting");
+		this.globalSettings.profileDirectories = { ...directories };
+		this.sessionProfileOverride = current ?? null;
+		if (name === undefined) delete this.globalSettings.profileDirectories[canonical];
+		else setOwnValue(this.globalSettings.profileDirectories, canonical, name);
+		this.markModified("profileDirectories", canonical);
+		this.save();
 	}
 
 	getLoadError(scope: SettingsScope): Error | null {
@@ -559,15 +811,44 @@ export class SettingsManager {
 		this.recomputeSettings();
 	}
 
-	/** Mark a global field as modified during this session */
+	/** Existing setters write to the active profile; management and bookkeeping remain global. */
 	private markModified(field: keyof Settings, nestedKey?: string): void {
+		const name = this.getActiveProfile();
+		if (name && !GLOBAL_ONLY_PROFILE_SETTINGS.has(field)) {
+			this.markProfileModified(name, field, nestedKey);
+			return;
+		}
 		this.modifiedFields.add(field);
 		if (nestedKey) {
-			if (!this.modifiedNestedFields.has(field)) {
-				this.modifiedNestedFields.set(field, new Set());
-			}
+			if (!this.modifiedNestedFields.has(field)) this.modifiedNestedFields.set(field, new Set());
 			this.modifiedNestedFields.get(field)!.add(nestedKey);
 		}
+	}
+
+	private markProfileModified(name: string, field: keyof Settings, nestedKey?: string): void {
+		this.globalSettings.profiles ??= {};
+		const profile = this.globalSettings.profiles[name] ?? {};
+		const base = this.baseGlobalSettings as Record<string, unknown>;
+		const global = this.globalSettings as Record<string, unknown>;
+		const value = global[field];
+		setProfileField(profile as Record<string, unknown>, field, value, nestedKey);
+		setOwnValue(this.globalSettings.profiles, name, profile);
+		if (Object.hasOwn(base, field)) setOwnValue(global, field, structuredClone(base[field]));
+		else delete global[field];
+		this.markProfileEntryModified(name, field, nestedKey);
+	}
+
+	private markProfileEntryModified(name: string, field: ProfileField, nestedKey?: string): void {
+		let fields = this.modifiedProfileFields.get(name);
+		if (!fields) {
+			fields = new Map();
+			this.modifiedProfileFields.set(name, fields);
+		}
+		const previous = fields.get(field);
+		if (nestedKey && (!fields.has(field) || previous)) fields.set(field, new Set([...(previous ?? []), nestedKey]));
+		else fields.set(field, undefined);
+		this.modifiedFields.add("profiles");
+		this.modifiedNestedFields.set("profiles", new Set(this.modifiedProfileFields.keys()));
 	}
 
 	/** Mark a project field as modified during this session */
@@ -621,6 +902,7 @@ export class SettingsManager {
 		snapshotSettings: Settings,
 		modifiedFields: Set<keyof Settings>,
 		modifiedNestedFields: Map<keyof Settings, Set<string>>,
+		profileChanges: ProfileChanges = new Map(),
 	): void {
 		this.storage.withLock(scope, (current) => {
 			const currentFileSettings = current
@@ -629,18 +911,17 @@ export class SettingsManager {
 			const mergedSettings: Settings = { ...currentFileSettings };
 			for (const field of modifiedFields) {
 				const value = snapshotSettings[field];
-				if (modifiedNestedFields.has(field) && typeof value === "object" && value !== null) {
-					const nestedModified = modifiedNestedFields.get(field)!;
-					const baseNested = (currentFileSettings[field] as Record<string, unknown>) ?? {};
-					const inMemoryNested = value as Record<string, unknown>;
-					const mergedNested = { ...baseNested };
-					for (const nestedKey of nestedModified) {
-						setOwnValue(mergedNested, nestedKey, inMemoryNested[nestedKey]);
-					}
-					(mergedSettings as Record<string, unknown>)[field] = mergedNested;
-				} else {
-					(mergedSettings as Record<string, unknown>)[field] = value;
-				}
+				const next =
+					modifiedNestedFields.has(field) && isMergeableObject(value)
+						? mergeModifiedNestedSetting(
+								field,
+								currentFileSettings,
+								snapshotSettings,
+								modifiedNestedFields.get(field)!,
+								profileChanges,
+							)
+						: value;
+				setOwnValue(mergedSettings as Record<string, unknown>, field, next);
 			}
 
 			return JSON.stringify(mergedSettings, null, 2);
@@ -657,9 +938,18 @@ export class SettingsManager {
 		const snapshotGlobalSettings = structuredClone(this.globalSettings);
 		const modifiedFields = new Set(this.modifiedFields);
 		const modifiedNestedFields = this.cloneModifiedNestedFields(this.modifiedNestedFields);
+		const profileChanges = new Map(this.modifiedProfileFields);
+		this.modifiedProfileFields = new Map();
+		this.baseGlobalSettings = structuredClone(this.globalSettings);
 
 		this.enqueueWrite("global", () => {
-			this.persistScopedSettings("global", snapshotGlobalSettings, modifiedFields, modifiedNestedFields);
+			this.persistScopedSettings(
+				"global",
+				snapshotGlobalSettings,
+				modifiedFields,
+				modifiedNestedFields,
+				profileChanges,
+			);
 		});
 	}
 
@@ -699,6 +989,18 @@ export class SettingsManager {
 		const path = realpathSync(cwd);
 		const name = Object.hasOwn(defaults, path) ? defaults[path] : undefined;
 		return typeof name === "string" && /^[a-z0-9][a-z0-9-]*$/.test(name) ? name : undefined;
+	}
+
+	/** Resolve startup auto-connection from trusted profile settings, then the legacy directory assignment. */
+	getAutoConnectSandbox(cwd: string): string | undefined {
+		const active = this.getActiveProfile();
+		const profile = active ? this.getProfile(active) : undefined;
+		if (profile?.autoConnectSandbox === false) return undefined;
+		if (profile?.defaultSandbox !== undefined) {
+			const name = profile.defaultSandbox;
+			return typeof name === "string" && /^[a-z0-9][a-z0-9-]*$/.test(name) ? name : undefined;
+		}
+		return this.getDefaultSandbox(cwd);
 	}
 
 	setDefaultSandbox(cwd: string, name: string | undefined): void {
@@ -763,7 +1065,7 @@ export class SettingsManager {
 	}
 
 	getCompressionDetectionModel(): string | undefined {
-		return this.globalSettings.compressionDetectionModel;
+		return this.getTrustedModelSetting("compressionDetectionModel");
 	}
 
 	setCompressionDetectionModel(reference: string | undefined): void {
@@ -773,19 +1075,32 @@ export class SettingsManager {
 		this.save();
 	}
 
+	/** Switch the current session model without rewriting the selected profile's defaults. */
+	async withTransientModelSelection(task: () => Promise<void>): Promise<void> {
+		this.transientModelSelections++;
+		try {
+			await task();
+		} finally {
+			this.transientModelSelections--;
+		}
+	}
+
 	setDefaultProvider(provider: string): void {
+		if (this.transientModelSelections) return;
 		this.globalSettings.defaultProvider = provider;
 		this.markModified("defaultProvider");
 		this.save();
 	}
 
 	setDefaultModel(modelId: string): void {
+		if (this.transientModelSelections) return;
 		this.globalSettings.defaultModel = modelId;
 		this.markModified("defaultModel");
 		this.save();
 	}
 
 	setDefaultModelAndProvider(provider: string, modelId: string): void {
+		if (this.transientModelSelections) return;
 		this.globalSettings.defaultProvider = provider;
 		this.globalSettings.defaultModel = modelId;
 		this.markModified("defaultProvider");
@@ -828,6 +1143,7 @@ export class SettingsManager {
 	}
 
 	setDefaultThinkingLevel(level: ThinkingLevel): void {
+		if (this.transientModelSelections) return;
 		this.globalSettings.defaultThinkingLevel = level;
 		this.markModified("defaultThinkingLevel");
 		this.save();
@@ -1132,10 +1448,20 @@ export class SettingsManager {
 		this.markModified("enableJobs");
 		this.save();
 	}
+	private getTrustedModelSetting(key: TrustedModelSettingKey): string | undefined {
+		const active = this.getActiveProfile();
+		const profile = active ? this.getProfile(active) : undefined;
+		const value =
+			this.runtimeOverrides[key] !== undefined
+				? this.runtimeOverrides[key]
+				: profile?.[key] !== undefined
+					? profile[key]
+					: this.globalSettings[key];
+		return typeof value === "string" && value.trim() ? value : undefined;
+	}
 
 	getJobModel(): string | undefined {
-		const model = this.globalSettings.jobModel;
-		return typeof model === "string" && model.trim() ? model : undefined;
+		return this.getTrustedModelSetting("jobModel");
 	}
 
 	setJobModel(model: string | undefined): void {
@@ -1246,30 +1572,55 @@ export class SettingsManager {
 	}
 
 	getModelProfiles(): Record<string, string[]> {
-		const storedProfiles: unknown = this.globalSettings.modelProfiles;
-		if (!isMergeableObject(storedProfiles)) return {};
 		const profiles: Record<string, string[]> = {};
-		for (const [name, patterns] of Object.entries(storedProfiles)) {
-			if (
-				!isValidModelProfileName(name) ||
-				!Array.isArray(patterns) ||
-				!patterns.every((value) => typeof value === "string")
-			) {
-				continue;
-			}
-			setOwnValue(profiles, name, [...patterns]);
-		}
+		collectModelProfiles(profiles, this.globalSettings.modelProfiles, false);
+		collectModelProfiles(profiles, this.globalSettings.profiles, true);
 		return profiles;
 	}
 
-	setModelProfile(name: string, patterns: string[]): void {
+	setModelProfile(name: string, patterns: string[], selectedModel?: ProfileModelSelection): void {
 		if (!isValidModelProfileName(name)) throw new Error(`Invalid model profile name: ${name}`);
-		if (patterns.length === 0 || !patterns.every((pattern) => typeof pattern === "string" && pattern.length > 0)) {
-			throw new Error("Model profiles must contain at least one non-empty model pattern");
+		if (!patterns.every((pattern) => typeof pattern === "string" && pattern.length > 0)) {
+			throw new Error("Model profiles must contain only non-empty model patterns");
 		}
-		if (!isMergeableObject(this.globalSettings.modelProfiles)) this.globalSettings.modelProfiles = {};
-		setOwnValue(this.globalSettings.modelProfiles, name, [...patterns]);
-		this.markModified("modelProfiles", name);
+		const {
+			profiles: _profiles,
+			modelProfiles: _legacy,
+			activeProfile: _active,
+			profileDirectories: _directories,
+			defaultSandboxes: _sandboxes,
+			lastChangelogVersion: _changelog,
+			...settings
+		} = this.settings;
+		const active = this.getActiveProfile();
+		const currentProfile = active ? this.getProfile(active) : undefined;
+		// Sandbox selection is trusted user-only; do not snapshot project or runtime values.
+		const {
+			defaultSandbox: _untrustedSandbox,
+			autoConnectSandbox: _untrustedAutoConnect,
+			enabledModels: _inheritedModels,
+			...ordinary
+		} = settings as ProfileSettings;
+		const profile: ProfileSettings = structuredClone(ordinary);
+		if (patterns.length) profile.enabledModels = [...patterns];
+		if (currentProfile?.defaultSandbox !== undefined) profile.defaultSandbox = currentProfile.defaultSandbox;
+		if (currentProfile?.autoConnectSandbox !== undefined)
+			profile.autoConnectSandbox = currentProfile.autoConnectSandbox;
+		const trustedJobModel = this.getJobModel();
+		const trustedDetectorModel = this.getCompressionDetectionModel();
+		if (trustedJobModel) profile.jobModel = trustedJobModel;
+		else if (this.globalSettings.jobModel) profile.jobModel = null;
+		else delete profile.jobModel;
+		if (trustedDetectorModel) profile.compressionDetectionModel = trustedDetectorModel;
+		else if (this.globalSettings.compressionDetectionModel) profile.compressionDetectionModel = null;
+		else delete profile.compressionDetectionModel;
+		if (selectedModel) {
+			profile.defaultProvider = selectedModel.provider;
+			profile.defaultModel = selectedModel.id;
+		}
+		this.globalSettings.profiles ??= {};
+		setOwnValue(this.globalSettings.profiles, name, profile);
+		this.markModified("profiles", name);
 		this.save();
 	}
 	getDoubleEscapeAction(): DoubleEscapeAction {
