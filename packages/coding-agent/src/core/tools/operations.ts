@@ -410,6 +410,7 @@ export class LocalToolOperations implements ToolOperations {
 export class DeferredRemoteToolOperations implements ToolOperations {
 	cwd: string;
 	private readonly expectedCwd: string;
+	private workspaceRoot: string;
 	private operations: RemoteToolOperations | undefined;
 	private hostWorkspaceRoot: string | undefined;
 	private remoteCatalogUnsubscribe: (() => void) | undefined;
@@ -420,6 +421,7 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	constructor(cwd: string, onDisconnect?: (message: string) => void) {
 		this.cwd = cwd;
 		this.expectedCwd = cwd;
+		this.workspaceRoot = cwd;
 		this.onDisconnect = onDisconnect;
 	}
 
@@ -433,10 +435,30 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 			if (!stat.isDirectory()) throw new Error(`Remote daemon cwd is not a directory: ${next.cwd}`);
 			const expectedCwd = options.expectedCwd ?? this.expectedCwd;
 			if (!workspaceRootsEqual(next.cwd, expectedCwd, next.workspacePathFlavor)) {
-				throw new Error(`Remote daemon workspace root mismatch: expected ${expectedCwd}, received ${next.cwd}`);
+				// Only managed sandbox activation supplies a verified host mount mapping.
+				// A raw attachment still requires an exact daemon root match.
+				const paths = next.workspacePathFlavor === "windows" ? win32 : posix;
+				const suffix = paths.relative(next.cwd, expectedCwd);
+				if (
+					!options.hostWorkspaceRoot ||
+					!paths.isAbsolute(expectedCwd) ||
+					suffix === ".." ||
+					suffix.startsWith(`..${paths.sep}`) ||
+					paths.isAbsolute(suffix)
+				) {
+					throw new Error(`Remote daemon workspace root mismatch: expected ${expectedCwd}, received ${next.cwd}`);
+				}
+				const canonicalDirectory = await next.resolveWorkspaceDirectory(expectedCwd);
+				if (!workspaceRootsEqual(canonicalDirectory, expectedCwd, next.workspacePathFlavor)) {
+					throw new Error(
+						`Remote workspace directory mismatch: expected ${expectedCwd}, received ${canonicalDirectory}`,
+					);
+				}
 			}
 			const hostRoot = options.hostWorkspaceRoot ? await fsRealpath(options.hostWorkspaceRoot) : undefined;
 			await this.replaceOperations(next);
+			this.cwd = expectedCwd;
+			this.workspaceRoot = expectedCwd;
 			this.hostWorkspaceRoot = hostRoot;
 			return this.getBackendInfo();
 		} catch (error) {
@@ -464,7 +486,7 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	}
 
 	async exec(command: string, options: ToolExecOptions): Promise<ToolExecResult> {
-		return this.requireOperations().exec(command, options);
+		return this.requireOperations().exec(command, { ...options, cwd: options.cwd ?? this.cwd });
 	}
 
 	async access(path: string, mode?: ToolAccessMode): Promise<void> {
@@ -510,7 +532,7 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 			throw new Error("No verified host mount mapping is available for this sandbox");
 		}
 		const canonicalGuest = await remote.resolveWorkspaceDirectory(posix.resolve(this.cwd, guestPath));
-		const suffix = posix.relative(remote.cwd, canonicalGuest);
+		const suffix = posix.relative(this.workspaceRoot, canonicalGuest);
 		if (suffix === ".." || suffix.startsWith("../") || posix.isAbsolute(suffix)) {
 			throw new Error("Guest directory is outside the mounted workspace");
 		}
@@ -540,7 +562,9 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	}
 
 	getBackendInfo(): ToolBackendInfo {
-		return this.operations?.getBackendInfo() ?? { type: "remote", cwd: this.cwd, configured: false };
+		const info = this.operations?.getBackendInfo();
+		if (info?.type !== "remote" || !info.configured) return { type: "remote", cwd: this.cwd, configured: false };
+		return { ...info, cwd: this.workspaceRoot, workspace: { ...info.workspace, root: this.workspaceRoot } };
 	}
 	isDisconnected(): boolean {
 		return this.operations?.isDisconnected() ?? false;
@@ -745,6 +769,9 @@ export class RemoteToolOperations implements ToolOperations {
 				websocket.terminate();
 				reject(new Error(`Failed to connect remote workspace: ${normalized.url}`));
 			};
+			// Bun can emit another error while terminating a failed opening socket.
+			// Keep an error listener through teardown and the handoff to the protocol client.
+			websocket.on("error", () => undefined);
 			websocket.once("open", onOpen);
 			websocket.once("error", onError);
 		});

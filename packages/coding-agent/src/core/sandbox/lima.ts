@@ -592,6 +592,42 @@ export class LimaSandboxService {
 		}
 	}
 
+	/** Inspect a running legacy daemon without restarting it or changing its credentials. */
+	private async reuseDaemon(config: SandboxConfig, name: string, mountRoot: string): Promise<string | undefined> {
+		const script = [
+			"set -eu",
+			`pid_file="$HOME/.cache/grip/sandbox-daemon-${config.daemonPort}.pid"`,
+			'test ! -L "$pid_file" || exit 31',
+			'if test ! -e "$pid_file"; then printf "GRIP_SANDBOX_ABSENT\\n"; exit 0; fi',
+			'test -f "$pid_file" || exit 31',
+			'pid="$(cat "$pid_file")"',
+			'case "$pid" in ""|0|*[!0-9]*) exit 31;; esac',
+			'if test ! -d "/proc/$pid"; then printf "GRIP_SANDBOX_ABSENT\\n"; exit 0; fi',
+			'kill -0 "$pid" || exit 31',
+			`identity() { awk '{ sub(/^.*\\) /, ""); if ($1 == "Z" || $1 == "X") exit 1; print $20 }' "/proc/$pid/stat"; }`,
+			'start_time="$(identity)"; test -n "$start_time" || exit 31',
+			`expected_root=${shellQuote(config.workspaceMountPath)}; mount_root=${shellQuote(mountRoot)}; export expected_root mount_root`,
+			// A daemon may serve a parent of this client's selected directory, but not a sibling or unrelated mount.
+			// NUL-delimited argv preserves spaces, quotes, and newlines in workspace paths.
+			`awk -v port=${config.daemonPort} 'function within(path, root) { return path == root || index(path, root == "/" ? "/" : root "/") == 1 } BEGIN { RS="\\0" } $0 == "--daemon" { daemon++ } $0 == "--daemon-port" { ports++; getline; if ($0 != port) exit 1 } $0 == "--daemon-cwd" { roots++; getline; if (!within($0, ENVIRON["mount_root"]) || !within(ENVIRON["expected_root"], $0)) exit 1 } END { if (daemon != 1 || ports != 1 || roots != 1) exit 1 }' "/proc/$pid/cmdline" || exit 32`,
+			`token="$(awk 'BEGIN { RS="\\0" } /^GRIP_DAEMON_TOKEN=/ { sub(/^GRIP_DAEMON_TOKEN=/, ""); print; count++ } END { if (count != 1) exit 1 }' "/proc/$pid/environ")" || exit 31`,
+			'test -n "$token" && test "$(identity)" = "$start_time" && kill -0 "$pid" || exit 31',
+			'printf "GRIP_SANDBOX_TOKEN=%s\\n" "$token"',
+		].join("\n");
+		const result = await this.runner.run(config.limaBinary, ["shell", "--tty=false", name, "sh", "-lc", script]);
+		// Credential-bearing output must never appear in diagnostics.
+		if (result.exitCode === 32) {
+			throw new Error(
+				"Running Lima daemon uses a different workspace or port; refusing to restart it and disconnect other agents",
+			);
+		}
+		if (result.exitCode !== 0) throw new Error("Lima daemon identity is uncertain; reconcile guest state manually");
+		if (result.stdout.trim() === "GRIP_SANDBOX_ABSENT") return undefined;
+		const token = result.stdout.match(/^(?:GRIP_SANDBOX_TOKEN=)([A-Za-z0-9+/]{43}=)\r?\n?$/)?.[1];
+		if (!token) throw new Error("Lima daemon did not return a valid credential; reconcile guest state manually");
+		return token;
+	}
+
 	private async startDaemon(config: SandboxConfig, name: string): Promise<string> {
 		const pidFile = `.cache/grip/sandbox-daemon-${config.daemonPort}.pid`;
 		const logFile = `.cache/grip/sandbox-daemon-${config.daemonPort}.log`;
@@ -603,7 +639,7 @@ export class LimaSandboxService {
 			'mkdir "$mode_lock" || exit 28',
 			"trap 'rmdir \"$mode_lock\" 2>/dev/null || true' EXIT",
 			'test ! -e "$HOME/.cache/grip/shared-lima" && test ! -L "$HOME/.cache/grip/shared-lima" || exit 29',
-			`if test -f "$HOME/${pidFile}"; then old_pid="$(cat "$HOME/${pidFile}")"; kill "$old_pid" 2>/dev/null || true; fi`,
+			`if test -e "$HOME/${pidFile}" || test -L "$HOME/${pidFile}"; then test -f "$HOME/${pidFile}" && test ! -L "$HOME/${pidFile}" || exit 31; old_pid="$(cat "$HOME/${pidFile}")"; case "$old_pid" in ""|0|*[!0-9]*) exit 31;; esac; test ! -d "/proc/$old_pid" || exit 31; fi`,
 			`token="$(head -c 32 /dev/urandom | base64 | tr -d '\\n')"`,
 			`nohup env GRIP_DAEMON_TOKEN="$token" "${this.env.GRIP_SANDBOX_GUEST_BINARY ? "$HOME/.local/bin/grip" : '$(command -v grip || printf %s "$HOME/.local/bin/grip")'}" --daemon --daemon-host 127.0.0.1 --daemon-allow-insecure-transport --daemon-port ${config.daemonPort} --daemon-cwd ${shellQuote(config.workspaceMountPath)} --daemon-allow-root --daemon-allow-process-exec --daemon-allow-full-filesystem >"$HOME/${logFile}" 2>&1 </dev/null &`,
 			`echo $! >"$HOME/${pidFile}"`,
@@ -753,8 +789,14 @@ export class LimaSandboxService {
 		if (!existing) await this.startInstance(effectiveConfig, workspaceRoot, name, daemonPort);
 		// A failed guest install/start can have changed state; never delete an uncertain VM.
 		if (existing) await this.assertNoSharedGuestState(effectiveConfig, name);
-		await this.ensureGrip(effectiveConfig, name, !!existing, local);
-		const token = await this.startDaemon({ ...effectiveConfig, workspaceMountPath: binding.guestRoot }, name);
+		const daemonConfig = { ...effectiveConfig, workspaceMountPath: binding.guestRoot };
+		const reusedToken = existing ? await this.reuseDaemon(daemonConfig, name, binding.guestParent) : undefined;
+		let token = reusedToken;
+		if (!token) {
+			await this.ensureGrip(effectiveConfig, name, !!existing, local);
+			// Serve the fixed mount, not the first client's selected project, so siblings can attach later.
+			token = await this.startDaemon({ ...effectiveConfig, workspaceMountPath: binding.guestParent }, name);
+		}
 		await this.readinessWaiter(config.daemonHostBind, daemonPort);
 		// A failed readiness check is not proof that this daemon is ours to stop.
 		// Leave uncertain guest state for explicit operator reconciliation.
@@ -762,12 +804,15 @@ export class LimaSandboxService {
 		const mountedWorkspaceRoot = existing
 			? resolve(findWorkspaceMount(existing, config.workspaceMountPath)!.location!)
 			: workspaceRoot;
-		this.managedInstances.set(name, {
-			workspaceRoot: mountedWorkspaceRoot,
-			daemonPort,
-			ownerId: options.sessionId,
-			managed,
-		});
+		// Attachment does not confer ownership of another agent's daemon.
+		if (!reusedToken) {
+			this.managedInstances.set(name, {
+				workspaceRoot: mountedWorkspaceRoot,
+				daemonPort,
+				ownerId: options.sessionId,
+				managed,
+			});
+		}
 		const daemonUrl = `ws://${urlHost(daemonConnectionHost(config.daemonHostBind))}:${daemonPort}${DAEMON_WEBSOCKET_PATH}`;
 		return {
 			containerId: name,
