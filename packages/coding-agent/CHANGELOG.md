@@ -2,6 +2,23 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.2.1](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.0...@greppleai/grip-v0.2.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **coding-agent:** fix/extensions-selector - hide local extensions ([3a84a0e](https://github.com/greppleai/grip/commit/3a84a0efd6ba21a22979f826da4ba196c107b62f))
+* **coding-agent:** fix/extensions-selector - use inline extension menu ([e256d85](https://github.com/greppleai/grip/commit/e256d8585b5cda69ab626eb61a8a58cebcc78da1))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.2.0 to ^0.2.1
+    * @greppleai/grip-ai bumped from ^0.2.0 to ^0.2.1
+    * @greppleai/grip-tui bumped from ^0.2.0 to ^0.2.1
+
 ## [0.2.0](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.11...@greppleai/grip-v0.2.0) (2026-10-28)
 
 
