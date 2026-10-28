@@ -683,7 +683,17 @@ export class ModelRegistry {
 	): Model<Api>[] {
 		const credential = this.authStorage.get("openai-codex");
 		const accountId = credential?.type === "oauth" ? credential.accountId : undefined;
-		const codexModels = accountId === this.codexAccountId ? this.codexModels : [];
+		// Match exact OpenAI API model IDs for an API-equivalent estimate. Codex's
+		// account catalog has no prices, and the subscription is not billed at these rates.
+		const openAiRates = new Map(
+			getModels("openai")
+				.filter((model) => model.cost.input > 0 && model.cost.output > 0)
+				.map((model) => [model.id, model.cost]),
+		);
+		const codexModels = (accountId === this.codexAccountId ? this.codexModels : []).map((model) => {
+			const cost = openAiRates.get(model.id);
+			return cost ? { ...model, cost: { ...cost } } : model;
+		});
 		const openRouterBaseModels = getModels("openrouter") as Model<Api>[];
 		const openRouterBaseIds = new Set(openRouterBaseModels.map((model) => model.id));
 		const openRouterAccountOnlyModels = this.openRouterAllowedIds
