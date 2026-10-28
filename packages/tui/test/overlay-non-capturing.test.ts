@@ -354,6 +354,91 @@ describe("TUI overlay non-capturing", () => {
 			}
 		});
 
+		it("replaces an active base focus target", () => {
+			const tui = new TuiMainScreen(new VirtualTerminal());
+			const previous = new FocusableOverlay(["PREVIOUS"]);
+			const replacement = new FocusableOverlay(["REPLACEMENT"]);
+			tui.addChild(previous);
+			tui.setFocus(previous);
+			tui.removeChild(previous);
+			tui.addChild(replacement);
+			tui.replaceFocusTarget(previous, replacement);
+			assert.strictEqual(tui.getFocusedComponent(), replacement);
+			assert.strictEqual(previous.focused, false);
+			assert.strictEqual(replacement.focused, true);
+		});
+
+		for (const release of ["hide", "setHidden", "unfocus"] as const) {
+			it(`retargets saved base focus without stealing overlay focus (${release})`, async () => {
+				const terminal = new VirtualTerminal(80, 24);
+				const tui = new TuiMainScreen(terminal);
+				const previous = new FocusableOverlay(["PREVIOUS"]);
+				const replacement = new FocusableOverlay(["REPLACEMENT"]);
+				const overlay = new FocusableOverlay(["OVERLAY"]);
+				const nested = new FocusableOverlay(["NESTED"]);
+				tui.addChild(previous);
+				tui.setFocus(previous);
+				tui.start();
+				try {
+					const handle = tui.showOverlay(overlay);
+					const nestedHandle = tui.showOverlay(nested);
+					tui.removeChild(previous);
+					tui.addChild(replacement);
+					tui.replaceFocusTarget(previous, replacement);
+					assert.strictEqual(tui.getFocusedComponent(), nested);
+					nestedHandle.hide();
+					assert.strictEqual(tui.getFocusedComponent(), overlay);
+					if (release === "setHidden") handle.setHidden(true);
+					else handle[release]();
+					assert.strictEqual(tui.getFocusedComponent(), replacement);
+					terminal.sendInput("x");
+					await renderAndFlush(tui, terminal);
+					assert.deepStrictEqual(replacement.inputs, ["x"]);
+					assert.deepStrictEqual(previous.inputs, []);
+				} finally {
+					tui.stop();
+				}
+			});
+		}
+
+		it("replaces a blocking focus target without prematurely resuming its overlay", () => {
+			const tui = new TuiMainScreen(new VirtualTerminal());
+			const editor = new FocusableOverlay(["EDITOR"]);
+			const previous = new FocusableOverlay(["PREVIOUS"]);
+			const replacement = new FocusableOverlay(["REPLACEMENT"]);
+			const overlay = new FocusableOverlay(["OVERLAY"]);
+			tui.addChild(editor);
+			tui.addChild(previous);
+			tui.setFocus(editor);
+			tui.showOverlay(overlay);
+			tui.setFocus(previous);
+			tui.removeChild(previous);
+			tui.addChild(replacement);
+			tui.replaceFocusTarget(previous, replacement);
+			assert.strictEqual(tui.getFocusedComponent(), replacement);
+			tui.setFocus(null);
+			assert.strictEqual(tui.getFocusedComponent(), overlay);
+		});
+
+		it("retargets a pending explicit focus target while another component blocks restoration", () => {
+			const tui = new TuiMainScreen(new VirtualTerminal());
+			const previous = new FocusableOverlay(["PREVIOUS"]);
+			const replacement = new FocusableOverlay(["REPLACEMENT"]);
+			const blocker = new FocusableOverlay(["BLOCKER"]);
+			tui.addChild(previous);
+			tui.addChild(blocker);
+			tui.setFocus(previous);
+			const handle = tui.showOverlay(new FocusableOverlay(["OVERLAY"]));
+			tui.setFocus(blocker);
+			handle.unfocus({ target: previous });
+			tui.removeChild(previous);
+			tui.addChild(replacement);
+			tui.replaceFocusTarget(previous, replacement);
+			assert.strictEqual(tui.getFocusedComponent(), blocker);
+			tui.setFocus(null);
+			assert.strictEqual(tui.getFocusedComponent(), replacement);
+		});
+
 		it("capturing overlay unfocus() on topmost capturing overlay falls back to preFocus", async () => {
 			const terminal = new VirtualTerminal(80, 24);
 			const tui = new TuiMainScreen(terminal);

@@ -330,6 +330,8 @@ export interface TUI extends Component {
 	setClearOnShrink(enabled: boolean): void;
 	getFocusedComponent(): Component | null;
 	setFocus(component: Component | null): void;
+	/** Retarget active and saved focus when replacing a component, preserving unrelated focus. */
+	replaceFocusTarget(previous: Component, replacement: Component): void;
 	showOverlay(component: Component, options?: OverlayOptions): OverlayHandle;
 	hideOverlay(): void;
 	hasOverlay(): boolean;
@@ -442,6 +444,19 @@ export abstract class TuiBase extends Container implements TUI {
 
 	setFocus(component: Component | null): void {
 		this.setFocusInternal({ component, overlayFocusRestore: "clear" });
+	}
+
+	replaceFocusTarget(previous: Component, replacement: Component): void {
+		if (previous === replacement) return;
+		this.retargetOverlayPreFocus(previous, replacement);
+		const restoreState = this.overlayFocusRestore;
+		if (restoreState.status === "blocked") {
+			if (restoreState.blockedBy === previous) restoreState.blockedBy = replacement;
+			if (restoreState.resume.status === "focus-target" && restoreState.resume.target === previous) {
+				restoreState.resume.target = replacement;
+			}
+		}
+		if (this.focusedComponent === previous) this.setFocus(replacement);
 	}
 
 	private resolveNonOverlayFocus(
@@ -564,10 +579,10 @@ export abstract class TuiBase extends Container implements TUI {
 		return false;
 	}
 
-	private retargetOverlayPreFocus(removed: OverlayStackEntry): void {
+	private retargetOverlayPreFocus(previous: Component, replacement: Component | null): void {
 		for (const overlay of this.overlayStack) {
-			if (overlay !== removed && overlay.preFocus === removed.component) {
-				overlay.preFocus = removed.preFocus;
+			if (overlay.preFocus === previous) {
+				overlay.preFocus = replacement;
 			}
 		}
 	}
@@ -657,7 +672,7 @@ export abstract class TuiBase extends Container implements TUI {
 				const index = this.overlayStack.indexOf(entry);
 				if (index !== -1) {
 					this.clearOverlayFocusRestoreFor(entry);
-					this.retargetOverlayPreFocus(entry);
+					this.retargetOverlayPreFocus(entry.component, entry.preFocus);
 					this.overlayStack.splice(index, 1);
 					this.onOverlayStackChanged();
 					// Restore focus if this overlay had focus
@@ -708,7 +723,7 @@ export abstract class TuiBase extends Container implements TUI {
 		const overlay = this.overlayStack[this.overlayStack.length - 1];
 		if (!overlay) return;
 		this.clearOverlayFocusRestoreFor(overlay);
-		this.retargetOverlayPreFocus(overlay);
+		this.retargetOverlayPreFocus(overlay.component, overlay.preFocus);
 		this.overlayStack.pop();
 		this.onOverlayStackChanged();
 		if (this.focusedComponent === overlay.component) {
