@@ -83,8 +83,8 @@ function deferred<T>() {
 }
 
 describe("extension manager controller", () => {
-	it("starts from inventory, not catalog discovery, and retains missing/failed/disabled/manual provenance", async () => {
-		const rows = [installation(), installation("npm:third-party"), installation("/manual.js", false)];
+	it("starts from inventory, not catalog discovery, and retains missing/failed/disabled/unmanaged remote provenance", async () => {
+		const rows = [installation(), installation("npm:third-party"), installation("npm:unmanaged", false)];
 		rows[0].status = "disabled";
 		rows[1].status = "failed";
 		rows[1].errors = ["Factory failed"];
@@ -106,6 +106,46 @@ describe("extension manager controller", () => {
 		expect(h.manager.getState().inventory).toEqual(rows);
 		rows[0].version = "forged";
 		expect(h.manager.getState().inventory[0].version).toBe("1.0.0");
+	});
+
+	it.each([
+		"official:fixture",
+		"npm:@acme/fixture@1.0.0",
+		"git:github.com/acme/fixture",
+		"git:git@github.com:acme/fixture.git",
+		"https://example.com/acme/fixture.git",
+		"ssh://git@example.com/acme/fixture.git",
+	])("lists remote source %s without exposing or changing local inventory", async (source) => {
+		const localSources = [
+			"auto",
+			"/manual/local.ts",
+			"./local-package",
+			"../local-package",
+			"~/local-package",
+			"C:\\local\\fixture",
+			"relative/path",
+			"<inline>",
+			"unclassified",
+		];
+		const locals = localSources.map((local) => installation(local, false));
+		const remote = installation(source);
+		const rows = [...locals, remote];
+		const h = harness(rows);
+		await h.manager.initialize();
+		expect(h.manager.getState().inventory).toEqual([remote]);
+		for (const local of locals) {
+			h.manager.showDetail({ kind: "installed", identity: local.identity });
+			expect(h.manager.getState().page).toBe("installed");
+		}
+		h.manager.showDetail({ kind: "installed", identity: remote.identity });
+		expect(h.manager.getState()).toMatchObject({ page: "detail", target: { identity: remote.identity } });
+		rows.push(installation("./new-local-package"));
+		await h.manager.initialize();
+		expect(h.manager.getState().inventory).toEqual([remote]);
+		expect(await h.getExtensionInventory()).toBe(rows);
+		expect(rows.map((row) => row.source)).toEqual([...localSources, source, "./new-local-package"]);
+		expect(h.getOfficialCatalog).not.toHaveBeenCalled();
+		await h.manager.dispose();
 	});
 
 	it("supports an empty installed list/catalog and navigates back without fabricating entries", async () => {
@@ -219,11 +259,13 @@ describe("extension manager controller", () => {
 		expect(h.installAndPersist).toHaveBeenCalledTimes(1);
 	});
 
-	it("does not grant removal ownership to manual/local entries, even with a catalog match", async () => {
+	it("ignores local targets without granting removal ownership through catalog matches", async () => {
 		const manual = installation("/manual/fixture.js", false);
 		const h = harness([manual]);
 		await h.manager.initialize();
+		expect(h.manager.getState().inventory).toEqual([]);
 		h.manager.showDetail({ kind: "installed", identity: manual.identity });
+		expect(h.manager.getState().page).toBe("installed");
 		h.manager.requestRemove();
 		await h.manager.confirm();
 		await h.manager.openCatalog();

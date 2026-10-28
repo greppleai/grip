@@ -148,7 +148,7 @@ describe("/extensions interactive host mounting", () => {
 		await host.handleEditorSubmit(" /extensions ");
 		const component = host.extensionManager!.component;
 		expect(text(component)).toContain("Install extension");
-		expect(text(component)).toContain("No installed or configured extensions.");
+		expect(text(component)).toContain("No installed or configured remote extensions.");
 		expect(ui.getFocusedComponent()).toBe(component);
 		expect(editorContainer.children).toEqual([component]);
 		expect(ui.hasOverlay()).toBe(false);
@@ -288,7 +288,12 @@ describe("/extensions interactive host mounting", () => {
 			await host.handleEditorSubmit("/extensions");
 			const rendered = text(host.extensionManager!.component);
 			expect(rendered).toContain("Install extension");
-			expect(rendered).toContain(noExtensions ? "disabled" : "failed");
+			expect(rendered).toContain("No installed or configured remote extensions.");
+			expect(rendered).not.toContain("auto");
+			expect(rendered).not.toContain(noExtensions ? "disabled" : "failed");
+			expect(await loader.getExtensionInventory()).toContainEqual(
+				expect.objectContaining({ source: "auto", status: noExtensions ? "disabled" : "failed" }),
+			);
 			expect(prompt).not.toHaveBeenCalled();
 			await host.disposeExtensionManager();
 			await host.extensionManagerReload.request();
@@ -296,7 +301,8 @@ describe("/extensions interactive host mounting", () => {
 			expect(loader.getExtensions().extensions).toHaveLength(0);
 			expect(loader.getExtensions().errors).toHaveLength(noExtensions ? 0 : 1);
 			await host.handleEditorSubmit("/extensions");
-			expect(text(host.extensionManager!.component)).toContain(noExtensions ? "disabled" : "failed");
+			expect(text(host.extensionManager!.component)).toContain("No installed or configured remote extensions.");
+			expect(text(host.extensionManager!.component)).not.toContain("auto");
 		},
 	);
 
@@ -677,6 +683,10 @@ describe("/extensions interactive host mounting", () => {
 			await started.promise;
 			await host.handleEditorSubmit("/extensions");
 			const component = host.extensionManager!.component;
+			expect(Boolean(runtime.session.extensionRunner.getCommand("manual-proof"))).toBe(!noExtensions);
+			expect(text(component)).toContain("No installed or configured remote extensions.");
+			expect(text(component)).not.toContain("auto");
+			expect(text(component)).not.toContain("manual.ts");
 			activate(component, "Install extension");
 			await vi.waitFor(() => expect(text(component)).toContain("Fixture (1.0.0)"));
 			activate(component, "Fixture");
@@ -707,6 +717,8 @@ describe("/extensions interactive host mounting", () => {
 			);
 			await host.handleEditorSubmit("/extensions");
 			const removal = host.extensionManager!.component;
+			expect(text(removal)).not.toContain("auto");
+			expect(text(removal)).not.toContain("manual.ts");
 			activate(removal, "official:fixture");
 			activate(removal, "Uninstall");
 			expect(harness.settingsManager.getPackages()).toEqual(["official:fixture"]);

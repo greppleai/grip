@@ -8,6 +8,7 @@ import type {
 import { OfficialExtensionError } from "../../core/official-transport.ts";
 import type { ConfiguredPackageTarget, PackageManager } from "../../core/package-manager.ts";
 import type { ResourceLoader } from "../../core/resource-loader.ts";
+import { parseGitUrl } from "../../utils/git.ts";
 
 export type ExtensionManagerList = "installed" | "catalog";
 export type ExtensionManagerPage = ExtensionManagerList | "detail" | "confirm";
@@ -93,7 +94,15 @@ export class ExtensionManagerController {
 		try {
 			const inventory = await this.options.resourceLoader.getExtensionInventory();
 			if (this.disposed) return;
-			this.state.inventory = structuredClone(inventory);
+			// Keep local discovery in the resource loader; this manager lists remote packages only.
+			this.state.inventory = structuredClone(
+				inventory.filter(
+					(row) =>
+						row.source.startsWith("official:") ||
+						row.source.startsWith("npm:") ||
+						parseGitUrl(row.source) !== null,
+				),
+			);
 			this.state.inventoryReady = true;
 			this.state.inventoryError = null;
 		} catch (error) {

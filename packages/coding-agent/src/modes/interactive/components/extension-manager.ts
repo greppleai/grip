@@ -409,7 +409,7 @@ export class ExtensionManagerComponent implements Component, Focusable {
 			);
 			lines.push("", ...this.searches[page].render(width), "");
 			if (page === "installed" && this.state.inventoryReady && this.state.inventory.length === 0)
-				lines.push(...this.text("No installed or configured extensions.", width));
+				lines.push(...this.text("No installed or configured remote extensions.", width));
 		}
 		lines.push(...this.list.render(Math.max(8, width)), "");
 		lines.push(
