@@ -134,7 +134,7 @@ describe("extension manager component", () => {
 	it("offers browsing with no installed extensions, without fetching on open, and closes once", async () => {
 		const h = harness();
 		await h.component.initialize();
-		expect(text(h.component)).toContain("No installed or configured extensions");
+		expect(text(h.component)).toContain("No installed or configured remote extensions");
 		expect(text(h.component)).toContain("Install extension");
 		expect(h.getOfficialCatalog).not.toHaveBeenCalled();
 		h.component.handleInput("\x1b");
@@ -143,7 +143,36 @@ describe("extension manager component", () => {
 		expect(h.component.render(80)).toEqual([]);
 	});
 
-	it("renders scoped status, unknown versions, manual protection and failed-entry provenance", async () => {
+	it.each(["user", "project"] as const)(
+		"hides %s local extensions and keeps remote packages visible after refresh",
+		async (scope) => {
+			const rows = [installation("auto", scope, false), installation("./local-package", scope, false)];
+			const h = harness(rows);
+			await h.component.initialize();
+			expect(text(h.component)).toContain("No installed or configured remote extensions.");
+			expect(text(h.component)).not.toContain("auto");
+			expect(text(h.component)).not.toContain("./local-package");
+			expect(text(h.component)).toContain("Install extension");
+			rows.push(
+				installation("git:git@github.com:acme/remote.git", scope),
+				installation("npm:remote", scope),
+				installation(),
+			);
+			activate(h.component, "Refresh installed");
+			await vi.waitFor(() => expect(text(h.component)).toContain("git:git@github.com:acme/remote.git"));
+			expect(text(h.component)).toContain("npm:remote");
+			expect(text(h.component)).toContain("official:fixture");
+			expect(text(h.component)).not.toContain("No installed or configured remote extensions.");
+			expect(text(h.component)).not.toContain("auto");
+			expect(text(h.component)).not.toContain("./local-package");
+			expect(rows).toHaveLength(5);
+			expect(h.installAndPersist).not.toHaveBeenCalled();
+			expect(h.removeAndPersist).not.toHaveBeenCalled();
+			await h.component.dispose();
+		},
+	);
+
+	it("renders scoped status, unknown versions, unmanaged remote protection and failed-entry provenance", async () => {
 		const disabled = installation();
 		disabled.status = "disabled";
 		const failed = installation("npm:broken", "project");
@@ -160,7 +189,7 @@ describe("extension manager component", () => {
 		const missing = installation("official:missing");
 		missing.status = "missing";
 		missing.installedPath = null;
-		const manual = installation("/manual/local.ts", "temporary", false);
+		const manual = installation("npm:unmanaged", "temporary", false);
 		manual.version = null;
 		const h = harness([disabled, failed, missing, manual]);
 		await h.component.initialize();
@@ -172,7 +201,7 @@ describe("extension manager component", () => {
 		expect(text(h.component)).toContain("Factory failed");
 		expect(text(h.component)).toContain("Entry error");
 		h.component.handleInput("\x1b");
-		activate(h.component, "/manual/local.ts");
+		activate(h.component, "npm:unmanaged");
 		expect(text(h.component)).toContain("unknown (not reported)");
 		expect(text(h.component)).toContain("Grip will not delete these files");
 		expect(text(h.component)).not.toContain("Uninstall");
