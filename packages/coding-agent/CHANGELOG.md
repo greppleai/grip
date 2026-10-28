@@ -2,6 +2,32 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.2.0](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.11...@greppleai/grip-v0.2.0) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* Package hosts must await installed-path/configured-list\nlookups and implement official catalog/startup methods. Resource hosts\nmust provide extension inventory and resolution diagnostics. Official\nmembership changes require transactional install/remove operations.
+
+### Features
+
+* feat/official-extension-installer - add managed extensions ([5fb0d49](https://github.com/greppleai/grip/commit/5fb0d499c19c1361d523eb009a89a088e39a25fe))
+* load and cache model catalogs at runtime ([c45535f](https://github.com/greppleai/grip/commit/c45535ffa962313c85c4927117e60dc9dd13fc9b))
+
+
+### Bug Fixes
+
+* estimate Codex costs and isolate official update tests ([ff88a1b](https://github.com/greppleai/grip/commit/ff88a1bbdf6ffa82c6ca2d523a232f6cfae8e525))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.1.11 to ^0.2.0
+    * @greppleai/grip-ai bumped from ^0.1.11 to ^0.2.0
+    * @greppleai/grip-tui bumped from ^0.1.11 to ^0.2.0
+
 ## [0.1.11](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.1.10...@greppleai/grip-v0.1.11) (2026-10-27)
 
 

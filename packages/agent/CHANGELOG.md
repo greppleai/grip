@@ -2,6 +2,20 @@
 
 All notable changes to `@greppleai/grip-agent-core` are documented in this file.
 
+## [0.2.0](https://github.com/greppleai/grip/compare/@greppleai/grip-agent-core-v0.1.11...@greppleai/grip-agent-core-v0.2.0) (2026-10-28)
+
+
+### Features
+
+* load and cache model catalogs at runtime ([c45535f](https://github.com/greppleai/grip/commit/c45535ffa962313c85c4927117e60dc9dd13fc9b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-ai bumped from ^0.1.11 to ^0.2.0
+
 ## [0.1.11](https://github.com/greppleai/grip/compare/@greppleai/grip-agent-core-v0.1.10...@greppleai/grip-agent-core-v0.1.11) (2026-10-27)
 
 
