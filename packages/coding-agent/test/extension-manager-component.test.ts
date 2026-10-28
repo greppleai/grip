@@ -383,6 +383,48 @@ describe("extension manager component", () => {
 		expect(h.component.render(80)).toEqual([]);
 	});
 
+	it("uses inline selector borders and spacing on every page without an overlay frame", async () => {
+		const h = harness();
+		await h.component.initialize();
+		const assertLayout = () => {
+			const lines = h.component.render(76).map(stripTerminalSequences);
+			expect(lines[0]).toBe("─".repeat(76));
+			expect(lines[1]).toBe("");
+			expect(lines[2]).toBe("Extensions");
+			expect(lines.at(-2)).toBe("");
+			expect(lines.at(-1)).toBe("─".repeat(76));
+			expect(lines.join("\n")).not.toMatch(/[╭╮╰╯│]/);
+			for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(76);
+		};
+		assertLayout();
+		const search = h.component.render(76).find((line) => line.includes(CURSOR_MARKER))!;
+		expect(stripTerminalSequences(search.slice(0, search.indexOf(CURSOR_MARKER)))).toBe("> ");
+		await openCatalog(h.component);
+		assertLayout();
+		activate(h.component, "Fixture");
+		assertLayout();
+		activate(h.component, "Install");
+		assertLayout();
+		await h.component.dispose();
+	});
+
+	it("keeps inline borders while closing and waiting for inventory to settle", async () => {
+		const h = harness();
+		const pending = deferred<InstalledExtension[]>();
+		h.getExtensionInventory.mockReturnValue(pending.promise);
+		const initialization = h.component.initialize();
+		await vi.waitFor(() => expect(h.getExtensionInventory).toHaveBeenCalledOnce());
+		h.component.handleInput("\x1b");
+		const lines = h.component.render(76).map(stripTerminalSequences);
+		expect(lines[0]).toBe("─".repeat(76));
+		expect(lines.at(-1)).toBe("─".repeat(76));
+		expect(lines.join("\n")).toContain("Closing; waiting for management work to settle...");
+		for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(76);
+		pending.resolve([]);
+		await initialization;
+		await vi.waitFor(() => expect(h.onClose).toHaveBeenCalledExactlyOnceWith(false));
+	});
+
 	it("is width-safe with Unicode/hostile metadata and resolves the current theme after invalidation", async () => {
 		const view = catalog();
 		view.extensions[0].manifest!.description = `${"界🌈".repeat(30)}\x1b]52;c;secret\x07\n\r\x00`;
@@ -390,7 +432,7 @@ describe("extension manager component", () => {
 		await h.component.initialize();
 		await openCatalog(h.component);
 		const assertWidths = () => {
-			for (const width of [0, 1, 2, 8, 24, 40, 80]) {
+			for (const width of [0, 1, 2, 3, 4, 5, 8, 24, 40, 80]) {
 				for (const line of h.component.render(width)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
 			}
 		};

@@ -97,7 +97,8 @@ describe("/extensions interactive host mounting", () => {
 		const ui = new TuiMainScreen(new VirtualTerminal());
 		const editor = Reflect.get(mode, "editor") as CustomEditor;
 		vi.spyOn(editor, "addToHistory");
-		ui.addChild(editor);
+		const editorContainer = Reflect.get(mode, "editorContainer") as Container;
+		ui.addChild(editorContainer);
 		ui.setFocus(editor);
 		const showWarning = vi.fn();
 		const showStatus = vi.fn();
@@ -132,6 +133,7 @@ describe("/extensions interactive host mounting", () => {
 			host,
 			ui,
 			editor,
+			editorContainer,
 			showWarning,
 			showStatus,
 			showError,
@@ -140,17 +142,22 @@ describe("/extensions interactive host mounting", () => {
 	}
 
 	it("dispatches without factories and restores editor focus after selector disposal", async () => {
-		const { host, ui, editor, harness } = await setup();
+		const { host, ui, editor, editorContainer, harness } = await setup();
+		const showOverlay = vi.spyOn(ui, "showOverlay");
 		const prompt = vi.spyOn(harness.session, "prompt");
 		await host.handleEditorSubmit(" /extensions ");
 		const component = host.extensionManager!.component;
 		expect(text(component)).toContain("Install extension");
 		expect(text(component)).toContain("No installed or configured extensions.");
 		expect(ui.getFocusedComponent()).toBe(component);
+		expect(editorContainer.children).toEqual([component]);
+		expect(ui.hasOverlay()).toBe(false);
+		expect(showOverlay).not.toHaveBeenCalled();
 		expect(prompt).not.toHaveBeenCalled();
 		component.handleInput("\x1b");
 		await vi.waitFor(() => expect(host.extensionManager).toBeUndefined());
 		expect(ui.getFocusedComponent()).toBe(editor);
+		expect(editorContainer.children).toEqual([editor]);
 		expect(editor.addToHistory).toHaveBeenCalledWith("/extensions");
 	});
 
@@ -169,21 +176,90 @@ describe("/extensions interactive host mounting", () => {
 		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
-	it("refocuses an existing manager and keeps another overlay intact when disposing", async () => {
-		const { host, ui } = await setup();
+	it.each([false, true])("does not replace /model when a displaced manager closes (dispose=%s)", async (dispose) => {
+		const { host, ui, editor, editorContainer } = await setup();
 		await host.handleEditorSubmit("/extensions");
-		const first = host.extensionManager!.component;
-		const other = new Container();
-		const overlay = ui.showOverlay(other);
-		await host.handleEditorSubmit("/extensions");
-		expect(host.extensionManager!.component).toBe(first);
-		expect(ui.getFocusedComponent()).toBe(first);
-		overlay.focus();
-		await host.disposeExtensionManager();
-		expect(ui.getFocusedComponent()).toBe(other);
-		expect(ui.hasOverlay()).toBe(true);
-		overlay.hide();
+		const component = host.extensionManager!.component;
+		await host.handleEditorSubmit("/model");
+		const modelSelector = editorContainer.children[0];
+		expect(modelSelector).not.toBe(component);
+		expect(modelSelector).not.toBe(editor);
+		expect(ui.getFocusedComponent()).toBe(modelSelector);
+		if (dispose) await host.disposeExtensionManager();
+		else component.handleInput("\x1b");
+		await vi.waitFor(() => expect(host.extensionManager).toBeUndefined());
+		expect(editorContainer.children).toEqual([modelSelector]);
+		expect(ui.getFocusedComponent()).toBe(modelSelector);
+		expect(ui.hasOverlay()).toBe(false);
+		modelSelector.handleInput!("\x1b");
+		expect(editorContainer.children).toEqual([editor]);
+		expect(ui.getFocusedComponent()).toBe(editor);
 	});
+
+	it("remounts the same manager and ignores a replaced model selector's stale close", async () => {
+		const { host, ui, editor, editorContainer } = await setup();
+		await host.handleEditorSubmit("/extensions");
+		const component = host.extensionManager!.component;
+		await host.handleEditorSubmit("/model");
+		const modelSelector = editorContainer.children[0];
+		await host.handleEditorSubmit("/extensions");
+		expect(host.extensionManager!.component).toBe(component);
+		expect(editorContainer.children).toEqual([component]);
+		expect(ui.getFocusedComponent()).toBe(component);
+		modelSelector.handleInput!("\x1b");
+		expect(editorContainer.children).toEqual([component]);
+		expect(ui.getFocusedComponent()).toBe(component);
+		component.handleInput("\x1b");
+		await vi.waitFor(() => expect(host.extensionManager).toBeUndefined());
+		expect(editorContainer.children).toEqual([editor]);
+		expect(ui.getFocusedComponent()).toBe(editor);
+	});
+
+	it("does not replace /model when inventory settles after the manager starts closing", async () => {
+		const { host, ui, editorContainer, harness } = await setup();
+		const inventory = Promise.withResolvers<InstalledExtension[]>();
+		cleanups.push(async () => inventory.resolve([]));
+		const readInventory = vi
+			.spyOn(harness.session.resourceLoader, "getExtensionInventory")
+			.mockReturnValue(inventory.promise);
+		const opening = host.handleEditorSubmit("/extensions");
+		await vi.waitFor(() => expect(readInventory).toHaveBeenCalledOnce());
+		const component = host.extensionManager!.component;
+		expect(editorContainer.children).toEqual([component]);
+		component.handleInput("\x1b");
+		expect(text(component)).toContain("Closing;");
+		await host.handleEditorSubmit("/model");
+		const modelSelector = editorContainer.children[0];
+		inventory.resolve([]);
+		await opening;
+		await vi.waitFor(() => expect(host.extensionManager).toBeUndefined());
+		expect(editorContainer.children).toEqual([modelSelector]);
+		expect(ui.getFocusedComponent()).toBe(modelSelector);
+		expect(ui.hasOverlay()).toBe(false);
+	});
+
+	it.each([false, true])(
+		"refocuses the same manager and preserves an unrelated overlay (dispose=%s)",
+		async (dispose) => {
+			const { host, ui, editor, editorContainer } = await setup();
+			await host.handleEditorSubmit("/extensions");
+			const first = host.extensionManager!.component;
+			const other = new Container();
+			const overlay = ui.showOverlay(other);
+			await host.handleEditorSubmit("/extensions");
+			expect(host.extensionManager!.component).toBe(first);
+			expect(ui.getFocusedComponent()).toBe(first);
+			overlay.focus();
+			if (dispose) await host.disposeExtensionManager();
+			else first.handleInput("\x1b");
+			await vi.waitFor(() => expect(host.extensionManager).toBeUndefined());
+			expect(editorContainer.children).toEqual([editor]);
+			expect(ui.getFocusedComponent()).toBe(other);
+			expect(ui.hasOverlay()).toBe(true);
+			overlay.hide();
+			expect(ui.getFocusedComponent()).toBe(editor);
+		},
+	);
 
 	it.each([false, true])(
 		"mounts with actual failed or disabled local loading (noExtensions=%s)",

@@ -37,7 +37,6 @@ import type {
 	Keybinding,
 	KeyId,
 	MarkdownTheme,
-	OverlayHandle,
 	OverlayOptions,
 	SlashCommand,
 	Terminal,
@@ -607,7 +606,7 @@ export class InteractiveMode {
 	private footerDataProvider: FooterDataProvider;
 	// Stored so the same manager can be injected into custom editors, selectors, and extension UI.
 	private keybindings: KeybindingsManager;
-	private extensionManager: { component: ExtensionManagerComponent; handle: OverlayHandle } | undefined;
+	private extensionManager: { component: ExtensionManagerComponent; done: () => void } | undefined;
 	private extensionManagerDisposal: Promise<void> = Promise.resolve();
 	private readonly extensionManagerReload: ExtensionManagerReloadCoordinator;
 	private extensionManagerInvalidating = false;
@@ -5068,7 +5067,8 @@ export class InteractiveMode {
 		await this.extensionManagerDisposal;
 		if (this.isShuttingDown || this.extensionManagerInvalidating || this.session !== session) return;
 		if (this.extensionManager) {
-			this.extensionManager.handle.focus();
+			const view = this.extensionManager;
+			view.done = this.showSelector(() => ({ component: view.component, focus: view.component }));
 			return;
 		}
 		const component = new ExtensionManagerComponent({
@@ -5087,12 +5087,12 @@ export class InteractiveMode {
 				const view = this.extensionManager;
 				if (view?.component !== component) return;
 				this.extensionManager = undefined;
-				view.handle.hide();
+				view.done();
 				this.recordExtensionManagerChanges(reloadRequired);
 			},
 		});
-		const handle = this.ui.showOverlay(component, { width: "90%", maxHeight: "90%" });
-		this.extensionManager = { component, handle };
+		const done = this.showSelector(() => ({ component, focus: component }));
+		this.extensionManager = { component, done };
 		await component.initialize();
 	}
 
@@ -5109,7 +5109,7 @@ export class InteractiveMode {
 		const view = this.extensionManager;
 		if (!view) return this.extensionManagerDisposal;
 		this.extensionManager = undefined;
-		view.handle.hide();
+		view.done();
 		const disposal = view.component.dispose();
 		this.extensionManagerDisposal = Promise.all([this.extensionManagerDisposal, disposal]).then(([, required]) => {
 			this.recordExtensionManagerChanges(required);
@@ -5121,17 +5121,20 @@ export class InteractiveMode {
 	 * Shows a selector component in place of the editor.
 	 * @param create Factory that receives a `done` callback and returns the component and focus target
 	 */
-	private showSelector(create: SelectorFactory): void {
+	private showSelector(create: SelectorFactory): () => void {
 		const done = () => {
+			if (!this.editorContainer.children.includes(component)) return;
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
+			this.ui.replaceFocusTarget(focus, this.editor);
+			this.ui.requestRender();
 		};
 		const { component, focus } = create(done);
 		this.editorContainer.clear();
 		this.editorContainer.addChild(component);
 		this.ui.setFocus(focus);
 		this.ui.requestRender();
+		return done;
 	}
 	private updateOutputPad(padding: number): void {
 		this.settingsManager.setOutputPad(padding);
