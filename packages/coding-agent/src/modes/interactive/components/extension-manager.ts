@@ -62,7 +62,7 @@ export class ExtensionManagerComponent implements Component, Focusable {
 			onChange: () => this.sync(),
 		});
 		this.state = this.controller.getState();
-		this.border = new DynamicBorder((text) => this.options.getTheme().fg("borderAccent", text));
+		this.border = new DynamicBorder((text) => this.options.getTheme().fg("border", text));
 		this.list = this.createList([]);
 		this.rebuild();
 	}
@@ -359,25 +359,28 @@ export class ExtensionManagerComponent implements Component, Focusable {
 
 	render(width: number): string[] {
 		if (width <= 0 || this.disposed) return [];
-		const lines = [...this.border.render(width), ...this.text("Extensions", width, "accent")];
-		if (this.closing) return [...lines, ...this.text("Closing; waiting for management work to settle...", width)];
-		if (this.state.reloadRequired)
-			lines.push(
-				...this.text("Reload/restart pending; running extensions have not been replaced.", width, "warning"),
-			);
-		if (this.state.inventoryError)
-			lines.push(
-				...this.text(
-					`Inventory unavailable: ${this.state.inventoryError}. Retry Refresh installed before making changes.`,
-					width,
-					"error",
-				),
-			);
-		if (this.state.notice) lines.push(...this.text(this.state.notice, width, "warning"));
-		if (this.state.page === "catalog") lines.push(...this.catalogStatus(width));
-		if (this.state.page === "detail" || this.state.page === "confirm") lines.push(...this.details(width));
-		lines.push(...this.renderControls(width));
-		lines.push(...this.border.render(width));
+		const lines = [...this.border.render(width), "", ...this.text("Extensions", width, "accent")];
+		if (this.closing) {
+			lines.push(...this.text("Closing; waiting for management work to settle...", width));
+		} else {
+			if (this.state.reloadRequired)
+				lines.push(
+					...this.text("Reload/restart pending; running extensions have not been replaced.", width, "warning"),
+				);
+			if (this.state.inventoryError)
+				lines.push(
+					...this.text(
+						`Inventory unavailable: ${this.state.inventoryError}. Retry Refresh installed before making changes.`,
+						width,
+						"error",
+					),
+				);
+			if (this.state.notice) lines.push(...this.text(this.state.notice, width, "warning"));
+			if (this.state.page === "catalog") lines.push(...this.catalogStatus(width));
+			if (this.state.page === "detail" || this.state.page === "confirm") lines.push(...this.details(width));
+			lines.push(...this.renderControls(width));
+		}
+		lines.push("", ...this.border.render(width));
 		return lines.map((line) => truncateToWidth(line, width, ""));
 	}
 
@@ -404,11 +407,11 @@ export class ExtensionManagerComponent implements Component, Focusable {
 			lines.push(
 				...this.text(page === "catalog" ? "Official catalog — search:" : "Installed/configured — search:", width),
 			);
-			lines.push(...this.searches[page].render(width));
+			lines.push("", ...this.searches[page].render(width), "");
 			if (page === "installed" && this.state.inventoryReady && this.state.inventory.length === 0)
 				lines.push(...this.text("No installed or configured extensions.", width));
 		}
-		lines.push(...this.list.render(Math.max(8, width)));
+		lines.push(...this.list.render(Math.max(8, width)), "");
 		lines.push(
 			this.options
 				.getTheme()
