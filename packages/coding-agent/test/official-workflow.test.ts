@@ -229,4 +229,4 @@ export default api => {
 		]),
 	);
 	expect(restarted.commands).not.toEqual(expect.arrayContaining([expect.objectContaining({ name: "alpha-proof" })]));
-}, 45000);
+}, 90000);

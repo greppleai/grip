@@ -6,6 +6,7 @@ import { ENV_AGENT_DIR } from "../src/config.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import type { LoadExtensionsResult } from "../src/core/extensions/types.ts";
 import { GripAgent } from "../src/core/grip-agent.ts";
+import { ModelRegistry } from "../src/core/model-registry.ts";
 import { encodeOfficialArtifact, officialJson, officialSha256 } from "../src/core/official-artifact.ts";
 import {
 	OFFICIAL_CATALOG_URL,
@@ -614,13 +615,15 @@ describe("official packages through the canonical manager", () => {
 			await h.manager.installAndPersist("official:fixture");
 			vi.stubEnv("GRIP_MODEL_CATALOG_URL", "");
 			vi.stubGlobal("fetch", h.fetcher);
+			const authStorage = AuthStorage.inMemory();
 			const agent = await GripAgent.create({
 				mode,
 				cwd: h.agentDir,
 				agentDir: h.agentDir,
 				hooks: false,
 				noTools: "all",
-				authStorage: AuthStorage.inMemory(),
+				authStorage,
+				modelRegistry: ModelRegistry.inMemory(authStorage),
 				settingsManager: h.settings,
 				sessionManager: new InMemorySessionManager(h.agentDir),
 			});

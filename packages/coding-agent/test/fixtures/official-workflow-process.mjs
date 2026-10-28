@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { GripAgent } from "../../src/core/grip-agent.ts";
 import { OFFICIAL_CATALOG_URL } from "../../src/core/official-catalog.ts";
+import { ModelRegistry } from "../../src/core/model-registry.ts";
 import { DefaultPackageManager } from "../../src/core/package-manager.ts";
 import { InMemorySessionManager } from "../../src/core/session/in-memory-session-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
@@ -24,11 +25,14 @@ globalThis.fetch = async (input) => {
 };
 const settingsManager = SettingsManager.create(agentDir, agentDir);
 const manager = new DefaultPackageManager({ cwd: agentDir, agentDir, settingsManager });
+const authStorage = AuthStorage.inMemory();
 const runtime = await GripAgent.create({
 	cwd: agentDir,
 	agentDir,
 	settingsManager,
-	authStorage: AuthStorage.inMemory(),
+	authStorage,
+	// Network requests in this fixture belong solely to the official package workflow.
+	modelRegistry: ModelRegistry.inMemory(authStorage),
 	sessionManager: new InMemorySessionManager(agentDir),
 	noTools: "all",
 	hooks: false,

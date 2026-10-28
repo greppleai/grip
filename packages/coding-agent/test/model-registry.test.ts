@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AnthropicMessagesCompat, Api, Context, Model, OpenAICompletionsCompat } from "@greppleai/grip-ai";
-import { getApiProvider, resetModelCatalog } from "@greppleai/grip-ai";
+import { calculateCost, getApiProvider, resetModelCatalog } from "@greppleai/grip-ai";
 import { getOAuthProvider } from "@greppleai/grip-ai/oauth";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
@@ -60,7 +60,12 @@ describe("ModelRegistry", () => {
 				]),
 			),
 			google: { "gemini-test": builtin("google", "google-generative-ai", "gemini-test") },
-			openai: { "gpt-test": builtin("openai", "openai-responses", "gpt-test") },
+			openai: {
+				"gpt-test": {
+					...builtin("openai", "openai-responses", "gpt-test"),
+					cost: { input: 1.25, output: 5, cacheRead: 0.125, cacheWrite: 0 },
+				},
+			},
 		};
 		writeFileSync(
 			catalogPath,
@@ -147,6 +152,14 @@ describe("ModelRegistry", () => {
 								context_window: 500000,
 								supported_reasoning_levels: [{ effort: "low" }],
 							},
+							{
+								slug: "gpt-test",
+								display_name: "Priced API Model",
+								visibility: "list",
+								input_modalities: ["text"],
+								context_window: 200000,
+								supported_reasoning_levels: [{ effort: "high" }],
+							},
 							{ slug: "review-hidden", visibility: "hide" },
 						],
 					}),
@@ -156,14 +169,42 @@ describe("ModelRegistry", () => {
 		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
 		expect(registry.find("openai-codex", "gpt-account-only")).toBeUndefined();
 		const refreshed = await registry.refreshCodexModels();
-		expect(refreshed).toEqual({ count: 1 });
+		expect(refreshed).toEqual({ count: 2 });
 		expect(registry.find("openai-codex", "gpt-account-only")?.contextWindow).toBe(500000);
+		expect(registry.find("openai-codex", "gpt-account-only")?.cost).toEqual({
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+		});
+		const apiCost = { input: 1.25, output: 5, cacheRead: 0.125, cacheWrite: 0 };
+		const codexModel = registry.find("openai-codex", "gpt-test");
+		expect(codexModel?.cost).toEqual(apiCost);
+		if (!codexModel) throw new Error("Missing Codex pricing fixture");
+		expect(
+			calculateCost(codexModel, {
+				input: 1_000_000,
+				output: 1_000_000,
+				cacheRead: 1_000_000,
+				cacheWrite: 0,
+				totalTokens: 3_000_000,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			}).total,
+		).toBe(6.375);
+		expect(registry.find("openai-codex", "gpt-test")).toMatchObject({
+			provider: "openai-codex",
+			api: "openai-codex-responses",
+			baseUrl: "https://chatgpt.com/backend-api",
+			contextWindow: 200000,
+		});
+		expect(registry.find("openai", "gpt-test")?.cost).toEqual(apiCost);
 		expect(registry.find("openai-codex", "review-hidden")).toBeUndefined();
 		registry.refresh();
-		expect(registry.find("openai-codex", "gpt-account-only")).toBeDefined();
+		expect(registry.find("openai-codex", "gpt-test")?.cost).toEqual(apiCost);
 		const offline = ModelRegistry.create(authStorage, modelsJsonPath);
 		await offline.refreshCodexModels({ offline: true });
-		expect(offline.find("openai-codex", "gpt-account-only")).toBeDefined();
+		expect(offline.find("openai-codex", "gpt-test")?.cost).toEqual(apiCost);
+		expect(offline.find("openai-codex", "gpt-account-only")?.cost.input).toBe(0);
 		authStorage.set("openai-codex", {
 			type: "oauth",
 			access: "other-access",

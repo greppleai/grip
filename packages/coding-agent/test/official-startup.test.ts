@@ -9,6 +9,7 @@ import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@grepp
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { GripAgent, type GripAgentAppMode, isFatalGripAgentDiagnostic } from "../src/core/grip-agent.ts";
+import { ModelRegistry } from "../src/core/model-registry.ts";
 import { encodeOfficialArtifact, officialJson, officialSha256 } from "../src/core/official-artifact.ts";
 import {
 	OFFICIAL_CATALOG_URL,
@@ -147,6 +148,7 @@ async function createRuntime(
 	mode: GripAgentAppMode = "embedded",
 	noExtensions = false,
 ): Promise<GripAgent> {
+	const authStorage = AuthStorage.inMemory();
 	return GripAgent.create({
 		cwd: agentDir,
 		agentDir,
@@ -154,7 +156,9 @@ async function createRuntime(
 		settingsManager,
 		noTools: "all",
 		hooks: false,
-		authStorage: AuthStorage.inMemory(),
+		authStorage,
+		// Official update tests own the network fixture; account/model catalog refresh is independent.
+		modelRegistry: ModelRegistry.inMemory(authStorage),
 		sessionManager: new InMemorySessionManager(agentDir),
 		resourceLoaderOptions: { noExtensions, noContextFiles: true },
 	});
@@ -641,12 +645,14 @@ describe("official updates before shared initial resource loading", () => {
 		const loader = new DefaultResourceLoader({ cwd: h.agentDir, agentDir: h.agentDir, settingsManager: h.settings });
 		await loader.reload();
 		const phase = vi.spyOn(OfficialExtensionInstaller.prototype, "startupUpdates");
+		const authStorage = AuthStorage.inMemory();
 		const agent = await GripAgent.create({
 			cwd: h.agentDir,
 			agentDir: h.agentDir,
 			settingsManager: h.settings,
+			authStorage,
+			modelRegistry: ModelRegistry.inMemory(authStorage),
 			resourceLoader: loader,
-			authStorage: AuthStorage.inMemory(),
 			sessionManager: new InMemorySessionManager(h.agentDir),
 			noTools: "all",
 			hooks: false,
@@ -754,6 +760,7 @@ describe("official updates before shared initial resource loading", () => {
 			settingsManager: h.settings,
 			authStorage,
 			model: faux.getModel(),
+			modelRegistry: ModelRegistry.inMemory(authStorage),
 			tools: ["job"],
 			hooks: false,
 			sessionManager: new InMemorySessionManager(h.agentDir),

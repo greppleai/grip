@@ -25,7 +25,7 @@ Use `/logout` to clear credentials. Tokens are stored in `~/.grip/agent/auth.jso
 
 - Requires ChatGPT Plus or Pro subscription
 - Models are discovered for your signed-in ChatGPT account at startup, after `/login`, and with `/model --refresh`. Only listed models appear in the picker. Cached models are available offline.
-- The Codex catalog does not publish output-token limits or per-token pricing; Grip uses a conservative output limit and shows zero token cost for subscription requests.
+- The Codex catalog does not publish output-token limits or per-token pricing. Grip uses a conservative output limit and, for exact model IDs with published OpenAI API rates in the general catalog, shows an API-equivalent token-cost estimate. This is **not** your ChatGPT subscription charge; zero for an unmatched model means its rate is unknown, not that API use is free. Previously recorded session costs are not recalculated. See [model configuration](models.md#per-model-overrides) to override rates manually.
 - Officially endorsed by OpenAI: [Codex for OSS](https://developers.openai.com/community/codex-for-oss)
 
 ### Claude Pro/Max
