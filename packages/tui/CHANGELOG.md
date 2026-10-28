@@ -2,6 +2,13 @@
 
 All notable changes to `@greppleai/grip-tui` are documented in this file.
 
+## [0.2.1](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.2.0...@greppleai/grip-tui-v0.2.1) (2026-10-28)
+
+
+### Features
+
+* **tui:** fix/extensions-selector - support focus replacement ([a96d747](https://github.com/greppleai/grip/commit/a96d747b5abe93a89e8453075094cf91fd1ba197))
+
 ## [0.2.0](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.1.11...@greppleai/grip-tui-v0.2.0) (2026-10-28)
 
 
