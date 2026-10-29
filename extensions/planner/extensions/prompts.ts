@@ -85,9 +85,5 @@ export function compactionInstructions(state: LoopState, plan: Plan): string {
 	return `Planner checkpoint: ${formatLoop(state)}. Durable context is in ${JSON.stringify(plan.path)}, runtime state ${JSON.stringify(plan.path.replace(/INDEX\.md$/, "LOOP-STATE.json"))} (if present), and referenced STEP/PROGRESS/HANDOFF files. Keep the summary short: preserve user constraints, unsaved work, changed files, validation and unresolved risks. Do not repeat the stored plan or completed-step history.`;
 }
 export function shouldCompact(percent: number | null | undefined): boolean {
-	return (
-		percent != null &&
-		Number.isFinite(percent) &&
-		(percent <= 1 ? percent * 100 : percent) >= COMPACTION_THRESHOLD_PERCENT
-	);
+	return percent != null && Number.isFinite(percent) && percent >= COMPACTION_THRESHOLD_PERCENT;
 }
