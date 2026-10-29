@@ -965,10 +965,21 @@ export class RemoteToolOperations implements ToolOperations {
 	}
 
 	async writeFile(path: string, content: string | Buffer): Promise<void> {
+		const bytes = Buffer.from(content);
+		const limits = this.client.handshake?.limits ?? DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS;
+		const base64Length = Math.ceil(bytes.byteLength / 3) * 4;
+		// Reserve space for the request envelope, escaped path and shared revision.
+		const envelopeBytes = Buffer.byteLength(JSON.stringify(path)) + 1024;
+		if (base64Length > limits.maxStringBytes || base64Length + envelopeBytes > limits.maxMessageBytes) {
+			// The upload protocol has no revision precondition. Never bypass shared CAS.
+			if (this.isShared) throw new Error("Large shared writes require revision-aware upload support");
+			await this.uploadBytes(path, bytes);
+			return;
+		}
 		const expectedRevision = this.isShared ? await this.sharedExpectedRevision(path) : undefined;
 		await this.request("workspace.write", {
 			path,
-			contentBase64: Buffer.from(content).toString("base64"),
+			contentBase64: bytes.toString("base64"),
 			...(expectedRevision ? { expectedRevision } : {}),
 		});
 	}
@@ -986,7 +997,10 @@ export class RemoteToolOperations implements ToolOperations {
 
 	async uploadFile(sourcePath: string, destinationPath: string): Promise<void> {
 		if (this.isShared) throw new Error("Shared guest file transfers are unavailable");
-		const content = await fsReadFile(sourcePath);
+		await this.uploadBytes(destinationPath, await fsReadFile(sourcePath));
+	}
+
+	private async uploadBytes(destinationPath: string, content: Buffer): Promise<void> {
 		const sha256 = createHash("sha256").update(content).digest("hex");
 		const handle = this.client.beginRequest("transfer.upload", {
 			path: destinationPath,
@@ -994,11 +1008,18 @@ export class RemoteToolOperations implements ToolOperations {
 			sha256,
 			overwrite: true,
 		});
-		const chunkBytes = this.client.handshake?.limits.maxTransferChunkBytes ?? 64 * 1024;
-		for (let offset = 0; offset < content.byteLength; offset += chunkBytes) {
-			await handle.sendTransferChunk(content.subarray(offset, Math.min(offset + chunkBytes, content.byteLength)));
+		// Attach a rejection handler immediately: the server may reject while chunks are sent.
+		void handle.result.catch(() => {});
+		try {
+			const chunkBytes = this.client.handshake?.limits.maxTransferChunkBytes ?? 64 * 1024;
+			for (let offset = 0; offset < content.byteLength; offset += chunkBytes) {
+				await handle.sendTransferChunk(content.subarray(offset, Math.min(offset + chunkBytes, content.byteLength)));
+			}
+			await handle.finishTransfer(content.byteLength, sha256);
+		} catch (error) {
+			await handle.cancel().catch(() => {});
+			throw error;
 		}
-		await handle.finishTransfer(content.byteLength, sha256);
 		await handle.result;
 	}
 

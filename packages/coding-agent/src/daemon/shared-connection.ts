@@ -248,6 +248,10 @@ export class SharedDaemonConnection {
 			},
 			{
 				validateToolArguments: (toolName, value) => channel.handler.validateToolArguments(toolName, value),
+				handleUploadChunk: (request, chunk, sequence, context) =>
+					channel.handler.handleUploadChunk!(request, chunk, sequence, context),
+				handleUploadFinish: (request, metadata, context) =>
+					channel.handler.handleUploadFinish!(request, metadata, context),
 				handleRequest: (request, context) =>
 					this.budget.run(request.method, async () => {
 						const result = await withSharedRevisionGuard(

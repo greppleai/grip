@@ -166,6 +166,10 @@ export function createDaemonServer(configuration: DaemonConfiguration): DaemonSe
 			}
 			return activityBudget.run(request.method, () => runtimeHandler.handleRequest(request, context));
 		},
+		handleUploadChunk: (request, chunk, sequence, context) =>
+			runtimeHandler.handleUploadChunk!(request, chunk, sequence, context),
+		handleUploadFinish: (request, metadata, context) =>
+			runtimeHandler.handleUploadFinish!(request, metadata, context),
 		validateToolArguments: (toolName, value) => runtimeHandler.validateToolArguments(toolName, value),
 	};
 	const requestListener = (_request: IncomingMessage, response: ServerResponse) => {
