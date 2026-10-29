@@ -2,6 +2,24 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.2.3](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.2...@greppleai/grip-v0.2.3) (2026-10-29)
+
+
+### Features
+
+* add Codex image generation tool ([1a7db9e](https://github.com/greppleai/grip/commit/1a7db9ef4cd7a0d0db5eac5bea0bdd9a55c7d7ef))
+* add profile image model selection ([0c322e0](https://github.com/greppleai/grip/commit/0c322e0ea884be320e0de099dfad633c93d28980))
+* show delegated job usage in footer ([7fef8af](https://github.com/greppleai/grip/commit/7fef8af9bf93908b21a50c7eff85341cf5c74eb7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.2.2 to ^0.2.3
+    * @greppleai/grip-ai bumped from ^0.2.2 to ^0.2.3
+    * @greppleai/grip-tui bumped from ^0.2.2 to ^0.2.3
+
 ## [0.2.2](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.1...@greppleai/grip-v0.2.2) (2026-10-29)
 
 
