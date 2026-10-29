@@ -1,0 +1,15 @@
+{
+  "name": "@grip-extensions/planner",
+  "version": "1.0.0",
+  "description": "File-backed Markdown plans and iterative build loops for Grip",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "grip": ">=0.2.1 <0.3.0" },
+  "files": ["README.md", "LICENSE"],
+  "grip": {
+    "official": { "id": "planner", "displayName": "Planner" },
+    "extensions": ["extensions/index.ts"],
+    "skills": ["skills/planner/SKILL.md"]
+  },
+  "dependencies": { "yaml": "2.9.1" }
+}
