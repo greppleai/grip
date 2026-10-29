@@ -229,16 +229,22 @@ export default function registerPlanner(pi: ExtensionAPI) {
 		}
 	}
 
-	async function finish(plan: Plan, ctx: ExtensionContext): Promise<void> {
+	async function finish(plan: Plan, ctx: ExtensionContext, valid: () => boolean): Promise<boolean> {
+		if (!valid()) return false;
 		if (!plan.steps.length || plan.steps.some((step) => !isTerminal(step.status)))
 			throw new Error("Cannot finish: mark every step Completed or Skipped first.");
 		const plans = store(ctx);
-		await plans.checkTemplates(plan, await plans.readRuntime(plan.id));
+		const runtime = await plans.readRuntime(plan.id);
+		if (!valid()) return false;
+		await plans.checkTemplates(plan, runtime);
+		if (!valid()) return false;
 		if (fingerprint(plan) === checkpoint)
 			throw new Error("Save authored progress/context before completing; terminal statuses alone are not progress.");
-		await plans.updateIndex(plan.id, { status: "Completed" });
+		await plans.updateIndex(plan.id, { status: "Completed" }, valid);
+		if (!valid()) return false;
 		clear(ctx);
 		notify(ctx, `Planner complete: ${plan.id}.`);
+		return true;
 	}
 
 	async function advance(ctx: ExtensionContext, expectedGeneration: number): Promise<void> {
@@ -336,8 +342,8 @@ export default function registerPlanner(pi: ExtensionAPI) {
 			return "Plan skipped; loop stopped.";
 		}
 		if (plan.steps.length && plan.steps.every((step) => isTerminal(step.status))) {
-			await finish(plan, ctx);
-			return "Plan completed. No next iteration.";
+			const completed = await finish(plan, ctx, () => generation === expectedGeneration && loop === activeLoop);
+			return completed ? "Plan completed. No next iteration." : "Planner loop changed; no completion delivered.";
 		}
 		assertSavedProgress(plan);
 		if (ctx.hasPendingMessages()) return "Pending messages already queued. Continue there.";
@@ -578,10 +584,13 @@ export default function registerPlanner(pi: ExtensionAPI) {
 				.map((part) => part.text)
 				.join("\n") ?? "";
 		if (!text.split(/\r?\n/).some((line) => line.trim() === COMPLETE_MARKER)) return;
+		const activeLoop = loop;
+		const expectedGeneration = generation;
+		const valid = () => generation === expectedGeneration && loop === activeLoop;
 		try {
-			await finish(await store(ctx).load(loop.planId), ctx);
+			await finish(await store(ctx).load(activeLoop.planId), ctx, valid);
 		} catch (error) {
-			notify(ctx, String(error), "warning");
+			if (valid()) notify(ctx, String(error), "warning");
 		}
 	});
 	pi.on("session_start", async (_event, ctx) => {

@@ -1674,3 +1674,91 @@ test("checkpoint compaction uses percentage points at the threshold", async () =
 		expect(f.messages).toHaveLength(percent >= 40 ? 1 : 2);
 	}
 });
+
+interface CompletionBarrier {
+	ready: Promise<void>;
+	release(): void;
+}
+
+function blockCompletionRead(f: PlannerFixture, path: string, sampleAt: number): CompletionBarrier {
+	let entered!: () => void;
+	let release!: () => void;
+	const ready = new Promise<void>((resolve) => {
+		entered = resolve;
+	});
+	const hold = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const originalRead = f.ctx.toolOperations.readFile;
+	let reads = 0;
+	f.ctx.toolOperations.readFile = async (filePath) => {
+		const content = await originalRead(filePath);
+		if (filePath === path && ++reads === sampleAt) {
+			entered();
+			await hold;
+		}
+		return content;
+	};
+	return { ready, release };
+}
+
+type CompletionEntry = "done" | "marker";
+type CompletionAction = "cancel" | "replacement";
+
+async function checkStaleCompletion(entry: CompletionEntry, action: CompletionAction): Promise<void> {
+	const f = await setup();
+	await f.call("planner_start", { planName: "demo" });
+	await f.step("Completed");
+	const gate = blockCompletionRead(f, f.store.runtimePath("demo"), entry === "done" ? 2 : 1);
+	const finishing =
+		entry === "done"
+			? f.call("planner_done")
+			: f.events.get("agent_end")(
+					{ messages: [{ role: "assistant", content: [{ type: "text", text: "PLANNER_COMPLETE" }] }] },
+					f.ctx,
+				);
+	try {
+		await gate.ready;
+		if (action === "cancel") await f.command("cancel demo");
+		else {
+			f.setIdle(true);
+			await f.command("stop");
+			await f.store.preparePlan("replacement");
+			await f.store.prepareStep("replacement", "work", 1);
+			await f.call("planner_start", { planName: "replacement" });
+		}
+	} finally {
+		gate.release();
+	}
+	const response = await finishing;
+	if (entry === "done") expect((response as PlannerToolResult).content[0].text).toContain("no completion delivered");
+	expect((await f.store.load("demo")).status).toBe(action === "cancel" ? "Skipped" : "In Progress");
+	expect(f.notices.some((notice) => notice.includes("Planner complete: demo"))).toBe(false);
+	await f.command("status");
+	expect(f.notices.at(-1)).toContain(action === "cancel" ? "No active" : "replacement: iteration 1");
+}
+
+// biome-ignore format: Keep the custom bounded-test-matrix directive attached to the callback.
+test("stale completion after runtime validation cannot cancel or clear a replacement loop", // grip-ignore noExcessiveCollectionIterations: two entrypoints and two interruptions are a bounded test matrix.
+async () => {
+	for (const entry of ["done", "marker"] as const)
+		for (const action of ["cancel", "replacement"] as const) await checkStaleCompletion(entry, action);
+});
+
+test("cancel while completion holds the INDEX queue suppresses its mutation", async () => {
+	const f = await setup();
+	await f.call("planner_start", { planName: "demo" });
+	await f.step("Completed");
+	const runtimeGate = blockCompletionRead(f, f.store.runtimePath("demo"), 2);
+	const finishing = f.call("planner_done");
+	await runtimeGate.ready;
+	const indexGate = blockCompletionRead(f, f.store.indexPath("demo"), 2);
+	runtimeGate.release();
+	await indexGate.ready;
+	const cancellation = f.command("cancel demo");
+	indexGate.release();
+	const [response] = await Promise.all([finishing, cancellation]);
+	expect(response.content[0].text).toContain("no completion delivered");
+	expect((await f.store.load("demo")).status).toBe("Skipped");
+	expect(f.notices.some((notice) => notice.includes("Planner complete: demo"))).toBe(false);
+});
