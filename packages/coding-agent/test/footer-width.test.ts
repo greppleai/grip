@@ -238,7 +238,7 @@ describe("FooterComponent width handling", () => {
 			}),
 			createFooterData(1),
 		);
-		expect(footer.render(120)[1]).toContain("catalog $1.234 (sub) (detect est $0.0135 total) D2/1 C0");
+		expect(footer.render(120)[1]).toContain("$1.234 (sub) (detect est $0.0135 total) D2/1 C0");
 		const unset = new FooterComponent(createSession({ sessionName: "" }), createFooterData(1));
 		expect(unset.render(100)[1]).not.toContain("detect $");
 	});
@@ -266,7 +266,34 @@ describe("FooterComponent width handling", () => {
 			createFooterData(1),
 		);
 		const stats = footer.render(100)[1];
-		expect(stats).toContain("total ↑100 ↓20 catalog $1.000");
+		expect(stats).toContain("total ↑100 ↓20 $1.000");
+	});
+	it("shows completed job usage separately from parent usage", () => {
+		const job = {
+			type: "message",
+			message: {
+				role: "toolResult",
+				toolName: "job",
+				details: {
+					results: [{ usage: { input: 1200, output: 300, cacheRead: 40, cacheWrite: 0, cost: 0.025, turns: 1 } }],
+				},
+			},
+		} as unknown as SessionEntry;
+		const footer = new FooterComponent(
+			createSession({
+				sessionName: "",
+				subscription: true,
+				usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 1 } },
+				sessionEntries: [job],
+			}),
+			createFooterData(1),
+		);
+		const lines = footer.render(100);
+		expect(lines[1]).toContain("Main:");
+		expect(lines[1]).toContain("total ↑100 ↓20 $1.000 (sub)");
+		expect(lines[2]).toContain("Jobs:");
+		expect(lines[2]).toContain("↑1.2k ↓300 R40 est $0.025");
+		for (const line of footer.render(24)) expect(visibleWidth(line)).toBeLessThanOrEqual(24);
 	});
 	it("shows cumulative billed usage alongside current context", () => {
 		const footer = new FooterComponent(
@@ -286,7 +313,7 @@ describe("FooterComponent width handling", () => {
 			createFooterData(1),
 		);
 		const stats = footer.render(160)[1];
-		expect(stats).toContain("total ↑141M ↓372k R78M catalog $302.189");
+		expect(stats).toContain("total ↑141M ↓372k R78M $302.189");
 		expect(stats).toContain("ctx ~101k/200k (50.7%)");
 	});
 	it("shows cumulative removal and estimated break-even before claiming net avoidance", () => {

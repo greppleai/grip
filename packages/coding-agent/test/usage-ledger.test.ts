@@ -49,4 +49,41 @@ describe("persistent usage ledger", () => {
 		expect(current).toMatchObject({ input: 123 + next.usage.input, output: baseline.output + 10, requests: 2 });
 		expect(current.catalogCost).toBeCloseTo(0.15);
 	});
+
+	it("counts persisted job results separately across checkpoints, branches and replays", () => {
+		const session = new InMemorySessionManager().create();
+		const parent = fauxAssistantMessage("parent");
+		const parentId = session.appendMessage(parent);
+		const resultId = session.appendMessage({
+			role: "toolResult",
+			toolCallId: "job-1",
+			toolName: "job",
+			content: [],
+			isError: true,
+			timestamp: Date.now(),
+			details: {
+				mode: "parallel",
+				results: [
+					{ usage: { input: 10, output: 2, cacheRead: 3, cacheWrite: 4, cost: 0.5, turns: 1 } },
+					{ usage: { input: 20, output: 5, cacheRead: 6, cacheWrite: 7, cost: 0.25, turns: 2 } },
+				],
+			},
+		});
+		const before = readUsageLedger(session.getEntries());
+		expect(before.jobs).toEqual({
+			input: 30,
+			output: 7,
+			cacheRead: 9,
+			cacheWrite: 11,
+			catalogCost: 0.75,
+			requests: 3,
+		});
+		expect(before.input).toBe(parent.usage.input);
+		session.appendCustomEntry(USAGE_LEDGER_ENTRY_TYPE, before);
+		session.branch(parentId);
+		const original = session.getEntry(resultId);
+		if (!original) throw new Error("Missing job result");
+		session.appendReplayedEntry(original, new Map());
+		expect(readUsageLedger(session.getEntries()).jobs).toEqual(before.jobs);
+	});
 });
