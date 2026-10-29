@@ -56,6 +56,7 @@ describe("regression #2860: replaced session callbacks", () => {
 		authStorage.setRuntimeApiKey(faux.getModel().provider, "faux-key");
 
 		const runtime = await GripAgent.create({
+			hooks: false,
 			cwd: tempDir,
 			agentDir: tempDir,
 			authStorage,

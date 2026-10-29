@@ -97,6 +97,7 @@ describe("GripAgent remote session durability barriers", () => {
 		const authStorage = AuthStorage.inMemory();
 		authStorage.setRuntimeApiKey(model.provider, "test-key");
 		const pi = await GripAgent.create({
+			hooks: false,
 			cwd,
 			agentDir: cwd,
 			model,
