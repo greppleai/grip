@@ -2,7 +2,7 @@
 
 Official extensions are independently versioned, published releases curated from the [`extensions/` source directory](../../../extensions/README.md). Their package identity is `official:<id>`, not an npm package or Git repository. Grip selects a published stable release compatible with your Grip version; it never installs unpublished code from `main`.
 
-Planner is selected as an official extension source, but selection and local packaging do not publish it. `official:planner` appears in the production catalog only after a separate maintainer publication. The manager also supports an empty catalog; examples elsewhere in the repository are not automatically official or installed.
+Planner is selected as an official extension source. Pushes to main can publish it automatically after tests; local packaging never publishes. `official:planner` appears once publication updates the production catalog. The manager also supports an empty catalog; examples elsewhere in the repository are not automatically official or installed.
 
 > **Trust:** Official extensions run as your user with full access to files, commands, network and credentials. They are not sandboxed. Review code and install only extensions you trust. Catalog checksums verify artifact integrity relative to the trusted official repository; they do not independently authenticate the publisher or limit extension behavior.
 
@@ -109,4 +109,4 @@ For hosts implementing package/resource contracts:
 - Include `diagnostics` in `ResolvedPaths` and implement `ResourceLoader.getExtensionInventory()`. Consume its scoped `removal` target rather than deriving deletion rights from a path or catalog ID. Provenance includes official identity/version and load-error source information.
 - A runtime host's before-session-invalidate callback may return a Promise. Replacement/disposal awaits it so in-flight management settles before the old session is disposed.
 
-See [SDK usage](sdk.md), [extension API](extensions.md) and the [authoring and independent publication guide](../../../extensions/README.md). Publication remains an explicit maintainer action, not an installation or local validation step.
+See [SDK usage](sdk.md), [extension API](extensions.md) and the [authoring and independent publication guide](../../../extensions/README.md). Merging to main authorizes automatic publication after tests; source, license and compatibility approval must precede the merge. Executable smoke testing remains a maintainer responsibility. Installation and local validation do not publish.

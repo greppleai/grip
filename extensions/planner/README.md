@@ -6,7 +6,7 @@ planning-service credentials are required.
 
 ## Install and commands
 
-Planner is selected as an official extension source, but source presence does **not** publish it. Once `official:planner` is published and visible in the catalog, use `/extensions` or:
+Planner is selected as an official extension source. Pushes to main can publish it automatically after tests; local packaging never publishes. Once `official:planner` is visible in the catalog, use `/extensions` or:
 
 ```sh
 grip install official:planner
@@ -15,7 +15,7 @@ grip update official:planner
 grip remove official:planner
 ```
 
-The independently versioned initial package is `1.0.0`; its declared Grip range is `>=0.2.1 <0.3.0` (minimum 0.2.1). The range is validated against this checkout, not every released executable; release approval and executable smoke tests remain required. Official extensions run with full user access: review and trust the code before installation.
+The independently versioned initial package is `1.0.0`; its declared Grip range is `>=0.2.1 <0.3.0` (minimum 0.2.1). The range is validated against this checkout, not every released executable; source, license and compatibility approval before merging and maintainer executable smoke tests remain required. Official extensions run with full user access: review and trust the code before installation.
 
 Official installations are global and include their runtime dependencies. At startup Grip updates selected installations to newer compatible stable releases unless updates are disabled or offline; verified installed versions can be reused offline. Removing the official package removes selection and activation but retains immutable code versions and does not remove plans. Running sessions need to reload or restart after CLI changes; `/extensions` applies changes after work settles. See Grip's official extensions guide for policy and recovery.
 
@@ -275,7 +275,7 @@ From the Grip repository root after `npm ci --ignore-scripts`:
 node node_modules/vitest/dist/cli.js --run --config extensions/planner/vitest.config.mjs
 npm run extensions:pack -- --out /tmp/grip-official-artifacts
 cd packages/coding-agent
-node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts test/official-planner-artifact.test.ts test/official-planner-lifecycle.test.ts
+node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts test/official-automatic-publication.test.ts test/official-planner-artifact.test.ts test/official-planner-lifecycle.test.ts
 ```
 
 Run `npm run check` from the repository root after code changes. Packaging is local validation, not publication. For release readiness and the independent artifact/catalog workflow, see the repository's `extensions/README.md`.

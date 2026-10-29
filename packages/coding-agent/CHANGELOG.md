@@ -20,9 +20,13 @@ All notable changes to Grip are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Publish official extensions automatically after main-branch tests, with independent versioning and immutable artifacts.
+
 ### Added
 
-- Added Planner as an official extension source, pending independent publication.
+- Added Planner as an official extension source.
 
 ## [0.2.1](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.0...@greppleai/grip-v0.2.1) (2026-10-28)
 

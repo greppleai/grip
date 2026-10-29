@@ -24,11 +24,10 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Test packaging, virtual-module loading and mocked publication
         working-directory: packages/coding-agent
-        run: node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts test/official-planner-artifact.test.ts test/official-planner-lifecycle.test.ts
+        run: node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts test/official-automatic-publication.test.ts test/official-planner-artifact.test.ts test/official-planner-lifecycle.test.ts
       - name: Test Planner behavior
         run: node node_modules/vitest/dist/cli.js --run --config extensions/planner/vitest.config.mjs
-      - name: Validate source versions and published catalog consistency
+      - name: Validate automatic versions and published catalog consistency
         env:
           GH_TOKEN: ${{ github.token }}
-          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: node scripts/official-extensions-cli.mjs validate-published --out /tmp/grip-official-validation --base "$BASE_REF"
+        run: node scripts/official-extensions-cli.mjs validate-published --out /tmp/grip-official-validation

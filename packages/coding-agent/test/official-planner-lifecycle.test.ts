@@ -120,7 +120,7 @@ it("installs the packaged planner through isolated process lifecycles without im
 		expect.objectContaining({
 			sourceInfo: expect.objectContaining({
 				source: "official:planner",
-				official: { id: "planner", version: "1.0.0" },
+				official: { id: "planner", version: packaged.release.manifest.version },
 			}),
 		}),
 	]);
@@ -169,7 +169,7 @@ Keep planner data in the backend workspace.
 		agentDir,
 		"official",
 		"planner",
-		officialVersionDirectory("1.0.0", packaged.release.artifact.sha256),
+		officialVersionDirectory(packaged.release.manifest.version, packaged.release.artifact.sha256),
 		"extensions",
 		"index.js",
 	);

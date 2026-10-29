@@ -57,7 +57,7 @@ test("packages the actual planner reproducibly and loads its standalone artifact
 	expect(first.bytes.readUInt32LE(4)).toBe(0);
 	expect(first.release.manifest).toMatchObject({
 		name: "@grip-extensions/planner",
-		version: "1.0.0",
+		version: JSON.parse(await readFile(join(plannerRoot, "package.json"), "utf8")).version,
 		engines: { grip: ">=0.2.1 <0.3.0" },
 		grip: {
 			official: { id: "planner", displayName: "Planner" },

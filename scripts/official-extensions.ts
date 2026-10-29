@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { isBuiltin } from "node:module";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -194,21 +193,4 @@ export async function packageOfficialRepository(root: string, output: string, so
 	const catalog = mergeOfficialReleases(previous, releases);
 	await writeFile(join(output, "catalog.json"), `${officialJson(catalog)}\n`);
 	return catalog;
-}
-
-/** Conservative source-change gate: an edited extension needs an independent version bump. */
-export function checkOfficialVersionChanges(root: string, base: string): void {
-	const paths = execFileSync("git", ["diff", "--name-only", "--diff-filter=ACDMRT", base, "HEAD", "--", "extensions/"], { cwd: root, encoding: "utf8" }).trim().split("\n");
-	const ids = new Set(paths.map((path) => path.split("/")[1]).filter((id) => id && !id.endsWith(".md")));
-	for (const id of ids) {
-		validateOfficialId(id);
-		const path = `extensions/${id}/package.json`;
-		if (!execFileSync("git", ["ls-tree", "--name-only", "HEAD", "--", path], { cwd: root, encoding: "utf8" }).trim()) continue;
-		const present = execFileSync("git", ["show", `HEAD:${path}`], { cwd: root, encoding: "utf8" });
-		const exists = execFileSync("git", ["ls-tree", "--name-only", base, "--", path], { cwd: root, encoding: "utf8" }).trim();
-		if (!exists) continue;
-		const previous = execFileSync("git", ["show", `${base}:${path}`], { cwd: root, encoding: "utf8" });
-		if (parseOfficialManifest(JSON.parse(previous), id).version === parseOfficialManifest(JSON.parse(present), id).version)
-			throw new Error(`Changed official extension requires a version bump: ${id}`);
-	}
 }
