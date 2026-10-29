@@ -65,6 +65,7 @@ describe("GripAgent session replacement characterization", () => {
 		const model = options?.bootstrapModel === false ? undefined : faux.getModel();
 		const thinkingLevel = options?.bootstrapThinkingLevel === false ? undefined : undefined;
 		const runtime = await GripAgent.create({
+			hooks: false,
 			cwd: tempDir,
 			agentDir: tempDir,
 			authStorage,
@@ -482,6 +483,7 @@ describe("GripAgent session replacement characterization", () => {
 		authStorage.setRuntimeApiKey(faux.getModel().provider, "faux-key");
 
 		const runtime = await GripAgent.create({
+			hooks: false,
 			cwd: tempDir,
 			agentDir: tempDir,
 			authStorage,
@@ -574,6 +576,7 @@ describe("GripAgent session replacement characterization", () => {
 		const otherAuthStorage = AuthStorage.inMemory();
 		otherAuthStorage.setRuntimeApiKey(faux.getModel().provider, "faux-key");
 		const otherRuntime = await GripAgent.create({
+			hooks: false,
 			cwd: secondDir,
 			agentDir: tempDir,
 			authStorage: otherAuthStorage,
@@ -627,6 +630,7 @@ describe("GripAgent session replacement characterization", () => {
 		const otherAuthStorage = AuthStorage.inMemory();
 		otherAuthStorage.setRuntimeApiKey(faux.getModel().provider, "faux-key");
 		const otherRuntime = await GripAgent.create({
+			hooks: false,
 			cwd: otherDir,
 			agentDir: tempDir,
 			authStorage: otherAuthStorage,
