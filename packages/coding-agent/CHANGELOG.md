@@ -2,6 +2,22 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.2.2](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.1...@greppleai/grip-v0.2.2) (2026-10-29)
+
+
+### Features
+
+* **coding-agent:** feat/official-planner - add Planner extension ([0b5e39e](https://github.com/greppleai/grip/commit/0b5e39e8ca6c87640f43f30b0abff8ba361056ae))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.2.1 to ^0.2.2
+    * @greppleai/grip-ai bumped from ^0.2.1 to ^0.2.2
+    * @greppleai/grip-tui bumped from ^0.2.1 to ^0.2.2
+
 ## [Unreleased]
 
 ### Added
