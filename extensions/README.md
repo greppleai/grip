@@ -1,6 +1,6 @@
 # Official extensions
 
-This directory intentionally has no production extensions. Curating or moving an existing example requires operator selection. Tests generate isolated fixture extensions instead. For installation, automatic updates, trust, offline use, retained data and SDK contract changes, see the [user guide](../packages/coding-agent/docs/official-extensions.md). For factory APIs and UI, see the [extension API](../packages/coding-agent/docs/extensions.md) and [TUI guide](../packages/coding-agent/docs/tui.md).
+[Planner](planner/README.md) is the selected official extension source. Source selection and local packaging do not publish an artifact or update the production catalog; `official:planner` becomes discoverable only after a separate publication. Tests also generate isolated fixture extensions. For installation, automatic updates, trust, offline use, retained data and SDK contract changes, see the [user guide](../packages/coding-agent/docs/official-extensions.md). For factory APIs and UI, see the [extension API](../packages/coding-agent/docs/extensions.md) and [TUI guide](../packages/coding-agent/docs/tui.md).
 
 ## Authoring contract
 
@@ -39,10 +39,12 @@ npm run extensions:pack -- --out /tmp/grip-official-artifacts
 # Check against a saved trusted publication catalog and a base commit:
 npm run extensions:pack -- --out /tmp/grip-official-artifacts --previous /tmp/catalog.json --base BASE_SHA
 cd packages/coding-agent
-node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts
+node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts test/official-planner-artifact.test.ts test/official-planner-lifecycle.test.ts
+cd ../..
+node node_modules/vitest/dist/cli.js --run --config extensions/planner/vitest.config.mjs
 ```
 
-Packaging does not execute entry points, lifecycle scripts, Git cloning, or npm installs. Fixture tests alone execute their known fixture factory. Production packaging supports an empty directory and preserves historical published releases. Artifacts are deterministic gzip JSON envelopes with schema version, generated manifest and sorted path/base64 file records. The runtime decoder validates size, digest, bounded decompression, manifest agreement and paths before extraction. Limits: 2 MiB catalog, 32 MiB compressed, 128 MiB expanded JSON, 4096 files.
+Packaging does not execute entry points, lifecycle scripts, Git cloning, or npm installs. Focused tests execute isolated fixture factories and the packaged Planner factory. Production packaging supports an empty directory and preserves historical published releases. Artifacts are deterministic gzip JSON envelopes with schema version, generated manifest and sorted path/base64 file records. The runtime decoder validates size, digest, bounded decompression, manifest agreement and paths before extraction. Limits: 2 MiB catalog, 32 MiB compressed, 128 MiB expanded JSON, 4096 files.
 
 ## Independent publication
 
@@ -57,3 +59,13 @@ The artifact `<id>-<version>.json.gz` is uploaded to that tag's release without 
 All extension publications share a non-canceling concurrency group. Catalog generation merges all historical entries, including releases for now-absent extensions. Identical retries reuse immutable artifacts; different bytes fail. A verified `catalog.backup.json` is uploaded before replacing `catalog.json`; retries recover that backup if replacement was interrupted. A missing discovery asset during replacement is a transient failure and clients must fall back to the last valid cached catalog/install. HTTP/authentication errors are not treated as an empty initial catalog. Do not manually run parallel writers or edit/delete release assets; repository write access is the trust root, and checksums provide integrity relative to it, not independent authenticity.
 
 No actual release/publication is part of local validation. Before release, smoke-test feature-bearing npm-managed and compiled standalone executables from outside this checkout with isolated agent directories and fixture catalog/artifacts. Exercise install, dependency/asset loading, restart updates and uninstall; version/help output alone is insufficient. Build authorization is separate from packaging validation. The fixture packaging test exercises jiti/static virtual modules with native import disabled outside the checkout, not a compiled-binary smoke test. The process-backed `test/official-workflow.test.ts` exercises actual source runtime restarts, also not a compiled-binary smoke test.
+
+### Planner 1.0.0 readiness
+
+The proposed independent tag is `extension-planner-v1.0.0`; no tag or publication is created by local packaging. Before proposing publication:
+
+1. Confirm the approved repository MIT license and bundled `yaml@2.9.1` ISC notice in the generated artifact, and review all source/dependency notices.
+2. Review and approve the declared Grip range `>=0.2.1 <0.3.0` against released APIs and the intended executables. Current tests use this checkout; they do not establish compatibility with every release in that range.
+3. Run the local checks above, `npm run check`, inspect the artifact and verify deterministic bytes.
+4. With separate build authorization, run feature-bearing npm-managed and compiled standalone smoke tests outside the checkout with isolated agent/workspace directories and fixture catalog/artifacts. Exercise Planner install, skill and tool discovery, plan preparation, offline restart and uninstall/data preservation. Source/virtual-loader tests do not replace these executable checks.
+5. Only after review and separate authorization, commit the source, create the tag and let the existing immutable artifact/catalog workflow publish it. No core release or npm publication is needed for this extension. Verify the live catalog before directing users to install it.

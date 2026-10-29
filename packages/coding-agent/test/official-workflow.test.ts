@@ -103,7 +103,13 @@ export default api => {
 		);
 		await execute(
 			process.execPath,
-			[fileURLToPath(new URL("./fixtures/official-workflow-process.mjs", import.meta.url)), agentDir, operation],
+			[
+				"--import",
+				fileURLToPath(new URL("./fixtures/source-loader.mjs", import.meta.url)),
+				fileURLToPath(new URL("./fixtures/official-workflow-process.mjs", import.meta.url)),
+				agentDir,
+				operation,
+			],
 			{
 				cwd: agentDir,
 				timeout: 15000,

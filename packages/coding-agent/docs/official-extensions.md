@@ -2,7 +2,7 @@
 
 Official extensions are independently versioned, published releases curated from the [`extensions/` source directory](../../../extensions/README.md). Their package identity is `official:<id>`, not an npm package or Git repository. Grip selects a published stable release compatible with your Grip version; it never installs unpublished code from `main`.
 
-The production selection is currently empty. The manager supports an empty catalog; examples elsewhere in the repository are not automatically official or installed. A maintainer must select and publish production extensions before they appear.
+Planner is selected as an official extension source, but selection and local packaging do not publish it. `official:planner` appears in the production catalog only after a separate maintainer publication. The manager also supports an empty catalog; examples elsewhere in the repository are not automatically official or installed.
 
 > **Trust:** Official extensions run as your user with full access to files, commands, network and credentials. They are not sandboxed. Review code and install only extensions you trust. Catalog checksums verify artifact integrity relative to the trusted official repository; they do not independently authenticate the publisher or limit extension behavior.
 
@@ -23,7 +23,7 @@ The built-in command remains available with no extensions, factory failures or `
 
 ### CLI
 
-Replace `example` below with an ID from the published catalog; it is not a currently published extension:
+Replace `example` below with an ID from the published catalog; it is a placeholder:
 
 ```sh
 grip install official:example
@@ -109,4 +109,4 @@ For hosts implementing package/resource contracts:
 - Include `diagnostics` in `ResolvedPaths` and implement `ResourceLoader.getExtensionInventory()`. Consume its scoped `removal` target rather than deriving deletion rights from a path or catalog ID. Provenance includes official identity/version and load-error source information.
 - A runtime host's before-session-invalidate callback may return a Promise. Replacement/disposal awaits it so in-flight management settles before the old session is disposed.
 
-See [SDK usage](sdk.md), [extension API](extensions.md) and the [authoring and independent publication guide](../../../extensions/README.md). Publication and initial production selection remain explicit maintainer actions, not installation or local validation steps.
+See [SDK usage](sdk.md), [extension API](extensions.md) and the [authoring and independent publication guide](../../../extensions/README.md). Publication remains an explicit maintainer action, not an installation or local validation step.

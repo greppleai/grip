@@ -53,7 +53,7 @@ Grip accepts official, npm, git and local source types in settings and `grip ins
 
 ### Official
 
-Use `official:<id>` for a curated, published stable extension. Browse/install/uninstall with `/extensions`, or use `grip install official:<id>` and `grip remove official:<id>`. Official installations are global-only, do not require target-machine Git/npm, and update independently at startup to newer compatible stable versions. They never execute unpublished `main` or unselected catalog entries. The production catalog is initially empty pending maintainer selection/publication.
+Use `official:<id>` for a curated, published stable extension. Browse/install/uninstall with `/extensions`, or use `grip install official:<id>` and `grip remove official:<id>`. Official installations are global-only, do not require target-machine Git/npm, and update independently at startup to newer compatible stable versions. They never execute unpublished `main` or unselected catalog entries. Planner is selected in source; it becomes available from the production catalog only after a separate publication.
 
 See [official extensions](official-extensions.md) for full-access trust, live reload, immutable retained versions, offline/recovery behavior and automatic-update opt-out. The npm/git dependency-install instructions below do not apply to official artifacts.
 

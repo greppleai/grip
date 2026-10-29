@@ -2,6 +2,12 @@
 
 All notable changes to Grip are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Added Planner as an official extension source, pending independent publication.
+
 ## [0.2.1](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.0...@greppleai/grip-v0.2.1) (2026-10-28)
 
 
