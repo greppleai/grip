@@ -194,6 +194,7 @@ import {
 	isValidSuggestedCompressionRange,
 	type PendingContextCompression,
 } from "./tools/compress-context.ts";
+import { createGenerateImageToolDefinition } from "./tools/generate-image.ts";
 import { createJobToolDefinition, type JobRunner } from "./tools/job.ts";
 import {
 	DeferredRemoteToolOperations,
@@ -216,7 +217,7 @@ import { WORKSPACE_TOOL_NAMES, WorkspaceToolHost } from "./tools/workspace-tool-
 // Skill Block Parsing
 // ============================================================================
 
-const CORE_DEFAULT_TOOL_NAMES = ["bash", "write", "read_image", "websearch", "load_skill"] as const;
+const CORE_DEFAULT_TOOL_NAMES = ["bash", "write", "read_image", "websearch", "generate_image", "load_skill"] as const;
 const SESSION_HISTORY_TOOL_NAMES = ["session_search", "session_entry_get"] as const;
 export const JOB_TOOL_NAMES = ["job"] as const;
 export const DEFAULT_ACTIVE_TOOL_NAMES = [
@@ -5637,6 +5638,13 @@ export class AgentSession {
 			compress_context: createCompressContextToolDefinition(this.session, (request) => {
 				this._pendingContextCompression = request;
 			}) as unknown as ToolDefinition,
+			generate_image: createGenerateImageToolDefinition(
+				() => this.getToolOperations(),
+				async () =>
+					this.modelRegistry.authStorage.get("openai-codex")?.type === "oauth"
+						? this.modelRegistry.getApiKeyForProvider("openai-codex")
+						: undefined,
+			) as unknown as ToolDefinition,
 			websearch: createWebsearchToolDefinition(
 				() => parseWebsearchToolOptions(this.settingsManager.getToolSettings("websearch")),
 				(source) => {

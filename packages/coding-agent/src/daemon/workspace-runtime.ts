@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir as fsMkdir, lstat, open, readFile, realpath, rename, rm } from "node:fs/promises";
+import { mkdir as fsMkdir, link, lstat, open, readFile, realpath, rename, rm } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import type { AgentToolResult } from "@greppleai/grip-agent-core";
 import {
@@ -295,7 +295,7 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 		return candidate;
 	}
 
-	private async atomicWriteFile(path: string, content: string | Buffer): Promise<void> {
+	private async atomicWriteFile(path: string, content: string | Buffer, overwrite = true): Promise<void> {
 		const target = await this.writablePath(path);
 		const parent = resolve(target, "..");
 		const temporary = resolve(parent, `.grip-remote-write-${process.pid}-${randomUUID()}-${basename(target)}.tmp`);
@@ -303,20 +303,26 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 		let wroteTemporary = false;
 		try {
 			const handle = await open(temporary, "wx", 0o600);
+			wroteTemporary = true;
 			try {
 				await handle.writeFile(content, typeof content === "string" ? "utf8" : undefined);
 			} finally {
 				await handle.close();
 			}
-			wroteTemporary = true;
 			this.lexicalPath(await realpath(temporary));
 			try {
 				if ((await lstat(target)).isSymbolicLink()) throw new Error(`Writable path uses a symbolic link: ${path}`);
 			} catch (error) {
 				if (!isMissingPath(error)) throw error;
 			}
-			await rename(temporary, target);
-			wroteTemporary = false;
+			if (overwrite) {
+				await rename(temporary, target);
+				wroteTemporary = false;
+			} else {
+				await link(temporary, target);
+				await rm(temporary, { force: true });
+				wroteTemporary = false;
+			}
 			this.lexicalPath(await realpath(target));
 		} finally {
 			if (wroteTemporary) await rm(temporary, { force: true });
@@ -332,6 +338,10 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 			if (value !== undefined) environment[name] = value;
 		}
 		return this.local.exec(command, { ...options, cwd, env: environment });
+	}
+
+	async writeUpload(path: string, content: Buffer, overwrite: boolean): Promise<void> {
+		await this.atomicWriteFile(path, content, overwrite);
 	}
 
 	async access(path: string, mode?: ToolAccessMode): Promise<void> {
@@ -701,9 +711,15 @@ export function createDaemonWorkspaceRuntime(configuration: DaemonConfiguration)
 		operations: [
 			...PRIMITIVE_OPERATIONS.filter((method) => method !== "workspace.exec" || configuration.allowProcessExec),
 			...(configuration.sandboxInstructionsPath || configuration.userAgentsPath ? (["resource.read"] as const) : []),
+			"transfer.upload",
 		],
 	};
-	const capabilities: RemoteWorkspaceCapability[] = ["catalog_refresh", "primitive_operations", "tool_updates"];
+	const capabilities: RemoteWorkspaceCapability[] = [
+		"catalog_refresh",
+		"primitive_operations",
+		"tool_updates",
+		"file_transfer",
+	];
 	let activeRequests = 0;
 
 	return {
@@ -712,6 +728,15 @@ export function createDaemonWorkspaceRuntime(configuration: DaemonConfiguration)
 		catalog,
 		capabilities,
 		createHandler(workspace, sharedMode = false) {
+			const uploads = new Map<
+				RemoteWorkspaceServerRequestContext,
+				{
+					buffer: Buffer;
+					offset: number;
+					resolve: (value: unknown) => void;
+					reject: (error: Error) => void;
+				}
+			>();
 			const requestRuntime: DaemonRequestRuntime = {
 				configuration,
 				operations,
@@ -719,6 +744,44 @@ export function createDaemonWorkspaceRuntime(configuration: DaemonConfiguration)
 				workspace,
 				sharedMode,
 			};
+			async function handleUpload(
+				request: RemoteWorkspaceTypedRequest,
+				context: RemoteWorkspaceServerRequestContext,
+			) {
+				if (sharedMode)
+					throw new RemoteWorkspaceRequestError({
+						code: "invalid_request",
+						message: "Shared uploads are disabled until revision-safe commit is supported",
+						executionState: "not_started",
+						retryable: false,
+					});
+				const params = request.params as { path: string; length: number; sha256: string; overwrite: boolean };
+				// Bound per-transfer allocation independently of peer-negotiated limits.
+				if (
+					params.length >
+					Math.min(configuration.maxBufferedOutputBytes, configuration.protocolLimits.maxTransferBytes)
+				) {
+					throw new RemoteWorkspaceRequestError({
+						code: "limit_exceeded",
+						message: "Upload exceeds daemon memory limit",
+						executionState: "not_started",
+						retryable: false,
+					});
+				}
+				let abort = () => {};
+				try {
+					return await new Promise((resolve, reject) => {
+						const state = { buffer: Buffer.alloc(params.length), offset: 0, resolve, reject };
+						uploads.set(context, state);
+						abort = () => reject(requestError("cancelled", "Upload cancelled", "not_started"));
+						context.signal.addEventListener("abort", abort, { once: true });
+						if (context.signal.aborted) abort();
+					});
+				} finally {
+					context.signal.removeEventListener("abort", abort);
+					uploads.delete(context);
+				}
+			}
 			return {
 				validateToolArguments: (toolName, value) => host.validatePreparedArguments(toolName, value),
 				async handleRequest(request, context) {
@@ -732,10 +795,40 @@ export function createDaemonWorkspaceRuntime(configuration: DaemonConfiguration)
 					}
 					activeRequests++;
 					try {
+						if (request.method === "transfer.upload") {
+							return await handleUpload(request, context);
+						}
 						return await dispatchDaemonWorkspaceRequest(request, context, requestRuntime);
 					} finally {
 						activeRequests--;
 					}
+				},
+				async handleUploadChunk(_request, chunk, _sequence, context) {
+					const state = uploads.get(context);
+					if (!state || context.signal.aborted) throw new Error("Upload is no longer active");
+					if (state.offset + chunk.length > state.buffer.length) throw new Error("Upload exceeds declared length");
+					chunk.copy(state.buffer, state.offset);
+					state.offset += chunk.length;
+				},
+				async handleUploadFinish(request, metadata, context) {
+					if (sharedMode) throw new Error("Shared uploads are disabled");
+					const state = uploads.get(context);
+					if (!state || context.signal.aborted || state.offset !== state.buffer.length)
+						throw new Error("Upload is no longer active");
+					const params = request.params as { path: string; overwrite: boolean };
+					try {
+						await withFileMutationQueue(resolve(configuration.workspaceRoot, params.path), async () => {
+							if (context.signal.aborted) throw requestError("cancelled", "Upload cancelled", "not_started");
+							context.markSideEffectStarted();
+							await operations.writeUpload(params.path, state.buffer, params.overwrite);
+							context.markCommitted();
+						});
+					} catch (error) {
+						state.reject(error instanceof Error ? error : new Error(String(error)));
+						throw error;
+					}
+					// Let the protocol mark its verified incoming transfer finished first.
+					setImmediate(() => state.resolve(metadata));
 				},
 			};
 		},

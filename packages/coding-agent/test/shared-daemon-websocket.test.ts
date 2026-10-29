@@ -873,9 +873,9 @@ it("serves a sibling channel while one channel's outbound send is stalled", asyn
 					msg.type === "channel" && msg.channelId === opened.channelId && msg.payload.type === "handshake_ack",
 			);
 			expect(ack.payload.catalog.operations).not.toContain("workspace.exec");
-			expect(ack.payload.catalog.operations).not.toContain("transfer.upload");
+			expect(ack.payload.catalog.operations).toContain("transfer.upload");
 			expect(ack.payload.catalog.operations).not.toContain("transfer.download");
-			expect(ack.payload.capabilities).not.toContain("file_transfer");
+			expect(ack.payload.capabilities).toContain("file_transfer");
 			expect(ack.payload.catalog.tools).not.toContainEqual(expect.objectContaining({ name: "bash" }));
 		}
 		const denied = await sendAndReceive(
@@ -894,23 +894,6 @@ it("serves a sibling channel while one channel's outbound send is stalled", asyn
 			(msg) => msg.type === "channel" && msg.channelId === channels[1] && msg.payload.id === "denied-exec",
 		);
 		expect(denied.payload.error.code).toBe("not_available");
-		const upload = await sendAndReceive(
-			socket,
-			{
-				type: "channel",
-				channelId: channels[1],
-				payload: {
-					type: "request",
-					id: "unsupported-upload",
-					method: "transfer.upload",
-					timeoutMs: 1000,
-					params: { path: "file", length: 1, sha256: "0".repeat(64), overwrite: false },
-				},
-			},
-			(msg) => msg.type === "channel" && msg.channelId === channels[1] && msg.payload.id === "unsupported-upload",
-		);
-		expect(upload.payload.type).toBe("error");
-		expect(upload.payload.error).toMatchObject({ code: "not_available", executionState: "not_started" });
 		const [blocked, sibling] = channels;
 		let markStalled!: () => void;
 		const stalled = new Promise<void>((resolve) => {
