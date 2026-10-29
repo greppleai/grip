@@ -171,6 +171,7 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 |---------|------|---------|-------------|
 | `enableJobs` | boolean | `true` | Enable the built-in `job` tool for bounded delegated tasks. Changes made in `/settings` apply immediately; `/reload` applies file edits. An explicit CLI/SDK tool allowlist can still select `job`, while no-tools modes remain authoritative. |
 | `jobModel` | string or null | - | Trusted global or active-profile exact available `provider/model-id` for jobs; project settings cannot select it. Set via `/job model set --model <provider/model-id>` and clear via `/job model clear`. `null` in a profile disables an inherited global job model. Takes precedence over `GRIP_DEFAULT_JOB_MODEL`, then the parent model; applies to the next job. |
+| `imageModel` | string or null | `gpt-image-2` | Codex image-generation model ID. Set with `/image <model-id>`; `/image clear` restores the default, including in a profile. Project settings are ignored. Model availability is determined by Codex at request time. |
 | `tools` | object | `{}` | Per-tool configuration keyed by tool name |
 | `tools.websearch.provider` | string | `"duckduckgo"` | Web search provider: `"duckduckgo"`, `"brave"`, or `"firecrawl"` |
 | `tools.websearch.apiKey` | string | - | Provider API key. Brave env fallback: `GRIP_WEBSEARCH_BRAVE_API_KEY` or `BRAVE_SEARCH_API_KEY`. Firecrawl env fallback: `GRIP_WEBSEARCH_FIRECRAWL_API_KEY` or `FIRECRAWL_API_KEY` |

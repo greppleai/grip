@@ -144,6 +144,7 @@ export interface Settings {
 	enableSkillCommands?: boolean; // default: true - register skills and rules as /skill:name and /rule:name commands
 	enableJobs?: boolean; // default: true - expose built-in job tools
 	jobModel?: string | null; // trusted global/profile provider/model ID; null defers to environment or parent
+	imageModel?: string | null; // Codex image model ID; null uses the default
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
@@ -189,7 +190,7 @@ export function isValidModelProfileName(name: string): boolean {
 }
 
 type ProfileModelSelection = Pick<Model<Api>, "provider" | "id">;
-type TrustedModelSettingKey = "jobModel" | "compressionDetectionModel";
+type TrustedModelSettingKey = "jobModel" | "compressionDetectionModel" | "imageModel";
 
 interface ProfileSandboxOptions {
 	defaultSandbox?: string | undefined;
@@ -260,7 +261,10 @@ function setProfileField(
 		setOwnValue(
 			profile,
 			field,
-			(field === "jobModel" || field === "compressionDetectionModel") && value === undefined ? null : value,
+			(field === "jobModel" || field === "compressionDetectionModel" || field === "imageModel") &&
+				value === undefined
+				? null
+				: value,
 		);
 }
 
@@ -1530,6 +1534,18 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getImageModel(): string | undefined {
+		return this.getTrustedModelSetting("imageModel");
+	}
+
+	setImageModel(model: string | undefined): void {
+		if (model !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(model)) throw new Error("Invalid image model ID");
+		if (model === undefined) delete this.globalSettings.imageModel;
+		else this.globalSettings.imageModel = model;
+		this.markModified("imageModel");
+		this.save();
+	}
+
 	getThinkingBudgets(): ThinkingBudgetsSettings | undefined {
 		return this.settings.thinkingBudgets;
 	}
@@ -1672,6 +1688,7 @@ export class SettingsManager {
 		if (trustedDetectorModel) profile.compressionDetectionModel = trustedDetectorModel;
 		else if (this.globalSettings.compressionDetectionModel) profile.compressionDetectionModel = null;
 		else delete profile.compressionDetectionModel;
+		profile.imageModel = this.getImageModel() ?? (this.globalSettings.imageModel ? null : undefined);
 		if (selectedModel) {
 			profile.defaultProvider = selectedModel.provider;
 			profile.defaultModel = selectedModel.id;

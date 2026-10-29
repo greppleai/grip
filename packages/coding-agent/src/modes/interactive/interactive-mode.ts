@@ -3574,11 +3574,36 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private async handleImageCommand(text: string): Promise<void> {
+		const arg = text.slice("/image".length).trim();
+		if (!arg || arg === "show") {
+			this.showStatus(`Image model: ${this.settingsManager.getImageModel() ?? "gpt-image-2"}`);
+			return;
+		}
+		if (arg !== "clear" && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(arg)) {
+			this.showWarning("Usage: /image [show|clear|model-id]");
+			return;
+		}
+		const error = this.settingsManager.getLoadError("global");
+		if (error) {
+			this.showError(`Cannot save image model: ${error.message}`);
+			return;
+		}
+		this.settingsManager.setImageModel(arg === "clear" ? undefined : arg);
+		await this.settingsManager.flush();
+		this.showStatus(`Image model: ${this.settingsManager.getImageModel() ?? "gpt-image-2"}`);
+	}
+
 	private async handleBuiltInEditorCommand(text: string): Promise<boolean> {
 		if (this.matchesEditorCommand(text, "/extensions")) {
 			this.editor.setText("");
 			if (text === "/extensions") await this.showExtensionManager();
 			else this.showWarning("Usage: /extensions");
+			return true;
+		}
+		if (this.matchesEditorCommand(text, "/image")) {
+			this.editor.setText("");
+			await this.handleImageCommand(text);
 			return true;
 		}
 		const action =

@@ -5,6 +5,21 @@ import { describe, expect, it } from "vitest";
 import { InMemorySettingsStorage, type Settings, SettingsManager } from "../src/core/settings-manager.ts";
 
 describe("model profile settings", () => {
+	it("persists image model in the active profile and clears inherited values", async () => {
+		const manager = SettingsManager.inMemory({ imageModel: "global-image", profiles: { work: { theme: "dark" } } });
+		manager.useProfile("work");
+		manager.setImageModel("custom-image-1");
+		await manager.flush();
+		await manager.reload();
+		expect(manager.getImageModel()).toBe("custom-image-1");
+		expect(manager.getGlobalSettings().imageModel).toBe("global-image");
+		expect(manager.getProfile("work")?.theme).toBe("dark");
+		manager.setImageModel(undefined);
+		await manager.flush();
+		await manager.reload();
+		expect(manager.getImageModel()).toBeUndefined();
+		expect(() => manager.setImageModel("bad/model")).toThrow();
+	});
 	it("stores independent named model snapshots", async () => {
 		const manager = SettingsManager.inMemory();
 
