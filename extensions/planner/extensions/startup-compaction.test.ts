@@ -183,14 +183,14 @@ test("startup success is staged before all mutation in busy UI, busy headless an
 	}
 });
 
-test("below-threshold, unknown and nonfinite usage starts normally; normalized fractions compact", async () => {
-	for (const percent of [0, 10, 39.99, 0.3999, null, undefined, NaN, Infinity]) {
+test("percentage-point usage compacts only at or above the threshold", async () => {
+	for (const percent of [0, 0.4, 0.5, 1, 10, 39.99, null, undefined, NaN, Infinity]) {
 		const f = await setup(percent === undefined ? null : percent);
 		await f.call("planner_start", { planName: "demo" });
 		expect(f.requests).toEqual([]);
 		expect(f.messages).toHaveLength(1);
 	}
-	for (const percent of [0.4, 0.5, 1, 40, 80]) {
+	for (const percent of [40, 40.01, 80]) {
 		const f = await setup(percent);
 		await f.call("planner_start", { planName: "demo" });
 		expect(f.requests).toHaveLength(1);

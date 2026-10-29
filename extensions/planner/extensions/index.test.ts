@@ -1205,7 +1205,7 @@ test("compaction failure falls back to continuation", async () => {
 	const f = await setup();
 	await f.call("planner_start", { planName: "demo" });
 	await f.step("In Progress");
-	f.setPercent(0.5);
+	f.setPercent(50);
 	await f.call("planner_done");
 	f.compactions[0].onError(new Error("failure"));
 	await f.flush();
@@ -1291,7 +1291,8 @@ test("options are strict and zero means unlimited", async () => {
 	for (const s of ["", "demo --max-iterations", "demo --bogus 1", "demo --max-iterations -1", "demo junk"])
 		expect(() => parseBuildArgs(s)).toThrow();
 	expect(shouldCompact(39)).toBe(false);
-	expect(shouldCompact(0.4)).toBe(true);
+	expect(shouldCompact(0.4)).toBe(false);
+	expect(shouldCompact(40)).toBe(true);
 	expect(shouldCompact(null)).toBe(false);
 });
 
@@ -1660,4 +1661,16 @@ test("directory and closed-step prompts keep actionable Markdown without empty p
 	expect(closed).toContain("All steps are closed.");
 	expect(closed).toContain("`PLANNER_COMPLETE`");
 	expect(closed).not.toContain("No authored PROGRESS yet");
+});
+
+test("checkpoint compaction uses percentage points at the threshold", async () => {
+	for (const percent of [0.5, 1, 39.99, 40, 40.01]) {
+		const f = await setup();
+		await f.call("planner_start", { planName: "demo" });
+		await f.step("In Progress");
+		f.setPercent(percent);
+		await f.call("planner_done");
+		expect(f.compactions).toHaveLength(percent >= 40 ? 1 : 0);
+		expect(f.messages).toHaveLength(percent >= 40 ? 1 : 2);
+	}
 });
