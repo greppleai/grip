@@ -88,6 +88,7 @@ async function saveImage(ops: ToolOperations, backend: ToolBackendInfo | undefin
 export function createGenerateImageToolDefinition(
 	getOperations: () => ToolOperations,
 	getToken: () => Promise<string | undefined>,
+	getModel: () => string | undefined = () => undefined,
 ): ToolDefinition<typeof schema, Details> {
 	return {
 		name: "generate_image",
@@ -127,7 +128,7 @@ export function createGenerateImageToolDefinition(
 					"x-codex-image-turn-id": randomUUID(),
 				},
 				body: JSON.stringify({
-					model: "gpt-image-2",
+					model: getModel() ?? "gpt-image-2",
 					prompt: args.prompt,
 					size: args.size ?? "auto",
 					quality: args.quality ?? "auto",

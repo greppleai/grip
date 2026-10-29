@@ -170,6 +170,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/login`, `/logout` | Manage model-provider credentials |
 | `/websearch login` | Choose a web search engine and configure its API key |
 | `/model` | Switch models |
+| `/image [show\|clear\|model-id]` | Show, reset, or set the Codex image-generation model for the active profile (global without a profile) |
 | `/job model show`, `/job model set --model <provider/model-id>`, `/job model clear` | Inspect, set, or clear the active profile's job model (global without a profile) |
 | `/profile list`, `/profile create <name>`, `/profile use <name>` | List, snapshot, or switch named settings profiles (switching is session-only) |
 | `/profile directory <name> <absolute-path>`, `/profile directory clear <absolute-path>` | Assign or remove a directory-prefix profile rule |

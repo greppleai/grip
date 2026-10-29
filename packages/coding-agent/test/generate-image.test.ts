@@ -15,6 +15,25 @@ afterEach(async () => {
 });
 
 describe("generate_image", () => {
+	it("uses the selected image model at execution time", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(
+				new Response(JSON.stringify({ data: [{ b64_json: Buffer.from("image").toString("base64") }] })),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+		const cwd = await mkdtemp(join(tmpdir(), "grip-image-"));
+		directories.push(cwd);
+		let model = "first-image";
+		const tool = createGenerateImageToolDefinition(
+			() => new LocalToolOperations(cwd),
+			async () => token,
+			() => model,
+		);
+		model = "second-image";
+		await tool.execute("id", { prompt: "cat" }, undefined, undefined, ctx);
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe("second-image");
+	});
 	it("uses the Codex Images endpoint and writes the image locally", async () => {
 		const cwd = await mkdtemp(join(tmpdir(), "grip-image-"));
 		directories.push(cwd);

@@ -5644,6 +5644,7 @@ export class AgentSession {
 					this.modelRegistry.authStorage.get("openai-codex")?.type === "oauth"
 						? this.modelRegistry.getApiKeyForProvider("openai-codex")
 						: undefined,
+				() => this.settingsManager.getImageModel(),
 			) as unknown as ToolDefinition,
 			websearch: createWebsearchToolDefinition(
 				() => parseWebsearchToolOptions(this.settingsManager.getToolSettings("websearch")),
