@@ -15,6 +15,8 @@ export interface UsageLedger extends UsageTotals {
 	version: 1;
 	checkpointId: string;
 	last: UsageTotals;
+	/** Delegated job usage, separate from the parent provider totals. */
+	jobs: UsageTotals;
 }
 
 function emptyTotals(): UsageTotals {
@@ -61,7 +63,33 @@ function addAssistantUsage(ledger: UsageLedger, entry: SessionEntry): void {
 	ledger.checkpointId = entry.id;
 }
 
-/** Latest persisted checkpoint plus uncheckpointed provider responses; replayed copies never count. */
+function addJobResultUsage(totals: UsageTotals, result: unknown): void {
+	if (!result || typeof result !== "object" || !("usage" in result)) return;
+	const usage = result.usage;
+	if (!usage || typeof usage !== "object") return;
+	const fields = usage as Record<string, unknown>;
+	for (const [source, target] of [
+		["input", "input"],
+		["output", "output"],
+		["cacheRead", "cacheRead"],
+		["cacheWrite", "cacheWrite"],
+		["cost", "catalogCost"],
+		["turns", "requests"],
+	] as const) {
+		const value = fields[source];
+		if (typeof value === "number" && Number.isFinite(value) && value >= 0) totals[target] += value;
+	}
+}
+
+function addJobUsage(totals: UsageTotals, entry: SessionEntry): void {
+	if (entry.type !== "message" || entry.replayedFromId || entry.message.role !== "toolResult") return;
+	if (entry.message.toolName !== "job") return;
+	const details: unknown = entry.message.details;
+	if (!details || typeof details !== "object" || !("results" in details) || !Array.isArray(details.results)) return;
+	for (const result of details.results as unknown[]) addJobResultUsage(totals, result);
+}
+
+/** Latest persisted parent checkpoint plus uncheckpointed responses and all recorded job results. */
 export function readUsageLedger(entries: SessionEntry[]): UsageLedger {
 	let checkpointIndex = -1;
 	let prior: UsageLedger | undefined;
@@ -83,7 +111,9 @@ export function readUsageLedger(entries: SessionEntry[]): UsageLedger {
 		catalogCost: prior?.catalogCost ?? 0,
 		requests: prior?.requests ?? 0,
 		last: prior?.last ?? emptyTotals(),
+		jobs: emptyTotals(),
 	};
 	for (const entry of entries.slice(checkpointIndex + 1)) addAssistantUsage(ledger, entry);
+	for (const entry of entries) addJobUsage(ledger.jobs, entry);
 	return ledger;
 }

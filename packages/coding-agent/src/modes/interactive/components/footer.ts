@@ -154,6 +154,7 @@ export class FooterComponent implements Component {
 		contextPercent: string,
 	): string {
 		const parts: string[] = [
+			theme.fg("accent", "Main:"),
 			this.formatContextUsage(contextWindow, contextTokens, contextPercentValue, contextPercent),
 		];
 		if (totals.requests) parts.push("total");
@@ -174,9 +175,7 @@ export class FooterComponent implements Component {
 		);
 		if (totals.requests) {
 			parts.push(
-				usingSubscription
-					? `catalog $${totals.catalogCost.toFixed(3)} (sub)`
-					: `catalog $${totals.catalogCost.toFixed(3)}`,
+				usingSubscription ? `$${totals.catalogCost.toFixed(3)} (sub)` : `$${totals.catalogCost.toFixed(3)}`,
 			);
 		} else if (usingSubscription) parts.push("sub");
 		if (showDetection) parts.push(`(detect est $${detectionCost.toFixed(4)} total)`);
@@ -221,6 +220,19 @@ export class FooterComponent implements Component {
 		return truncateToWidth(statusLine, width, theme.fg("dim", "..."));
 	}
 
+	private formatJobs(totals: UsageLedger, width: number): string | undefined {
+		const usage = totals.jobs;
+		if (!(usage.requests || usage.input || usage.output || usage.cacheRead || usage.cacheWrite || usage.catalogCost))
+			return;
+		const parts = [theme.fg("success", "Jobs:")];
+		if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
+		if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
+		if (usage.cacheRead) parts.push(`R${formatTokens(usage.cacheRead)}`);
+		if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
+		parts.push(`est $${usage.catalogCost.toFixed(3)}`);
+		return theme.fg("dim", truncateToWidth(parts.join(" "), width, "..."));
+	}
+
 	render(width: number): string[] {
 		const state = this.session.state;
 		const totals = readUsageLedger(this.session.session.getEntries());
@@ -246,6 +258,8 @@ export class FooterComponent implements Component {
 		const dimmedRemainder = theme.fg("dim", statsLine.slice(stats.length));
 		const location = truncateToWidth(theme.fg("dim", locationText), width, theme.fg("dim", "..."));
 		const lines = [location, dimmedStats + dimmedRemainder];
+		const jobs = this.formatJobs(totals, width);
+		if (jobs) lines.push(jobs);
 		const savings = this.formatCompressionSavings().join(" ");
 		if (savings) lines.push(theme.fg("dim", truncateToWidth(savings, width, "...")));
 		const extensionStatuses = this.formatExtensionStatuses(width);
