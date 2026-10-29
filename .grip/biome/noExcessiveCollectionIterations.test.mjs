@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
-import { analyzeCollectionIterationSource } from "./noExcessiveCollectionIterations.mjs";
+import { analyzeCollectionIterationSource, analyzeRepository } from "./noExcessiveCollectionIterations.mjs";
 
 function analyze(sourceText) {
 	return analyzeCollectionIterationSource("packages/example/src/fixture.ts", sourceText);
@@ -141,5 +144,24 @@ describe("noExcessiveCollectionIterations", () => {
 		`);
 		assert.equal(diagnostics.length, 1);
 		assert.match(diagnostics[0].message, /Function missingReason/);
+	});
+
+	it("discovers TypeScript files in extensions and allows a missing extensions directory", async () => {
+		const repositoryRoot = await mkdtemp(join(tmpdir(), "no-excessive-collection-iterations-"));
+		try {
+			await mkdir(join(repositoryRoot, "packages"));
+			assert.deepEqual(await analyzeRepository(repositoryRoot), []);
+			const extensionPath = join(repositoryRoot, "extensions", "sample", "src", "index.ts");
+			await mkdir(join(repositoryRoot, "extensions", "sample", "src"), { recursive: true });
+			await writeFile(
+				extensionPath,
+				"function repeated(values: number[]) { return values.map(String).map((value) => value.trim()); }\n",
+			);
+			const diagnostics = await analyzeRepository(repositoryRoot);
+			assert.equal(diagnostics.length, 1);
+			assert.equal(diagnostics[0].location.path, "extensions/sample/src/index.ts");
+		} finally {
+			await rm(repositoryRoot, { recursive: true, force: true });
+		}
 	});
 });

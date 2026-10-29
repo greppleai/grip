@@ -1,9 +1,27 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { analyzeTypeAliasSource } from "./noImplementationDerivedTypeAliases.mjs";
+import { analyzeRepository, analyzeTypeAliasSource } from "./noImplementationDerivedTypeAliases.mjs";
 
 function analyze(sourceText) {
 	return analyzeTypeAliasSource("packages/example/src/fixture.ts", sourceText);
+}
+
+function writeFixtureFile(repositoryRoot, path, contents) {
+	const filePath = join(repositoryRoot, path);
+	mkdirSync(dirname(filePath), { recursive: true });
+	writeFileSync(filePath, contents);
+}
+
+async function withTemporaryRepository(run) {
+	const repositoryRoot = mkdtempSync(join(tmpdir(), "grip-implementation-derived-type-aliases-"));
+	try {
+		await run(repositoryRoot);
+	} finally {
+		rmSync(repositoryRoot, { recursive: true, force: true });
+	}
 }
 
 describe("noImplementationDerivedTypeAliases", () => {
@@ -62,5 +80,44 @@ describe("noImplementationDerivedTypeAliases", () => {
 		assert.match(diagnostics[0].message, /requireModel derives a function signature contract/);
 		assert.match(diagnostics[0].message, /indexed member access/);
 		assert.match(diagnostics[1].message, /Parameters/);
+	});
+
+	it("preserves package discovery when extensions is absent", async () => {
+		await withTemporaryRepository(async (repositoryRoot) => {
+			writeFixtureFile(repositoryRoot, "packages/example/src/flagged.ts", "type Value = ReturnType<typeof load>;");
+			writeFixtureFile(repositoryRoot, "packages/example/other/ignored.ts", "type Value = ReturnType<typeof load>;");
+
+			const diagnostics = await analyzeRepository(repositoryRoot);
+
+			assert.deepEqual(
+				diagnostics.map((diagnostic) => diagnostic.location.path),
+				["packages/example/src/flagged.ts"],
+			);
+		});
+	});
+
+	it("discovers official extension TypeScript while excluding ignored directories", async () => {
+		await withTemporaryRepository(async (repositoryRoot) => {
+			writeFixtureFile(repositoryRoot, "packages/example/src/allowed.ts", "type Value = string;");
+			writeFixtureFile(
+				repositoryRoot,
+				"extensions/official/extensions/flagged.ts",
+				"type Value = ReturnType<typeof load>;",
+			);
+			for (const directory of [".git", ".worktrees", "dist", "node_modules"]) {
+				writeFixtureFile(
+					repositoryRoot,
+					`extensions/official/${directory}/ignored.ts`,
+					"type Value = ReturnType<typeof load>;",
+				);
+			}
+
+			const diagnostics = await analyzeRepository(repositoryRoot);
+
+			assert.deepEqual(
+				diagnostics.map((diagnostic) => diagnostic.location.path),
+				["extensions/official/extensions/flagged.ts"],
+			);
+		});
 	});
 });

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
-import { analyzeInterfaceSources, normalizeInterfaceMember } from "./noNearIdenticalDataStructures.mjs";
+import { analyzeInterfaceSources, analyzeRepository, normalizeInterfaceMember } from "./noNearIdenticalDataStructures.mjs";
 
 function analyze(...sources) {
 	return analyzeInterfaceSources(
@@ -80,5 +83,38 @@ describe("noNearIdenticalDataStructures", () => {
 			interface Account { id: string | undefined; age?: number; }
 		`);
 		assert.equal(diagnostics.length, 3);
+	});
+
+	it("discovers extension TypeScript files and tolerates a missing extensions directory", async () => {
+		const root = await mkdtemp(join(tmpdir(), "no-near-identical-data-structures-"));
+		try {
+			const packageSourceDirectory = join(root, "packages", "fixture", "src");
+			await mkdir(packageSourceDirectory, { recursive: true });
+			await writeFile(
+				join(packageSourceDirectory, "package-contract.ts"),
+				"interface PackageContract { id: string; value: number; }\n",
+			);
+
+			assert.deepEqual(await analyzeRepository(root), []);
+
+			const extensionSourceDirectory = join(root, "extensions", "fixture", "src");
+			await mkdir(extensionSourceDirectory, { recursive: true });
+			await writeFile(
+				join(extensionSourceDirectory, "extension-contract.ts"),
+				"interface ExtensionContract { value: number; id: string; }\n",
+			);
+
+			const diagnostics = await analyzeRepository(root);
+			assert.equal(diagnostics.length, 2);
+			assert.deepEqual(
+				diagnostics.map((diagnostic) => diagnostic.location.path),
+				[
+					"extensions/fixture/src/extension-contract.ts",
+					"packages/fixture/src/package-contract.ts",
+				],
+			);
+		} finally {
+			await rm(root, { force: true, recursive: true });
+		}
 	});
 });

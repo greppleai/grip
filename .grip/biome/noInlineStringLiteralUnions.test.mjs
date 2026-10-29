@@ -1,9 +1,27 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { analyzeStringLiteralUnionSource } from "./noInlineStringLiteralUnions.mjs";
+import { analyzeRepository, analyzeStringLiteralUnionSource } from "./noInlineStringLiteralUnions.mjs";
 
 function analyze(sourceText) {
 	return analyzeStringLiteralUnionSource("packages/example/src/fixture.ts", sourceText);
+}
+
+function writeFixtureFile(repositoryRoot, path, contents) {
+	const filePath = join(repositoryRoot, path);
+	mkdirSync(dirname(filePath), { recursive: true });
+	writeFileSync(filePath, contents);
+}
+
+async function withTemporaryRepository(run) {
+	const repositoryRoot = mkdtempSync(join(tmpdir(), "grip-string-literal-unions-"));
+	try {
+		await run(repositoryRoot);
+	} finally {
+		rmSync(repositoryRoot, { recursive: true, force: true });
+	}
 }
 
 describe("noInlineStringLiteralUnions", () => {
@@ -81,5 +99,52 @@ describe("noInlineStringLiteralUnions", () => {
 			void value;
 		`);
 		assert.deepEqual(diagnostics, []);
+	});
+
+	it("preserves package discovery when extensions is absent", async () => {
+		await withTemporaryRepository(async (repositoryRoot) => {
+			writeFixtureFile(
+				repositoryRoot,
+				"packages/example/src/flagged.ts",
+				'interface Value { status: "enabled" | "disabled"; }',
+			);
+			writeFixtureFile(
+				repositoryRoot,
+				"packages/example/other/ignored.ts",
+				'interface Value { status: "enabled" | "disabled"; }',
+			);
+
+			const diagnostics = await analyzeRepository(repositoryRoot);
+
+			assert.deepEqual(
+				diagnostics.map((diagnostic) => diagnostic.location.path),
+				["packages/example/src/flagged.ts"],
+			);
+		});
+	});
+
+	it("discovers official extension TypeScript while excluding ignored directories", async () => {
+		await withTemporaryRepository(async (repositoryRoot) => {
+			writeFixtureFile(repositoryRoot, "packages/example/src/allowed.ts", "type Value = string;");
+			writeFixtureFile(
+				repositoryRoot,
+				"extensions/official/extensions/flagged.ts",
+				'interface Value { status: "enabled" | "disabled"; }',
+			);
+			for (const directory of [".git", ".worktrees", "dist", "node_modules"]) {
+				writeFixtureFile(
+					repositoryRoot,
+					`extensions/official/${directory}/ignored.ts`,
+					'interface Value { status: "enabled" | "disabled"; }',
+				);
+			}
+
+			const diagnostics = await analyzeRepository(repositoryRoot);
+
+			assert.deepEqual(
+				diagnostics.map((diagnostic) => diagnostic.location.path),
+				["extensions/official/extensions/flagged.ts"],
+			);
+		});
 	});
 });
