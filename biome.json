@@ -35,6 +35,7 @@
 			"packages/*/src/**/*.ts",
 			"packages/*/test/**/*.ts",
 			"packages/coding-agent/examples/**/*.ts",
+			"extensions/*/**/*.ts",
 			"!!.worktrees",
 			"!**/node_modules/**/*",
 			"!**/test-sessions.ts",

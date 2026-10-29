@@ -1,9 +1,27 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { analyzeInlineTypeImportSource } from "./noInlineTypeImports.mjs";
+import { analyzeInlineTypeImportSource, analyzeRepository } from "./noInlineTypeImports.mjs";
 
 function analyze(sourceText) {
 	return analyzeInlineTypeImportSource("packages/example/src/fixture.ts", sourceText);
+}
+
+function writeFixtureFile(repositoryRoot, path, contents) {
+	const filePath = join(repositoryRoot, path);
+	mkdirSync(dirname(filePath), { recursive: true });
+	writeFileSync(filePath, contents);
+}
+
+async function withTemporaryRepository(run) {
+	const repositoryRoot = mkdtempSync(join(tmpdir(), "grip-inline-type-imports-"));
+	try {
+		await run(repositoryRoot);
+	} finally {
+		rmSync(repositoryRoot, { recursive: true, force: true });
+	}
 }
 
 describe("noInlineTypeImports", () => {
@@ -38,5 +56,44 @@ describe("noInlineTypeImports", () => {
 			void load;
 		`);
 		assert.deepEqual(diagnostics, []);
+	});
+
+	it("preserves package discovery when extensions is absent", async () => {
+		await withTemporaryRepository(async (repositoryRoot) => {
+			writeFixtureFile(repositoryRoot, "packages/example/src/flagged.ts", 'type Value = import("example").Value;');
+			writeFixtureFile(repositoryRoot, "packages/example/other/ignored.ts", 'type Value = import("example").Value;');
+
+			const diagnostics = await analyzeRepository(repositoryRoot);
+
+			assert.deepEqual(
+				diagnostics.map((diagnostic) => diagnostic.location.path),
+				["packages/example/src/flagged.ts"],
+			);
+		});
+	});
+
+	it("discovers official extension TypeScript while excluding ignored directories", async () => {
+		await withTemporaryRepository(async (repositoryRoot) => {
+			writeFixtureFile(repositoryRoot, "packages/example/src/allowed.ts", "type Value = string;");
+			writeFixtureFile(
+				repositoryRoot,
+				"extensions/official/extensions/flagged.ts",
+				'type Value = import("example").Value;',
+			);
+			for (const directory of [".git", ".worktrees", "dist", "node_modules"]) {
+				writeFixtureFile(
+					repositoryRoot,
+					`extensions/official/${directory}/ignored.ts`,
+					'type Value = import("example").Value;',
+				);
+			}
+
+			const diagnostics = await analyzeRepository(repositoryRoot);
+
+			assert.deepEqual(
+				diagnostics.map((diagnostic) => diagnostic.location.path),
+				["extensions/official/extensions/flagged.ts"],
+			);
+		});
 	});
 });

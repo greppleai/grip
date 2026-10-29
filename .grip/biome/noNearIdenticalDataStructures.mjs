@@ -224,20 +224,47 @@ function shouldAnalyze(path) {
 	return SOURCE_DIRECTORY_NAMES.has(relativeParts[0]) || relativeParts[0] === "examples";
 }
 
-async function collectTypeScriptPaths(directory) {
+function shouldAnalyzeExtension(path) {
+	return path.endsWith(".ts");
+}
+
+async function collectTypeScriptPaths(directory, shouldInclude = shouldAnalyze) {
 	const paths = [];
 	for (const entry of await readdir(directory, { withFileTypes: true })) {
 		if (entry.isDirectory() && EXCLUDED_DIRECTORY_NAMES.has(entry.name)) continue;
 		const path = resolve(directory, entry.name);
-		if (entry.isDirectory()) paths.push(...(await collectTypeScriptPaths(path)));
-		else if (entry.isFile() && shouldAnalyze(path)) paths.push(path);
+		if (entry.isDirectory()) paths.push(...(await collectTypeScriptPaths(path, shouldInclude)));
+		else if (entry.isFile() && shouldInclude(path)) paths.push(path);
+	}
+	return paths;
+}
+
+async function collectExtensionTypeScriptPaths(root) {
+	const extensionsDirectory = resolve(root, "extensions");
+	let extensions;
+	try {
+		extensions = await readdir(extensionsDirectory, { withFileTypes: true });
+	} catch (error) {
+		if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return [];
+		throw error;
+	}
+	const paths = [];
+	for (const extension of extensions) {
+		if (!extension.isDirectory() || EXCLUDED_DIRECTORY_NAMES.has(extension.name)) continue;
+		paths.push(
+			...(await collectTypeScriptPaths(resolve(extensionsDirectory, extension.name), shouldAnalyzeExtension)),
+		);
 	}
 	return paths;
 }
 
 export async function analyzeRepository(repositoryRoot) {
 	const root = resolve(repositoryRoot);
-	const paths = await collectTypeScriptPaths(resolve(root, "packages"));
+	const [packagePaths, extensionPaths] = await Promise.all([
+		collectTypeScriptPaths(resolve(root, "packages")),
+		collectExtensionTypeScriptPaths(root),
+	]);
+	const paths = [...packagePaths, ...extensionPaths];
 	const sources = await Promise.all(
 		paths.sort().map(async (path) => ({
 			path: relative(root, path).split(sep).join("/"),

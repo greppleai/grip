@@ -452,23 +452,44 @@ function shouldAnalyze(path) {
 	return SOURCE_DIRECTORY_NAMES.has(relativeParts[0]) || relativeParts[0] === "examples";
 }
 
-async function collectTypeScriptPaths(directory) {
+function shouldAnalyzeExtension(path, extensionsDirectory) {
+	const extensionPath = relative(extensionsDirectory, path).split(sep).join("/");
+	return /^[^/]+\/.+\.ts$/.test(extensionPath);
+}
+
+async function collectTypeScriptPaths(directory, shouldAnalyzePath, allowMissingDirectory = false) {
 	const paths = [];
-	for (const entry of await readdir(directory, { withFileTypes: true })) {
+	let entries;
+	try {
+		entries = await readdir(directory, { withFileTypes: true });
+	} catch (error) {
+		if (allowMissingDirectory && error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+			return paths;
+		}
+		throw error;
+	}
+	for (const entry of entries) {
 		if (entry.isDirectory() && EXCLUDED_DIRECTORY_NAMES.has(entry.name)) continue;
 		const path = resolve(directory, entry.name);
-		if (entry.isDirectory()) paths.push(...(await collectTypeScriptPaths(path)));
-		else if (entry.isFile() && shouldAnalyze(path)) paths.push(path);
+		if (entry.isDirectory()) {
+			paths.push(...(await collectTypeScriptPaths(path, shouldAnalyzePath, allowMissingDirectory)));
+		} else if (entry.isFile() && shouldAnalyzePath(path)) {
+			paths.push(path);
+		}
 	}
 	return paths;
 }
 
 export async function analyzeRepository(repositoryRoot) {
 	const root = resolve(repositoryRoot);
-	const paths = await collectTypeScriptPaths(resolve(root, "packages"));
+	const extensionsDirectory = resolve(root, "extensions");
+	const [packagePaths, extensionPaths] = await Promise.all([
+		collectTypeScriptPaths(resolve(root, "packages"), shouldAnalyze),
+		collectTypeScriptPaths(extensionsDirectory, (path) => shouldAnalyzeExtension(path, extensionsDirectory), true),
+	]);
 	const diagnostics = (
 		await Promise.all(
-			paths.sort().map(async (path) => {
+			[...packagePaths, ...extensionPaths].sort().map(async (path) => {
 				const relativePath = relative(root, path).split(sep).join("/");
 				return analyzeCollectionIterationSource(relativePath, await readFile(path, "utf8"));
 			}),
