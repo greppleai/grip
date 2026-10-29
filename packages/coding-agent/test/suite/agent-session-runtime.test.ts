@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, registerFauxProvider, type TextContent } from "@greppleai/grip-ai";
+import { fauxAssistantMessage, getApiProvider, registerFauxProvider, type TextContent } from "@greppleai/grip-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { GripAgent } from "../../src/core/grip-agent.ts";
@@ -15,6 +15,7 @@ import type {
 	SessionShutdownEvent,
 	SessionStartEvent,
 } from "../../src/index.ts";
+import { getMessageText } from "./harness.ts";
 
 type RecordedSessionEvent =
 	| SessionBeforeSwitchEvent
@@ -52,11 +53,15 @@ describe("GripAgent session replacement characterization", () => {
 		mkdirSync(tempDir, { recursive: true });
 
 		const faux = registerFauxProvider({
+			// Missing registration must fail deterministically even when the API name triggers retries.
+			api: "faux-runtime-503",
 			models: [
 				{ id: "faux-1", reasoning: true },
 				{ id: "faux-2", reasoning: false },
 			],
 		});
+		const streamSimple = getApiProvider(faux.api)?.streamSimple;
+		if (!streamSimple) throw new Error("Missing faux stream provider");
 		faux.setResponses([fauxAssistantMessage("one"), fauxAssistantMessage("two"), fauxAssistantMessage("three")]);
 
 		const authStorage = AuthStorage.inMemory();
@@ -77,6 +82,7 @@ describe("GripAgent session replacement characterization", () => {
 							baseUrl: faux.getModel().baseUrl,
 							apiKey: "faux-key",
 							api: faux.api,
+							streamSimple,
 							models: faux.models.map((registeredModel) => ({
 								id: registeredModel.id,
 								name: registeredModel.name,
@@ -111,7 +117,7 @@ describe("GripAgent session replacement characterization", () => {
 			}
 		});
 
-		return { runtime, faux, tempDir };
+		return { runtime, faux, streamSimple, tempDir };
 	}
 
 	it("reuses one local ToolOperations identity across runtime hooks", async () => {
@@ -428,9 +434,11 @@ describe("GripAgent session replacement characterization", () => {
 	});
 
 	it("duplicates the current active branch when forking at the current position", async () => {
-		const { runtime } = await createRuntimeForTest(() => {});
+		const { runtime, faux } = await createRuntimeForTest(() => {});
 		await runtime.session.prompt("hello");
 		await runtime.session.prompt("again");
+		expect(faux.state.callCount).toBe(2);
+		expect(runtime.session.messages.map(getMessageText)).toEqual(["hello", "one", "again", "two"]);
 
 		const beforeMessages = runtime.session.messages.map((message) => ({
 			role: message.role,
@@ -472,11 +480,15 @@ describe("GripAgent session replacement characterization", () => {
 		mkdirSync(tempDir, { recursive: true });
 
 		const faux = registerFauxProvider({
+			// Missing registration must fail deterministically even when the API name triggers retries.
+			api: "faux-runtime-503",
 			models: [
 				{ id: "faux-1", reasoning: true },
 				{ id: "faux-2", reasoning: false },
 			],
 		});
+		const streamSimple = getApiProvider(faux.api)?.streamSimple;
+		if (!streamSimple) throw new Error("Missing faux stream provider");
 		faux.setResponses([fauxAssistantMessage("one"), fauxAssistantMessage("two"), fauxAssistantMessage("three")]);
 
 		const authStorage = AuthStorage.inMemory();
@@ -495,6 +507,7 @@ describe("GripAgent session replacement characterization", () => {
 							baseUrl: faux.getModel().baseUrl,
 							apiKey: "faux-key",
 							api: faux.api,
+							streamSimple,
 							models: faux.models.map((registeredModel) => ({
 								id: registeredModel.id,
 								name: registeredModel.name,
@@ -526,6 +539,8 @@ describe("GripAgent session replacement characterization", () => {
 
 		await runtime.session.prompt("hello");
 		await runtime.session.prompt("again");
+		expect(faux.state.callCount).toBe(2);
+		expect(runtime.session.messages.map(getMessageText)).toEqual(["hello", "one", "again", "two"]);
 
 		const beforeMessages = runtime.session.messages.map((message) => ({
 			role: message.role,
@@ -572,7 +587,7 @@ describe("GripAgent session replacement characterization", () => {
 		const secondDir = join(tmpdir(), `pi-runtime-cwd-b-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(firstDir, { recursive: true });
 		mkdirSync(secondDir, { recursive: true });
-		const { runtime, faux, tempDir } = await createRuntimeForTest(() => {}, { cwd: firstDir });
+		const { runtime, faux, streamSimple, tempDir } = await createRuntimeForTest(() => {}, { cwd: firstDir });
 		const otherAuthStorage = AuthStorage.inMemory();
 		otherAuthStorage.setRuntimeApiKey(faux.getModel().provider, "faux-key");
 		const otherRuntime = await GripAgent.create({
@@ -588,6 +603,7 @@ describe("GripAgent session replacement characterization", () => {
 							baseUrl: faux.getModel().baseUrl,
 							apiKey: "faux-key",
 							api: faux.api,
+							streamSimple,
 							models: faux.models.map((registeredModel) => ({
 								id: registeredModel.id,
 								name: registeredModel.name,
@@ -621,7 +637,7 @@ describe("GripAgent session replacement characterization", () => {
 	});
 
 	it("restores model and thinking state from the destination session", async () => {
-		const { runtime, faux, tempDir } = await createRuntimeForTest(() => {}, {
+		const { runtime, faux, streamSimple, tempDir } = await createRuntimeForTest(() => {}, {
 			bootstrapModel: false,
 			bootstrapThinkingLevel: false,
 		});
@@ -642,6 +658,7 @@ describe("GripAgent session replacement characterization", () => {
 							baseUrl: faux.getModel().baseUrl,
 							apiKey: "faux-key",
 							api: faux.api,
+							streamSimple,
 							models: faux.models.map((registeredModel) => ({
 								id: registeredModel.id,
 								name: registeredModel.name,
