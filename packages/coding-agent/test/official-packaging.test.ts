@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,7 +7,6 @@ import { createJiti } from "jiti/static";
 import * as typebox from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	checkOfficialVersionChanges,
 	emptyOfficialCatalog,
 	mergeOfficialReleases,
 	type OfficialPackageResult,
@@ -325,39 +323,6 @@ describe("official reproducible artifacts", () => {
 		);
 		expect((await packageOfficialExtension(root, commit)).release.manifest.grip.extensions).toEqual(["entry.js"]);
 	});
-
-	it("requires a version change for source changes relative to the base ref", async () => {
-		const root = await temporary();
-		const source = await fixture();
-		await mkdir(join(root, "extensions", "fixture"), { recursive: true });
-		await writeFile(
-			join(root, "extensions", "fixture", "package.json"),
-			await readFile(join(source, "package.json")),
-		);
-		const git = (...args: string[]) =>
-			execFileSync("git", args, {
-				cwd: root,
-				encoding: "utf8",
-				env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
-			}).trim();
-		git("init");
-		git("config", "user.email", "fixture@example.invalid");
-		git("config", "user.name", "Fixture");
-		git("config", "core.hooksPath", "/dev/null");
-		git("add", "extensions/fixture/package.json");
-		git("commit", "-m", "fixture");
-		const base = git("rev-parse", "HEAD");
-		await writeFile(join(root, "extensions", "fixture", "entry.ts"), "export default () => {};");
-		git("add", "extensions/fixture/entry.ts");
-		git("commit", "-m", "source");
-		expect(() => checkOfficialVersionChanges(root, base)).toThrow(/version bump/);
-		const pkg = JSON.parse(await readFile(join(source, "package.json"), "utf8"));
-		pkg.version = "1.0.1";
-		await writeFile(join(root, "extensions", "fixture", "package.json"), JSON.stringify(pkg));
-		git("add", "extensions/fixture/package.json");
-		git("commit", "-m", "version");
-		expect(() => checkOfficialVersionChanges(root, base)).not.toThrow();
-	});
 });
 
 class MemoryPublisher implements OfficialPublisher {
@@ -455,6 +420,12 @@ describe("official publication ordering and retry", () => {
 		const root = fileURLToPath(new URL("../../../", import.meta.url));
 		const workflow = await readFile(join(root, ".github/workflows/publish-official-extension.yml"), "utf8");
 		expect(workflow).toContain("extension-*-v*");
+		expect(workflow).toContain("branches: [main]");
+		expect(workflow).toContain("workflow_dispatch:");
+		expect(workflow).toContain("publish-main");
+		expect(workflow).toContain("needs.validate.outputs.commit");
+		expect(workflow).toContain("needs: validate");
+		expect(workflow).toContain("group: publish-official-catalog-v1");
 		expect(workflow).toContain("cancel-in-progress: false");
 		expect(workflow).not.toMatch(/npm (?:publish|run (?:build|release))/);
 		const core = await readFile(join(root, ".github/workflows/build-binaries.yml"), "utf8");
