@@ -33,7 +33,7 @@ const bashTool = createBashTool(operations);
 const grepTool = createGrepTool(operations);
 const findTool = createFindTool(operations);
 const lsTool = createLsTool(operations);
-const websearchTool = createWebsearchTool();
+const websearchTool = createWebsearchTool({ provider: "duckduckgo" });
 
 // Helper to extract text from content blocks
 function getTextOutput(result: any): string {

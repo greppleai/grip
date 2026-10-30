@@ -20,12 +20,14 @@ export type WebsearchProvider =
 	| "brave"
 	| "brave-search"
 	| "firecrawl"
-	| "firecrawl-search";
+	| "firecrawl-search"
+	| "tavily";
 
 /** Credential IDs are separate from model-provider IDs and never stored in settings.json. */
 export const WEBSEARCH_AUTH_PROVIDER_IDS = {
 	brave: "websearch-brave",
 	firecrawl: "websearch-firecrawl",
+	tavily: "websearch-tavily",
 } as const;
 export interface WebsearchToolOptions {
 	provider?: WebsearchProvider;
@@ -42,7 +44,7 @@ const websearchSchema = Type.Object({
 
 export type WebsearchToolInput = Static<typeof websearchSchema>;
 
-export type WebsearchSource = "duckduckgo-instant-answer" | "brave-search" | "firecrawl-search";
+export type WebsearchSource = "duckduckgo-instant-answer" | "brave-search" | "firecrawl-search" | "tavily-search";
 
 export interface WebsearchResultItem {
 	title: string;
@@ -103,7 +105,8 @@ export function parseWebsearchToolOptions(value: unknown): WebsearchToolOptions 
 			provider !== "brave" &&
 			provider !== "brave-search" &&
 			provider !== "firecrawl" &&
-			provider !== "firecrawl-search"
+			provider !== "firecrawl-search" &&
+			provider !== "tavily"
 		) {
 			throw new Error(`Invalid tools.websearch.provider: ${provider}`);
 		}
@@ -237,20 +240,46 @@ export function parseFirecrawlSearchResponse(data: unknown, limit: number): Webs
 	return results;
 }
 
+function parseTavilySearchResponse(data: unknown, limit: number): WebsearchResultItem[] {
+	if (!isRecord(data) || !Array.isArray(data.results)) {
+		throw new Error("Tavily Search returned an invalid response: expected a results array");
+	}
+	const results: WebsearchResultItem[] = [];
+	const seen = new Set<string>();
+	for (const entry of data.results) {
+		if (results.length >= limit) break;
+		if (!isRecord(entry)) continue;
+		const title = asString(entry.title);
+		const url = asString(entry.url);
+		if (!title || !url) continue;
+		const item: WebsearchResultItem = { title: stripHtml(title), url };
+		const content = asString(entry.content);
+		if (content) item.snippet = stripHtml(content);
+		pushResult(results, seen, item);
+	}
+	return results;
+}
+
 function formatSourceName(source: WebsearchSource): string {
 	switch (source) {
+		case "tavily-search":
+			return "Tavily";
 		case "brave-search":
 			return "Brave Search";
 		case "firecrawl-search":
 			return "Firecrawl";
 		case "duckduckgo-instant-answer":
-			return "DuckDuckGo";
+			return "DuckDuckGo Instant Answer";
 	}
 }
 
 function formatResults(query: string, results: WebsearchResultItem[], source: WebsearchSource): string {
 	if (results.length === 0) {
-		return `No ${formatSourceName(source)} links found for: ${query}`;
+		const empty = `No ${formatSourceName(source)} links found for: ${query}`;
+		if (source === "duckduckgo-instant-answer") {
+			return `${empty}\nDuckDuckGo Instant Answer is not full web search. Select Tavily with /websearch login for keyless web search.`;
+		}
+		return empty;
 	}
 	return results
 		.map((result, index) => {
@@ -298,10 +327,10 @@ function resolveWebsearchProvider(options?: WebsearchToolOptions): WebsearchSour
 		if (process.env.GRIP_WEBSEARCH_FIRECRAWL_API_KEY || process.env.FIRECRAWL_API_KEY) return "firecrawl-search";
 		if (options?.apiKey || process.env.GRIP_WEBSEARCH_BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY)
 			return "brave-search";
+		return "tavily-search";
 	}
-	if (!configured || configured === "duckduckgo" || configured === "duckduckgo-instant-answer") {
-		return "duckduckgo-instant-answer";
-	}
+	if (configured === "tavily") return "tavily-search";
+	if (configured === "duckduckgo" || configured === "duckduckgo-instant-answer") return "duckduckgo-instant-answer";
 	if (configured === "brave" || configured === "brave-search") return "brave-search";
 	if (configured === "firecrawl" || configured === "firecrawl-search") return "firecrawl-search";
 	throw new Error(`Unsupported websearch provider: ${configured}`);
@@ -399,6 +428,40 @@ async function fetchFirecrawlResults(
 	}
 	return parseFirecrawlSearchResponse((await response.json()) as unknown, limit);
 }
+async function fetchTavilyResults(
+	query: string,
+	limit: number,
+	signal: AbortSignal,
+	options?: WebsearchToolOptions,
+): Promise<WebsearchResultItem[]> {
+	const url = new URL(
+		options?.baseUrl ?? process.env.GRIP_WEBSEARCH_TAVILY_BASE_URL ?? "https://api.tavily.com/search",
+	);
+	const apiKey = asString(options?.apiKey ?? process.env.GRIP_WEBSEARCH_TAVILY_API_KEY ?? process.env.TAVILY_API_KEY);
+	const headers: Record<string, string> = {
+		accept: "application/json",
+		"content-type": "application/json",
+		"user-agent": "grip-coding-agent",
+	};
+	if (apiKey) headers.authorization = `Bearer ${apiKey}`;
+	else headers["X-Tavily-Access-Mode"] = "keyless";
+	const response = await fetch(url, {
+		method: "POST",
+		headers,
+		body: JSON.stringify({ query, max_results: limit, search_depth: "basic", include_answer: false }),
+		signal,
+	});
+	if (!response.ok) {
+		let message = `Tavily Search request failed: ${response.status} ${response.statusText}`;
+		if (!apiKey && (response.status === 401 || response.status === 403 || response.status === 429)) {
+			message +=
+				". Keyless access is limited; configure a Tavily API key with /websearch login or select another provider.";
+		}
+		throw new Error(message);
+	}
+	return parseTavilySearchResponse((await response.json()) as unknown, limit);
+}
+
 export function createWebsearchToolDefinition(
 	options?: WebsearchToolOptions | (() => WebsearchToolOptions | undefined),
 	getStoredApiKey?: (source: WebsearchSource) => string | undefined,
@@ -407,7 +470,7 @@ export function createWebsearchToolDefinition(
 		name: "websearch",
 		label: "websearch",
 		description:
-			"Search the web for relevant links using DuckDuckGo by default, or Brave Search/Firecrawl when configured. Returns titles, URLs, and snippets when available.",
+			"Search the web for relevant links using Tavily keyless by default, or DuckDuckGo Instant Answer, Brave Search, or Firecrawl when configured. Returns titles, URLs, and snippets when available.",
 		promptSnippet: "Search the web for relevant links",
 		parameters: websearchSchema,
 		async execute(_toolCallId, { query, limit }: WebsearchToolInput, signal?: AbortSignal) {
@@ -428,6 +491,8 @@ export function createWebsearchToolDefinition(
 				};
 				const results = await (async () => {
 					switch (source) {
+						case "tavily-search":
+							return fetchTavilyResults(trimmedQuery, effectiveLimit, controller.signal, effectiveOptions);
 						case "brave-search":
 							return fetchBraveResults(trimmedQuery, effectiveLimit, controller.signal, effectiveOptions);
 						case "firecrawl-search":

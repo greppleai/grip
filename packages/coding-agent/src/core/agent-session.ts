@@ -5654,7 +5654,9 @@ export class AgentSession {
 							? WEBSEARCH_AUTH_PROVIDER_IDS.brave
 							: source === "firecrawl-search"
 								? WEBSEARCH_AUTH_PROVIDER_IDS.firecrawl
-								: undefined;
+								: source === "tavily-search"
+									? WEBSEARCH_AUTH_PROVIDER_IDS.tavily
+									: undefined;
 					if (!id) return undefined;
 					const credential = this.modelRegistry.authStorage.get(id);
 					return credential?.type === "api_key" ? credential.key : undefined;

@@ -82,7 +82,7 @@ export interface WarningSettings {
 }
 
 export type ToolSettings = Record<string, Record<string, unknown> | undefined>;
-export type WebsearchSettingProvider = "duckduckgo" | "brave" | "firecrawl";
+export type WebsearchSettingProvider = "duckduckgo" | "brave" | "firecrawl" | "tavily";
 
 export interface SandboxSettings {
 	limaBinary?: string; // default: limactl

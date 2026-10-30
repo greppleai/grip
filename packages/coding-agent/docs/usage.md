@@ -39,7 +39,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | Command | Description |
 |---------|-------------|
 | `/login`, `/logout` | Manage OAuth or API-key credentials |
-| `/websearch login` | Select DuckDuckGo, Brave Search, or Firecrawl; save or update search API keys |
+| `/websearch login` | Select Tavily (keyless or with an optional API key), DuckDuckGo, Brave Search, or Firecrawl; save or update search API keys |
 | `/model [reference or query]` | Choose a provider and model, select an exact reference, or search across providers |
 | `/job model show` | Show the effective job model and its source |
 | `/job model set --model <provider/model-id>` | Save the single global job model |
