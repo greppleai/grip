@@ -1,6 +1,6 @@
 {
 	"name": "@greppleai/grip",
-	"version": "0.2.4",
+	"version": "0.2.5",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
 	"gripConfig": {
@@ -38,9 +38,9 @@
 		"prepublishOnly": "npm run clean && npm run build && npm run shrinkwrap"
 	},
 	"dependencies": {
-		"@greppleai/grip-agent-core": "^0.2.4",
-		"@greppleai/grip-ai": "^0.2.4",
-		"@greppleai/grip-tui": "^0.2.4",
+		"@greppleai/grip-agent-core": "^0.2.5",
+		"@greppleai/grip-ai": "^0.2.5",
+		"@greppleai/grip-tui": "^0.2.5",
 		"@silvia-odwyer/photon-node": "0.3.4",
 		"chalk": "6.0.1",
 		"cross-spawn": "7.0.6",
