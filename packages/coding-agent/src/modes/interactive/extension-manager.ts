@@ -222,18 +222,20 @@ export class ExtensionManagerController {
 		}
 	}
 
-	async confirm(): Promise<void> {
-		if (this.disposed || this.state.activity || this.state.page !== "confirm") return;
+	/** Return the committed action only after reconciliation and operation settlement. */
+	async confirm(): Promise<ExtensionManagerAction | null> {
+		if (this.disposed || this.state.activity || this.state.page !== "confirm") return null;
 		const action = this.state.confirmation;
-		if (!action || !this.state.inventoryReady || this.state.inventoryError) return;
+		if (!action || !this.state.inventoryReady || this.state.inventoryError) return null;
 		const removal =
 			action.kind === "remove"
 				? this.state.inventory.find((row) => row.identity === action.identity)?.removal
 				: null;
-		if (action.kind === "remove" && !removal) return;
+		if (action.kind === "remove" && !removal) return null;
 		this.state.confirmation = null;
 		this.state.page = "detail";
 		const official = action.kind === "install" || removal?.source.startsWith("official:") === true;
+		let completed: ExtensionManagerAction | null = null;
 		await this.run(action.kind, official, async (signal) => {
 			// Even a rejected/canceled mutation may have committed membership. Never claim rollback.
 			this.state.reloadRequired = true;
@@ -248,15 +250,17 @@ export class ExtensionManagerController {
 					this.state.notice =
 						"Saved. Reload/restart to reconcile the runtime; running extensions have not been replaced.";
 			} catch (error) {
-				if (!this.disposed) {
-					const message = error instanceof Error ? error.message : String(error);
-					this.state.notice = `${message}. Review inventory: cancellation or failure does not guarantee rollback.`;
-				}
+				if (this.disposed) return;
+				const message = error instanceof Error ? error.message : String(error);
+				this.state.notice = `${message}. Review inventory: cancellation or failure does not guarantee rollback.`;
+				return;
 			} finally {
 				// Do not reuse the operation's aborted signal for authoritative reconciliation.
 				if (!this.disposed) await this.readInventory();
 			}
+			if (!signal.aborted) completed = action;
 		});
+		return this.disposed ? null : completed;
 	}
 
 	cancel(): void {

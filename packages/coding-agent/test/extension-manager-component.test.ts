@@ -261,9 +261,11 @@ describe("extension manager component", () => {
 		await h.component.dispose();
 	});
 
-	it("requires full-access trust confirmation, defaults to Cancel, then reconciles after install", async () => {
+	it("requires trust confirmation and automatically closes only after install reconciliation settles", async () => {
 		const rows: InstalledExtension[] = [];
 		const h = harness(rows);
+		const inventory = deferred<InstalledExtension[]>();
+		h.getExtensionInventory.mockResolvedValueOnce(rows).mockReturnValueOnce(inventory.promise);
 		h.installAndPersist.mockImplementation(async () => {
 			const row = installation();
 			row.status = "not-loaded";
@@ -279,17 +281,38 @@ describe("extension manager component", () => {
 		expect(h.installAndPersist).not.toHaveBeenCalled();
 		activate(h.component, "Install");
 		activate(h.component, "Confirm");
-		await vi.waitFor(() => expect(text(h.component)).toContain("Saved."));
-		expect(h.installAndPersist).toHaveBeenCalledWith(
+		await vi.waitFor(() => expect(h.getExtensionInventory).toHaveBeenCalledTimes(2));
+		expect(h.onClose).not.toHaveBeenCalled();
+		expect(text(h.component)).toContain("install: working");
+		h.component.handleInput("\r");
+		expect(h.installAndPersist).toHaveBeenCalledExactlyOnceWith(
 			"official:fixture",
 			expect.objectContaining({
 				official: expect.objectContaining({ signal: expect.any(AbortSignal), onProgress: expect.any(Function) }),
 			}),
 		);
-		expect(text(h.component)).toContain("not-loaded");
-		expect(text(h.component)).toContain("Reload/restart pending");
-		for (let i = 0; i < 3; i++) h.component.handleInput("\x1b");
+		inventory.resolve(rows);
 		await vi.waitFor(() => expect(h.onClose).toHaveBeenCalledExactlyOnceWith(true));
+		expect(h.component.render(80)).toEqual([]);
+		h.component.handleInput("\x1b");
+		expect(h.onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps the manager open when cancellation arrives during post-install inventory reconciliation", async () => {
+		const h = harness();
+		const inventory = deferred<InstalledExtension[]>();
+		h.getExtensionInventory.mockResolvedValueOnce([]).mockReturnValueOnce(inventory.promise);
+		await h.component.initialize();
+		await openInstallConfirmation(h.component);
+		activate(h.component, "Confirm");
+		await vi.waitFor(() => expect(h.getExtensionInventory).toHaveBeenCalledTimes(2));
+		h.component.handleInput("\x1b");
+		inventory.resolve([installation()]);
+		await vi.waitFor(() => expect(text(h.component)).not.toContain("install: working"));
+		expect(text(h.component)).toContain("Saved.");
+		expect(text(h.component)).toContain("Reload/restart pending");
+		expect(h.onClose).not.toHaveBeenCalled();
+		await h.component.dispose();
 	});
 
 	it("confirms an owned uninstall with exact scope and data-preservation explanation", async () => {
@@ -325,7 +348,7 @@ describe("extension manager component", () => {
 		await h.component.dispose();
 	});
 
-	it("shows progress, requests cancellation without closing, and waits for authoritative inventory", async () => {
+	it.each([false, true])("keeps cancellation visible after settlement (committed=%s)", async (committed) => {
 		const h = harness();
 		const pending = deferred<void>();
 		h.installAndPersist.mockImplementation(async (_source, options) => {
@@ -341,10 +364,25 @@ describe("extension manager component", () => {
 		expect(h.installAndPersist.mock.calls[0][1]?.official?.signal?.aborted).toBe(true);
 		expect(text(h.component)).toContain("Cancellation requested");
 		expect(h.onClose).not.toHaveBeenCalled();
-		pending.reject(new OfficialExtensionError("canceled", "Canceled"));
-		await vi.waitFor(() => expect(text(h.component)).toContain("does not guarantee rollback"));
+		if (committed) pending.resolve();
+		else pending.reject(new OfficialExtensionError("canceled", "Canceled"));
+		await vi.waitFor(() => expect(text(h.component)).toContain(committed ? "Saved." : "does not guarantee rollback"));
 		expect(h.getExtensionInventory).toHaveBeenCalledTimes(2);
 		expect(text(h.component)).toContain("Reload/restart pending");
+		expect(h.onClose).not.toHaveBeenCalled();
+		await h.component.dispose();
+	});
+
+	it("keeps failed install diagnostics visible instead of automatically closing", async () => {
+		const h = harness();
+		h.installAndPersist.mockRejectedValue(new OfficialExtensionError("network", "Download failed"));
+		await h.component.initialize();
+		await openInstallConfirmation(h.component);
+		activate(h.component, "Confirm");
+		await vi.waitFor(() => expect(text(h.component)).toContain("Download failed"));
+		expect(text(h.component)).toContain("does not guarantee rollback");
+		expect(h.getExtensionInventory).toHaveBeenCalledTimes(2);
+		expect(h.onClose).not.toHaveBeenCalled();
 		await h.component.dispose();
 	});
 

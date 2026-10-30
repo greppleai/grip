@@ -13,7 +13,7 @@ In interactive mode, enter `/extensions`:
 1. Choose **Install extension** to open the searchable official catalog.
 2. Select an entry to see its description, supported Grip range and compatible stable version. Entries without a compatible release explain why installation is unavailable.
 3. Choose **Install**, read the full-access warning and confirm.
-4. Wait for the operation to settle, then leave the manager to apply saved changes safely.
+4. Wait for installation to settle. On success, the manager closes automatically and Grip reloads resources as soon as the session is idle.
 
 Use the configured selection keys shown in the footer; type to search. Installed and catalog searches/selections are retained when returning from details. **Refresh catalog** retries discovery; cached, stale, offline and unavailable states are distinguished. Browsing does not execute catalog code or install unselected entries.
 
@@ -46,7 +46,7 @@ Official uninstall removes the selection from the active profile (or default set
 
 ## Applying changes to a running session
 
-Install/uninstall first saves package state; it does not replace live extension code while the manager is open. The manager shows **Reload/restart pending** until changes are applied. On close, Grip waits for the session, tools and tracked interactive commands to settle, then uses the normal resource reload lifecycle. New commands wait for reconciliation rather than running against an obsolete extension host.
+Install/uninstall first saves package state; it does not replace live extension code while the manager is open. A successful install automatically closes the manager to load the extension. Failed or canceled operations keep the manager open so you can inspect the result; uninstall still applies when you leave the manager. On close, Grip waits for the session, tools and tracked interactive commands to settle, then uses the normal resource reload lifecycle. New commands wait for reconciliation rather than running against an obsolete extension host.
 
 A busy session reports that reload is pending until idle. A failed reload reports that changes are saved but reload/restart is required; it is not reported as a successful activation. Retry `/reload` when idle or restart Grip. `--no-extensions` remains authoritative after reload. CLI mutations affect persisted state; already running processes retain their loaded code until their own reload/restart.
 
