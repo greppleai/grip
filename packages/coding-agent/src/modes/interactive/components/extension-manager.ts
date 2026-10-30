@@ -235,7 +235,15 @@ export class ExtensionManagerComponent implements Component, Focusable {
 		if (this.state.page === "confirm") {
 			return [
 				{ value: "cancel", label: "Cancel", run: () => this.back() },
-				{ value: "confirm", label: "Confirm", run: () => void this.controller.confirm() },
+				{
+					value: "confirm",
+					label: "Confirm",
+					run: () => {
+						void this.controller.confirm().then(async (action) => {
+							if (action?.kind === "install") await this.close();
+						});
+					},
+				},
 			];
 		}
 		const choices: ManagerChoice[] = [];

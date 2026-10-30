@@ -598,9 +598,14 @@ describe("/extensions interactive host mounting", () => {
 		expect(finished).toHaveBeenCalledOnce();
 		expect(reload).toHaveBeenCalledOnce();
 	});
-	it.each([false, true])(
-		"installs and removes through real managed state and idle reload (noExtensions=%s)",
-		async (noExtensions) => {
+	it.each([
+		[false, false],
+		[false, true],
+		[true, false],
+		[true, true],
+	])(
+		"automatically reloads installed extensions and preserves managed removal behavior (noExtensions=%s, busy=%s)",
+		async (noExtensions, busy) => {
 			const manifest = parseOfficialManifest(
 				{
 					name: "official-fixture",
@@ -679,8 +684,8 @@ describe("/extensions interactive host mounting", () => {
 			await host.bindCurrentSessionExtensions();
 			const agentDir = join(harness.tempDir, "agent");
 			const reload = vi.spyOn(runtime.session, "reload");
-			const command = host.promptSession("/hold-install");
-			await started.promise;
+			const command = busy ? host.promptSession("/hold-install") : Promise.resolve();
+			if (busy) await started.promise;
 			await host.handleEditorSubmit("/extensions");
 			const component = host.extensionManager!.component;
 			expect(Boolean(runtime.session.extensionRunner.getCommand("manual-proof"))).toBe(!noExtensions);
@@ -694,13 +699,14 @@ describe("/extensions interactive host mounting", () => {
 			expect(text(component)).toContain("not sandboxed");
 			expect(harness.settingsManager.getPackages()).toEqual([]);
 			activate(component, "Confirm");
-			await vi.waitFor(() => expect(text(component)).toContain("Saved. Reload/restart"));
+			await vi.waitFor(() => expect(host.extensionManager).toBeUndefined());
 			expect(harness.settingsManager.getPackages()).toEqual(["official:fixture"]);
 			expect(SettingsManager.create(harness.tempDir, agentDir).getPackages()).toEqual(["official:fixture"]);
-			expect(runtime.session.extensionRunner.getCommand("official-proof")).toBeUndefined();
-			await host.disposeExtensionManager();
-			expect(reload).not.toHaveBeenCalled();
-			expect(showStatus).toHaveBeenCalledWith(expect.stringContaining("reload pending"));
+			if (busy) {
+				expect(runtime.session.extensionRunner.getCommand("official-proof")).toBeUndefined();
+				expect(reload).not.toHaveBeenCalled();
+				expect(showStatus).toHaveBeenCalledWith(expect.stringContaining("reload pending"));
+			}
 			released.resolve();
 			await command;
 			await vi.waitFor(() => expect(host.extensionManagerReload.reloadRequired).toBe(false));

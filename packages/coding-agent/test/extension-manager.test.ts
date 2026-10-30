@@ -214,7 +214,7 @@ describe("extension manager controller", () => {
 			});
 			h.getExtensionInventory.mockResolvedValue([installation()]);
 		});
-		await h.manager.confirm();
+		expect(await h.manager.confirm()).toEqual({ kind: "install", id: "fixture" });
 		expect(h.installAndPersist).toHaveBeenCalledExactlyOnceWith("official:fixture", {
 			official: { signal: expect.any(AbortSignal), onProgress: expect.any(Function) },
 		});
@@ -315,7 +315,7 @@ describe("extension manager controller", () => {
 				if (committed) h.getExtensionInventory.mockResolvedValue([installation()]);
 				throw new OfficialExtensionError("canceled", "Operation canceled");
 			});
-			await h.manager.confirm();
+			expect(await h.manager.confirm()).toBeNull();
 			expect(h.manager.getState().inventory).toEqual(committed ? [installation()] : []);
 			expect(h.manager.getState().notice).toContain("does not guarantee rollback");
 			expect(h.manager.getState().reloadRequired).toBe(true);
@@ -372,7 +372,7 @@ describe("extension manager controller", () => {
 		expect(controls.signal?.aborted).toBe(true);
 		controls.onProgress?.({ id: "fixture", phase: "membership" });
 		mutation.resolve();
-		await operation;
+		expect(await operation).toBeNull();
 		expect(await closing).toBe(true);
 		await h.manager.initialize();
 		await h.manager.openCatalog(true);
