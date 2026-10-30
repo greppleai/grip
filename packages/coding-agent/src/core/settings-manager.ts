@@ -781,6 +781,12 @@ export class SettingsManager {
 		else this.recomputeSettings();
 	}
 
+	/** Preserve manual selection during runtime replacement without overriding directory defaults. */
+	inheritProfileSelection(previous: SettingsManager): void {
+		this.sessionProfileOverride = previous.sessionProfileOverride;
+		this.recomputeSettings();
+	}
+
 	setProfileSandbox(name: string, vmName: string | undefined): void {
 		this.setProfileSandboxOptions(name, { defaultSandbox: vmName });
 	}
