@@ -9,9 +9,9 @@
 			"version": "0.2.4",
 			"license": "MIT",
 			"dependencies": {
-				"@greppleai/grip-agent-core": "^0.2.3",
-				"@greppleai/grip-ai": "^0.2.3",
-				"@greppleai/grip-tui": "^0.2.3",
+				"@greppleai/grip-agent-core": "^0.2.4",
+				"@greppleai/grip-ai": "^0.2.4",
+				"@greppleai/grip-tui": "^0.2.4",
 				"@silvia-odwyer/photon-node": "0.3.4",
 				"chalk": "6.0.1",
 				"cross-spawn": "7.0.6",
@@ -73,11 +73,11 @@
 			}
 		},
 		"node_modules/@greppleai/grip-agent-core": {
-			"version": "0.2.3",
-			"resolved": "https://registry.npmjs.org/@greppleai/grip-agent-core/-/grip-agent-core-0.2.3.tgz",
+			"version": "0.2.4",
+			"resolved": "https://registry.npmjs.org/@greppleai/grip-agent-core/-/grip-agent-core-0.2.4.tgz",
 			"license": "MIT",
 			"dependencies": {
-				"@greppleai/grip-ai": "^0.2.3",
+				"@greppleai/grip-ai": "^0.2.4",
 				"ignore": "7.0.13",
 				"typebox": "1.4.3",
 				"yaml": "2.9.1"
@@ -87,8 +87,8 @@
 			}
 		},
 		"node_modules/@greppleai/grip-ai": {
-			"version": "0.2.3",
-			"resolved": "https://registry.npmjs.org/@greppleai/grip-ai/-/grip-ai-0.2.3.tgz",
+			"version": "0.2.4",
+			"resolved": "https://registry.npmjs.org/@greppleai/grip-ai/-/grip-ai-0.2.4.tgz",
 			"license": "MIT",
 			"dependencies": {
 				"@anthropic-ai/sdk": "1.1.0",
@@ -111,8 +111,8 @@
 			}
 		},
 		"node_modules/@greppleai/grip-tui": {
-			"version": "0.2.3",
-			"resolved": "https://registry.npmjs.org/@greppleai/grip-tui/-/grip-tui-0.2.3.tgz",
+			"version": "0.2.4",
+			"resolved": "https://registry.npmjs.org/@greppleai/grip-tui/-/grip-tui-0.2.4.tgz",
 			"license": "MIT",
 			"dependencies": {
 				"get-east-asian-width": "1.7.0",
