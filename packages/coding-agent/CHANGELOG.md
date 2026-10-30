@@ -2,6 +2,24 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.2.4](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.3...@greppleai/grip-v0.2.4) (2026-10-30)
+
+
+### Bug Fixes
+
+* **coding-agent:** profiles - reload after extension installs ([ca6c66c](https://github.com/greppleai/grip/commit/ca6c66ceb1059ba2111ae7e39281cb12a9cddb2e))
+* **coding-agent:** profiles - retain selection across sessions ([aef11e3](https://github.com/greppleai/grip/commit/aef11e3ff0cee2af555ab5cf889425efe009db4b))
+* **coding-agent:** profiles - scope official extension selections ([260d1dd](https://github.com/greppleai/grip/commit/260d1ddc6a380ace071ae83f22fae3343ec66f05))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.2.3 to ^0.2.4
+    * @greppleai/grip-ai bumped from ^0.2.3 to ^0.2.4
+    * @greppleai/grip-tui bumped from ^0.2.3 to ^0.2.4
+
 ## [0.2.3](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.2...@greppleai/grip-v0.2.3) (2026-10-29)
 
 
