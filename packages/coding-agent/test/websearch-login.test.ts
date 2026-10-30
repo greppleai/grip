@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
-import { SettingsManager } from "../src/core/settings-manager.ts";
+import { SettingsManager, type WebsearchSettingProvider } from "../src/core/settings-manager.ts";
 import { WEBSEARCH_AUTH_PROVIDER_IDS } from "../src/core/tools/websearch.ts";
 import { LoginDialogComponent } from "../src/modes/interactive/components/login-dialog.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
@@ -17,7 +17,7 @@ interface TestSettings {
 
 interface WebsearchCommandMode {
 	handleBuiltInEditorCommand(text: string): Promise<boolean>;
-	showWebsearchApiKeyDialog(provider: "brave", name: string): Promise<void>;
+	showWebsearchApiKeyDialog(provider: Exclude<WebsearchSettingProvider, "duckduckgo">, name: string): Promise<void>;
 	showWebsearchLoginSelector(): void;
 }
 
@@ -62,7 +62,13 @@ describe("/websearch login", () => {
 		const storage = harness.session.modelRegistry.authStorage;
 		storage.set(WEBSEARCH_AUTH_PROVIDER_IDS.brave, { type: "api_key", key: "brave-secret" });
 		storage.set(WEBSEARCH_AUTH_PROVIDER_IDS.firecrawl, { type: "api_key", key: "firecrawl-secret" });
+		storage.set(WEBSEARCH_AUTH_PROVIDER_IDS.tavily, { type: "api_key", key: "tavily-secret" });
 		const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+			if (String(url).includes("tavily.com")) {
+				expect(init?.headers).toMatchObject({ authorization: "Bearer tavily-secret" });
+				expect(init?.headers).not.toHaveProperty("X-Tavily-Access-Mode");
+				return Response.json({ results: [] });
+			}
 			if (String(url).includes("brave.com")) {
 				expect(init?.headers).toMatchObject({ "x-subscription-token": "brave-secret" });
 				return new Response(JSON.stringify({ web: { results: [] } }), { status: 200 });
@@ -77,11 +83,11 @@ describe("/websearch login", () => {
 		});
 		try {
 			const tool = harness.session.getToolDefinition("websearch")!;
-			for (const provider of ["brave", "firecrawl", "duckduckgo"] as const) {
+			for (const provider of ["brave", "firecrawl", "tavily", "duckduckgo"] as const) {
 				harness.settingsManager.setWebsearchProvider(provider);
 				await tool.execute("call", { query: "example" }, undefined, undefined, undefined as never);
 			}
-			expect(fetchMock).toHaveBeenCalledTimes(3);
+			expect(fetchMock).toHaveBeenCalledTimes(4);
 		} finally {
 			harness.cleanup();
 		}
@@ -136,5 +142,21 @@ describe("/websearch login", () => {
 		keyPrompt.mockRejectedValueOnce(new Error("Login cancelled"));
 		await (mode as unknown as WebsearchCommandMode).showWebsearchApiKeyDialog("brave", "Brave Search");
 		expect(showError).toHaveBeenCalledTimes(1);
+
+		keyPrompt.mockResolvedValue("");
+		await (mode as unknown as WebsearchCommandMode).showWebsearchApiKeyDialog("tavily", "Tavily");
+		expect(showError).toHaveBeenCalledTimes(1);
+		expect(showStatus).toHaveBeenCalledWith("Web search engine: Tavily");
+		expect(manager.getToolSettings("websearch")).toEqual({ provider: "tavily" });
+		expect(authStorage.get(WEBSEARCH_AUTH_PROVIDER_IDS.tavily)).toBeUndefined();
+
+		keyPrompt.mockResolvedValue("saved-tavily-key");
+		await (mode as unknown as WebsearchCommandMode).showWebsearchApiKeyDialog("tavily", "Tavily");
+		expect(authStorage.get(WEBSEARCH_AUTH_PROVIDER_IDS.tavily)).toEqual({ type: "api_key", key: "saved-tavily-key" });
+		expect(readFileSync(path, "utf8")).not.toContain("saved-tavily-key");
+
+		keyPrompt.mockResolvedValue("");
+		await (mode as unknown as WebsearchCommandMode).showWebsearchApiKeyDialog("tavily", "Tavily");
+		expect(authStorage.get(WEBSEARCH_AUTH_PROVIDER_IDS.tavily)).toEqual({ type: "api_key", key: "saved-tavily-key" });
 	});
 });

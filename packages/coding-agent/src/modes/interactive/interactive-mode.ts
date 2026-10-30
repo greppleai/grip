@@ -5970,7 +5970,9 @@ export class InteractiveMode {
 						? "Brave Search (web search)"
 						: providerId === WEBSEARCH_AUTH_PROVIDER_IDS.firecrawl
 							? "Firecrawl (web search)"
-							: this.session.modelRegistry.getProviderDisplayName(providerId),
+							: providerId === WEBSEARCH_AUTH_PROVIDER_IDS.tavily
+								? "Tavily web search"
+								: this.session.modelRegistry.getProviderDisplayName(providerId),
 				authType: credential.type === "api_key" && credential.obtainedVia === "oauth" ? "oauth" : credential.type,
 			});
 		}
@@ -6201,7 +6203,7 @@ export class InteractiveMode {
 	}
 
 	private showWebsearchLoginSelector(): void {
-		const choices = ["DuckDuckGo (no API key)", "Brave Search", "Firecrawl"];
+		const choices = ["DuckDuckGo (no API key)", "Brave Search", "Firecrawl", "Tavily (no API key; optional API key)"];
 		this.showSelector((done) => {
 			const selector = new ExtensionSelectorComponent(
 				"Choose a web search engine:",
@@ -6214,6 +6216,8 @@ export class InteractiveMode {
 						await this.showWebsearchApiKeyDialog("brave", "Brave Search");
 					} else if (choice === choices[2]) {
 						await this.showWebsearchApiKeyDialog("firecrawl", "Firecrawl");
+					} else if (choice === choices[3]) {
+						await this.showWebsearchApiKeyDialog("tavily", "Tavily");
 					}
 				},
 				() => {
@@ -6249,9 +6253,12 @@ export class InteractiveMode {
 		if (credential?.type === "api_key" && credential.key.trim()) return true;
 		const config = parseWebsearchToolOptions(this.settingsManager.getToolSettings("websearch"));
 		if ((config?.provider === provider || config?.provider === `${provider}-search`) && config.apiKey) return true;
-		return provider === "brave"
-			? Boolean(process.env.GRIP_WEBSEARCH_BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY)
-			: Boolean(process.env.GRIP_WEBSEARCH_FIRECRAWL_API_KEY || process.env.FIRECRAWL_API_KEY);
+		const environmentKeys: Record<WebsearchApiKeyProvider, string | undefined> = {
+			brave: process.env.GRIP_WEBSEARCH_BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY,
+			firecrawl: process.env.GRIP_WEBSEARCH_FIRECRAWL_API_KEY || process.env.FIRECRAWL_API_KEY,
+			tavily: process.env.GRIP_WEBSEARCH_TAVILY_API_KEY || process.env.TAVILY_API_KEY,
+		};
+		return Boolean(environmentKeys[provider]);
 	}
 
 	private async showWebsearchApiKeyDialog(provider: WebsearchApiKeyProvider, name: string): Promise<void> {
@@ -6262,8 +6269,16 @@ export class InteractiveMode {
 		this.ui.setFocus(dialog);
 		this.ui.requestRender();
 		try {
-			const apiKey = (await dialog.showPrompt("Enter API key (or leave blank to use an existing key):")).trim();
-			if (!apiKey && !this.hasWebsearchApiKey(provider)) throw new Error(`${name} requires an API key`);
+			const apiKey = (
+				await dialog.showPrompt(
+					provider === "tavily"
+						? "Enter API key (optional; leave blank to use an existing key or continue without one):"
+						: "Enter API key (or leave blank to use an existing key):",
+				)
+			).trim();
+			if (provider !== "tavily" && !apiKey && !this.hasWebsearchApiKey(provider)) {
+				throw new Error(`${name} requires an API key`);
+			}
 			if (apiKey) this.session.modelRegistry.authStorage.set(authId, { type: "api_key", key: apiKey });
 			await this.activateWebsearchProvider(provider, name);
 		} catch (error) {

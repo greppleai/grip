@@ -173,9 +173,9 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 | `jobModel` | string or null | - | Trusted global or active-profile exact available `provider/model-id` for jobs; project settings cannot select it. Set via `/job model set --model <provider/model-id>` and clear via `/job model clear`. `null` in a profile disables an inherited global job model. Takes precedence over `GRIP_DEFAULT_JOB_MODEL`, then the parent model; applies to the next job. |
 | `imageModel` | string or null | `gpt-image-2` | Codex image-generation model ID. Set with `/image <model-id>`; `/image clear` restores the default, including in a profile. Project settings are ignored. Model availability is determined by Codex at request time. |
 | `tools` | object | `{}` | Per-tool configuration keyed by tool name |
-| `tools.websearch.provider` | string | `"duckduckgo"` | Web search provider: `"duckduckgo"`, `"brave"`, or `"firecrawl"` |
-| `tools.websearch.apiKey` | string | - | Provider API key. Brave env fallback: `GRIP_WEBSEARCH_BRAVE_API_KEY` or `BRAVE_SEARCH_API_KEY`. Firecrawl env fallback: `GRIP_WEBSEARCH_FIRECRAWL_API_KEY` or `FIRECRAWL_API_KEY` |
-| `tools.websearch.baseUrl` | string | Provider default API URL | Override the Brave or Firecrawl endpoint for compatible/proxy APIs |
+| `tools.websearch.provider` | string | `"tavily"` | Web search provider: `"tavily"`, `"duckduckgo"`, `"brave"`, or `"firecrawl"`. If unset, existing Brave or Firecrawl environment credentials select that provider; otherwise Tavily is used. An explicit provider always takes precedence. |
+| `tools.websearch.apiKey` | string | - | Provider API key. Tavily env fallback: `GRIP_WEBSEARCH_TAVILY_API_KEY` or `TAVILY_API_KEY`; Brave: `GRIP_WEBSEARCH_BRAVE_API_KEY` or `BRAVE_SEARCH_API_KEY`; Firecrawl: `GRIP_WEBSEARCH_FIRECRAWL_API_KEY` or `FIRECRAWL_API_KEY` |
+| `tools.websearch.baseUrl` | string | Provider default API URL | Override the Tavily `/search` endpoint directly, or the Brave or Firecrawl endpoint for compatible/proxy APIs. Tavily env fallback: `GRIP_WEBSEARCH_TAVILY_BASE_URL` |
 
 ```json
 {
@@ -188,9 +188,11 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 }
 ```
 
-Global and project `tools` settings merge per tool name, so a project can override `tools.websearch.baseUrl` while keeping a global `tools.websearch.apiKey`. Environment variables remain supported for `websearch`; explicit settings take precedence over environment variables. Firecrawl uses `POST /v2/search` with web results only.
+Global and project `tools` settings merge per tool name, so a project can override `tools.websearch.baseUrl` while keeping a global `tools.websearch.apiKey`. Environment variables remain supported for `websearch`; explicit settings take precedence over environment variables. Tavily is the default and works without an API key: requests use `POST /search` with `X-Tavily-Access-Mode: keyless` when no key is configured, and bearer authentication when keyed. Anonymous access is rate limited. Search failures are reported as errors and must not be interpreted as proof that no results exist. Firecrawl uses `POST /v2/search` with web results only.
 
-In interactive mode, run `/websearch login` to select DuckDuckGo (no key), Brave Search, or Firecrawl. Brave and Firecrawl keys entered there are stored separately per engine in `~/.grip/agent/auth.json` (not in `settings.json`); selecting an engine again lets you keep its saved key by submitting an empty prompt, or replace it by entering a new key. The selected provider is saved globally under `tools.websearch.provider` and takes effect on the next tool call. `/logout` can remove saved web search credentials. Keys saved by this command take precedence over `tools.websearch.apiKey`; provider-specific environment variables remain fallbacks.
+In interactive mode, run `/websearch login` to select Tavily (no key required), DuckDuckGo (no key), Brave Search, or Firecrawl. For Tavily, submitting a blank key keeps keyless access; if a key was previously saved, a blank prompt preserves it. Brave and Firecrawl keys entered there are stored separately per engine in `~/.grip/agent/auth.json` (not in `settings.json`); selecting an engine again lets you keep its saved key by submitting an empty prompt, or replace it by entering a new key. The selected provider is saved globally under `tools.websearch.provider` and takes effect on the next tool call. `/logout` can remove saved web search credentials, including a saved Tavily key. Keys saved by this command take precedence over `tools.websearch.apiKey`; provider-specific environment variables remain fallbacks.
+
+DuckDuckGo remains available as an explicit provider, but its Instant Answer API is not full web search. Empty replies reflect its limited coverage and do not prove that no relevant search results exist.
 
 ### Lima Sandbox
 
