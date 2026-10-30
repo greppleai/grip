@@ -192,6 +192,45 @@ describe("official download trust and limits", () => {
 });
 
 describe("official transactional installation", () => {
+	it.each(["remove-journaled", "removed-membership"])(
+		"recovers interrupted profile removal at %s without deactivating another profile's code",
+		async (phase) => {
+			let interrupt = false;
+			const server = await harness({
+				onProgress: async ({ phase: current }) => {
+					if (interrupt && current === phase) throw new Error("crash");
+				},
+			});
+			await server.installer.install("fixture");
+			server.settings.setModelProfile("work", []);
+			server.settings.useProfile("work");
+			interrupt = true;
+			await expect(server.installer.remove("fixture")).rejects.toThrow();
+			interrupt = false;
+			expect((await server.installer.active("fixture"))?.installed.version).toBe("1.0.0");
+			expect(server.settings.getGlobalSettings().packages).toContain("official:fixture");
+			expect(await server.settings.officialPackageMembership("fixture", null)).toBe(phase === "remove-journaled");
+		},
+	);
+
+	it("never selects incompatible or corrupt shared code for another profile", async () => {
+		const server = await harness();
+		const installed = await server.installer.install("fixture");
+		server.settings.setModelProfile("work", []);
+		server.settings.useProfile("work");
+		server.settings.setPackages([]);
+		const incompatible = new OfficialExtensionInstaller(
+			{ agentDir: server.agentDir, settingsManager: server.settings, gripVersion: "2.0.0" },
+			{ transport: new OfficialTransport(server.fetcher) },
+		);
+		await expect(incompatible.install("fixture", { offline: true })).rejects.toMatchObject({ code: "incompatible" });
+		expect(server.settings.getPackages()).toEqual([]);
+		await writeFile(join(installed.path, "src/entry.js"), "corrupt");
+		await expect(server.installer.install("fixture", { offline: true })).rejects.toMatchObject({ code: "integrity" });
+		expect(server.settings.getPackages()).toEqual([]);
+		expect(server.settings.getGlobalSettings().packages).toContain("official:fixture");
+	});
+
 	it("installs without executing factories, is idempotent, and retains immutable code on uninstall", async () => {
 		const server = await harness();
 		const installed = await server.installer.install("fixture");
@@ -523,6 +562,43 @@ describe("official transactional installation", () => {
 });
 
 describe("conflict-safe official desired membership", () => {
+	it("re-reads profile membership under lock and preserves other profiles and settings", async () => {
+		const root = await temporary();
+		await writeFile(
+			join(root, "settings.json"),
+			JSON.stringify({
+				packages: ["official:fixture"],
+				profiles: { work: { packages: [], theme: "dark" }, personal: { packages: [] } },
+			}),
+		);
+		const first = SettingsManager.create(root, root);
+		const second = SettingsManager.create(root, root);
+		first.useProfile("work");
+		second.useProfile("work");
+		await first.officialPackageMembership("fixture", true);
+		await second.officialPackageMembership("other", true);
+		first.useProfile("personal");
+		await first.officialPackageMembership("third", true);
+		const fresh = SettingsManager.create(root, root);
+		expect(fresh.getGlobalSettings().packages).toEqual(["official:fixture"]);
+		expect(fresh.getProfile("work")).toEqual({ packages: ["official:fixture", "official:other"], theme: "dark" });
+		expect(fresh.getProfile("personal")?.packages).toEqual(["official:third"]);
+		await second.officialPackageMembership("fixture", false);
+		expect(await second.officialPackageMembership("fixture", null)).toBe(false);
+		expect(await second.hasOfficialPackageReferences("fixture")).toBe(true);
+	});
+
+	it("captures the profile before awaiting queued writes", async () => {
+		const settings = SettingsManager.inMemory({ profiles: { work: { packages: [] }, personal: { packages: [] } } });
+		settings.useProfile("work");
+		const pending = settings.officialPackageMembership("fixture", true);
+		settings.useProfile("personal");
+		await pending;
+		expect(settings.getPackages()).toEqual([]);
+		expect(settings.getProfile("work")?.packages).toEqual(["official:fixture"]);
+		expect(await settings.hasOfficialPackageReferences("fixture")).toBe(true);
+	});
+
 	it("re-reads persisted packages across stale managers, preserves filters and unrelated settings", async () => {
 		const root = await temporary();
 		const first = SettingsManager.create(root, root);

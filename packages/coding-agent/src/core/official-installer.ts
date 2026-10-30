@@ -345,7 +345,7 @@ export class OfficialExtensionInstaller {
 
 	private async recover(context: InstallationContext): Promise<OfficialInstallationState> {
 		const state = await this.state(context);
-		const desired = await this.options.settingsManager.officialPackageMembership(context.id, null);
+		const desired = await this.options.settingsManager.hasOfficialPackageReferences(context.id);
 		if (state.pending) {
 			const pending = state.pending;
 			if (pending.operation === "install" && pending.target && desired) {
@@ -372,12 +372,18 @@ export class OfficialExtensionInstaller {
 		return state;
 	}
 
+	private compatibleInstallation(id: string, installation: OfficialInstallation | null): OfficialInstallation | null {
+		return installation && selectOfficialRelease({ id, releases: [installation.release] }, this.options.gripVersion)
+			? installation
+			: null;
+	}
+
 	async active(id: string, options: Partial<OfficialOperationOptions> = {}): Promise<OfficialInstallation | null> {
 		return this.withInstallation(id, this.operationOptions(options), async (context) => {
 			const state = await this.recover(context);
 			if (!state.active) return null;
 			const installation = await this.version(context, state.active);
-			if (!selectOfficialRelease({ id, releases: [installation.release] }, this.options.gripVersion)) {
+			if (!this.compatibleInstallation(id, installation)) {
 				throw new OfficialExtensionError(
 					"incompatible",
 					`Installed official extension ${id} does not support Grip ${this.options.gripVersion}`,
@@ -389,9 +395,20 @@ export class OfficialExtensionInstaller {
 
 	async install(id: string, options: Partial<OfficialOperationOptions> = {}): Promise<OfficialInstallation> {
 		const operation = this.operationOptions(options);
-		return this.withInstallation(id, operation, async (context) =>
-			this.installLocked(context, await this.recover(context), false, operation, null),
-		);
+		return this.withInstallation(id, operation, async (context) => {
+			const state = await this.recover(context);
+			if (state.active && !(await this.options.settingsManager.officialPackageMembership(id, null))) {
+				const installed = this.compatibleInstallation(id, await this.version(context, state.active));
+				if (installed) {
+					// Reuse verified shared code when selecting it in another profile, including offline.
+					await this.options.settingsManager.officialPackageMembership(id, true);
+					await context.progress("membership");
+					context.checkLease();
+					return installed;
+				}
+			}
+			return this.installLocked(context, state, false, operation, null);
+		});
 	}
 
 	async update(id: string, options: Partial<OfficialOperationOptions> = {}): Promise<OfficialInstallation | null> {
@@ -537,7 +554,7 @@ export class OfficialExtensionInstaller {
 	): Promise<OfficialInstallation | null> {
 		return this.withInstallation(id, operation, async (context) => {
 			const state = await this.recover(context);
-			if (!state.active || !(await this.options.settingsManager.officialPackageMembership(id, null))) return null;
+			if (!state.active || !(await this.options.settingsManager.hasOfficialPackageReferences(id))) return null;
 			const previous = state.active.version;
 			const installed = await this.installLocked(context, state, true, operation, lookup);
 			return installed.installed.version === previous ? null : installed;
@@ -593,7 +610,8 @@ export class OfficialExtensionInstaller {
 		lookup: OfficialCatalogLookup | null,
 	): Promise<OfficialInstallation> {
 		const current = state.active ? await this.version(context, state.active) : null;
-		if (operation.offline && current) return current;
+		const compatibleCurrent = this.compatibleInstallation(context.id, current);
+		if (operation.offline && compatibleCurrent) return compatibleCurrent;
 		try {
 			const discovery = await (lookup ? lookup() : this.catalog(operation));
 			const entry = discovery.catalog.extensions.find((entry) => entry.id === context.id);
@@ -601,7 +619,7 @@ export class OfficialExtensionInstaller {
 				? selectOfficialRelease(entry, this.options.gripVersion, current?.installed.version ?? null)
 				: null;
 			if (!release) {
-				if (current) return current;
+				if (compatibleCurrent) return compatibleCurrent;
 				throw new OfficialExtensionError(
 					"incompatible",
 					"No compatible stable official extension release is available",
@@ -621,7 +639,7 @@ export class OfficialExtensionInstaller {
 			const installed = await this.stageVersion(context, state, release, bytes);
 			context.checkLease();
 			if (updateOnly) {
-				if (!(await this.options.settingsManager.officialPackageMembership(context.id, null)))
+				if (!(await this.options.settingsManager.hasOfficialPackageReferences(context.id)))
 					throw new OfficialExtensionError("removed", "Official extension was removed during update");
 			} else await this.options.settingsManager.officialPackageMembership(context.id, true);
 			await context.progress("membership");
@@ -677,7 +695,7 @@ export class OfficialExtensionInstaller {
 			context.checkLease();
 			await this.options.settingsManager.officialPackageMembership(id, false);
 			await context.progress("removed-membership");
-			state.active = null;
+			if (!(await this.options.settingsManager.hasOfficialPackageReferences(id))) state.active = null;
 			state.pending = null;
 			state.failure = null;
 			await this.saveState(context, state);
