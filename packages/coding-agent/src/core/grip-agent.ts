@@ -557,6 +557,7 @@ export class GripAgent {
 
 	private async createServices(cwd: string): Promise<GripAgentServices> {
 		const settingsManager = this.options.settingsManager ?? SettingsManager.create(cwd, this.agentDir);
+		if (this._services) settingsManager.inheritProfileSelection(this._services.settingsManager);
 		await this.refreshStartupModelCatalog();
 		const modelRegistry =
 			this.options.modelRegistry ?? ModelRegistry.create(this.authStorage, join(this.agentDir, "models.json"));
