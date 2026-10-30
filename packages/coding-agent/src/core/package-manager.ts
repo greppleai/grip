@@ -1009,7 +1009,11 @@ export class DefaultPackageManager implements PackageManager {
 			if (this.settingsManager.getLoadError("global")) throw new Error("Unreadable global settings");
 			const settings = this.settingsManager.getGlobalSettings();
 			const ids: string[] = [];
-			for (const pkg of settings.packages ?? []) {
+			const packages = [...(settings.packages ?? [])];
+			for (const name of Object.keys(settings.profiles ?? {})) {
+				packages.push(...(this.settingsManager.getProfile(name)?.packages ?? []));
+			}
+			for (const pkg of packages) {
 				try {
 					const source = parseOfficialSource(typeof pkg === "string" ? pkg : pkg.source);
 					if (source) ids.push(source.id);

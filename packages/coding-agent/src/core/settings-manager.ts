@@ -393,6 +393,47 @@ function mergeModifiedNestedSetting(
 	return merged;
 }
 
+function officialPackages(value: unknown): PackageSource[] {
+	const packages = value ?? [];
+	if (
+		!Array.isArray(packages) ||
+		!packages.every(
+			(entry) => typeof entry === "string" || (isMergeableObject(entry) && typeof entry.source === "string"),
+		)
+	)
+		throw new Error("Invalid official packages settings");
+	return packages;
+}
+
+function matchesOfficialPackage(entry: PackageSource, source: string): boolean {
+	return (typeof entry === "string" ? entry : entry.source) === source;
+}
+
+function updateOfficialMembership(
+	target: Record<string, unknown>,
+	inherited: PackageSource[],
+	source: string,
+	desired: boolean | null,
+): boolean {
+	const packages = officialPackages(target.packages ?? inherited);
+	const selected = packages.some((entry) => matchesOfficialPackage(entry, source));
+	if (desired === null || desired === selected) return false;
+	target.packages = desired
+		? [...packages, source]
+		: packages.filter((entry) => !matchesOfficialPackage(entry, source));
+	return true;
+}
+
+function hasOfficialProfileReferences(profiles: Record<string, unknown>, source: string): boolean {
+	let referenced = false;
+	for (const [name, value] of Object.entries(profiles)) {
+		if (!isValidModelProfileName(name) || !isMergeableObject(value)) continue;
+		// Validate every list even after finding a reference; malformed settings cannot grant removal.
+		if (officialPackages(value.packages).some((entry) => matchesOfficialPackage(entry, source))) referenced = true;
+	}
+	return referenced;
+}
+
 export type SettingsScope = "global" | "project";
 
 export interface SettingsStorage {
@@ -403,6 +444,16 @@ export interface SettingsStorage {
 export interface SettingsError {
 	scope: SettingsScope;
 	error: Error;
+}
+
+interface OfficialMembershipSettings {
+	packages: PackageSource[];
+	profile: Record<string, unknown> | null;
+}
+
+interface OfficialPackageSelection {
+	selected: boolean;
+	referenced: boolean;
 }
 
 interface SettingsLoadResult {
@@ -1366,37 +1417,52 @@ export class SettingsManager {
 		return [...(this.settings.packages ?? [])];
 	}
 
-	/** Read (null) or commit one official membership under the storage lock; failures reject. */
+	/** Read (null) or commit membership in the active profile, or default settings without a profile. */
 	officialPackageMembership(id: string, desired: boolean | null): Promise<boolean> {
+		return this.officialPackageSelection(id, desired).then((selection) => selection.selected);
+	}
+
+	/** Shared installations remain available while default settings or any profile selects them. */
+	hasOfficialPackageReferences(id: string): Promise<boolean> {
+		return this.officialPackageSelection(id, null).then((selection) => selection.referenced);
+	}
+
+	private officialPackageSelection(id: string, desired: boolean | null): Promise<OfficialPackageSelection> {
 		const source = `official:${validateOfficialId(id)}`;
-		let present = false;
+		// Capture ownership before waiting for queued writes; a later profile switch cannot retarget the commit.
+		const name = this.getActiveProfile();
+		let selected = false;
+		let referenced = false;
 		const operation = this.writeQueue.then(() => {
-			let packages: PackageSource[] = [];
+			const persisted: OfficialMembershipSettings = { packages: [], profile: null };
 			this.storage.withLock("global", (current) => {
 				const settings = current === undefined ? {} : officialObject(JSON.parse(current), "global settings");
-				const raw = settings.packages ?? [];
-				if (
-					!Array.isArray(raw) ||
-					!raw.every(
-						(entry) =>
-							typeof entry === "string" || (isMergeableObject(entry) && typeof entry.source === "string"),
-					)
-				)
-					throw new Error("Invalid global packages settings");
-				packages = raw as PackageSource[];
-				const matches = (entry: PackageSource) => (typeof entry === "string" ? entry : entry.source) === source;
-				present = packages.some(matches);
-				if (desired === null || desired === present) return undefined;
-				packages = desired ? [...packages, source] : packages.filter((entry) => !matches(entry));
-				settings.packages = packages;
-				present = desired;
-				return JSON.stringify(settings, null, 2);
+				persisted.packages = officialPackages(settings.packages);
+				const profiles = settings.profiles === undefined ? {} : officialObject(settings.profiles, "profiles");
+				if (name) persisted.profile = officialObject(profiles[name], `profile ${name}`);
+				const target = persisted.profile ?? settings;
+				const changed = updateOfficialMembership(target, persisted.packages, source, desired);
+				const packages = officialPackages(target.packages ?? persisted.packages);
+				selected = packages.some((entry) => matchesOfficialPackage(entry, source));
+				persisted.packages = officialPackages(settings.packages);
+				referenced =
+					hasOfficialProfileReferences(profiles, source) ||
+					persisted.packages.some((entry) => matchesOfficialPackage(entry, source));
+				return changed ? JSON.stringify(settings, null, 2) : undefined;
 			});
-			this.globalSettings.packages = structuredClone(packages);
+			this.globalSettings.packages = structuredClone(persisted.packages);
+			this.baseGlobalSettings.packages = structuredClone(persisted.packages);
+			if (name && persisted.profile) {
+				const currentProfile = this.globalSettings.profiles?.[name];
+				if (currentProfile) {
+					if (persisted.profile.packages === undefined) delete currentProfile.packages;
+					else currentProfile.packages = structuredClone(officialPackages(persisted.profile.packages));
+				}
+			}
 			this.recomputeSettings();
 		});
 		this.writeQueue = operation.catch((error) => this.recordError("global", error));
-		return operation.then(() => present);
+		return operation.then(() => ({ selected, referenced }));
 	}
 
 	setPackages(packages: PackageSource[]): void {

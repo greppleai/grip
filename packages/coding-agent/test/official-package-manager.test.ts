@@ -295,6 +295,93 @@ describe("official mutation controls through the canonical manager", () => {
 });
 
 describe("official packages through the canonical manager", () => {
+	it("selects a shared installation in another profile offline without downloading or changing default membership", async () => {
+		const h = await harness("export default () => {};");
+		await h.manager.installAndPersist("official:fixture");
+		const path = await h.manager.getInstalledPath("official:fixture", "user");
+		h.settings.setModelProfile("work", []);
+		h.settings.useProfile("work");
+		h.settings.setPackages([]);
+		const loader = new DefaultResourceLoader({ cwd: h.agentDir, agentDir: h.agentDir, settingsManager: h.settings });
+		await loader.reload();
+		expect(loader.getExtensions().extensions).toEqual([]);
+		const requests = h.fetcher.mock.calls.length;
+		await h.manager.installAndPersist("official:fixture", { official: { offline: true } });
+		expect(h.settings.getProfile("work")?.packages).toEqual(["official:fixture"]);
+		expect(h.settings.getGlobalSettings().packages).toEqual(["official:fixture"]);
+		expect(await h.manager.getInstalledPath("official:fixture", "user")).toBe(path);
+		await loader.reload();
+		expect(loader.getExtensions().extensions).toHaveLength(1);
+		expect((await loader.getExtensionInventory())[0]).toMatchObject({ configured: true, status: "loaded" });
+		await h.manager.removeAndPersist("official:fixture");
+		await loader.reload();
+		expect(loader.getExtensions().extensions).toEqual([]);
+		expect(h.settings.getProfile("work")?.packages).toEqual([]);
+		expect(h.settings.getGlobalSettings().packages).toEqual(["official:fixture"]);
+		expect(await h.manager.getInstalledPath("official:fixture", "user")).toBe(path);
+		expect(h.fetcher).toHaveBeenCalledTimes(requests);
+	});
+
+	it("keeps profile-only installations active until their last selection is removed", async () => {
+		const h = await harness();
+		h.settings.setModelProfile("work", []);
+		h.settings.setModelProfile("personal", []);
+		h.settings.useProfile("work");
+		await h.manager.installAndPersist("official:fixture");
+		const path = await h.manager.getInstalledPath("official:fixture", "user");
+		expect(h.settings.getGlobalSettings().packages ?? []).toEqual([]);
+		h.settings.useProfile("personal");
+		const requests = h.fetcher.mock.calls.length;
+		await h.manager.installAndPersist("official:fixture", { official: { offline: true } });
+		expect(h.fetcher).toHaveBeenCalledTimes(requests);
+		expect(h.settings.getProfile("personal")?.packages).toEqual(["official:fixture"]);
+		h.settings.useProfile("work");
+		await h.manager.removeAndPersist("official:fixture");
+		expect(await h.manager.getInstalledPath("official:fixture", "user")).toBe(path);
+		h.settings.useProfile("personal");
+		expect((await h.manager.listConfiguredPackages())[0]).toMatchObject({ installedPath: path, version: "1.0.0" });
+		await h.manager.removeAndPersist("official:fixture");
+		expect(await h.manager.getInstalledPath("official:fixture", "user")).toBeUndefined();
+		expect(await readFile(join(path!, "entry.js"), "utf8")).toContain("Must not execute");
+	});
+
+	it("removes an inherited selection only from the active profile", async () => {
+		const h = await harness();
+		h.settings.setModelProfile("work", []);
+		await h.manager.installAndPersist("official:fixture");
+		h.settings.useProfile("work");
+		expect(h.settings.getPackages()).toEqual(["official:fixture"]);
+		await h.manager.removeAndPersist("official:fixture");
+		expect(h.settings.getPackages()).toEqual([]);
+		expect(h.settings.getGlobalSettings().packages).toEqual(["official:fixture"]);
+		expect(await h.manager.getInstalledPath("official:fixture", "user")).toBeTruthy();
+	});
+
+	it("updates installed official selections found only in profiles during startup", async () => {
+		const h = await harness();
+		h.settings.setModelProfile("work", []);
+		h.settings.useProfile("work");
+		await h.manager.installAndPersist("official:fixture");
+		h.publish("1.1.0");
+		const cachePath = join(h.agentDir, "official/catalog.json");
+		const cached = JSON.parse(await readFile(cachePath, "utf8"));
+		cached.fetchedAt = 0;
+		await writeFile(cachePath, JSON.stringify(cached));
+		const defaultSettings = SettingsManager.inMemory(h.settings.getGlobalSettings());
+		const manager = new DefaultPackageManager({
+			cwd: h.agentDir,
+			agentDir: h.agentDir,
+			settingsManager: defaultSettings,
+			officialDependencies: { transport: new OfficialTransport(h.fetcher) },
+		});
+		expect(await manager.startupOfficialUpdates(false)).toEqual({
+			updated: [{ id: "fixture", version: "1.1.0" }],
+			diagnostics: [],
+		});
+		expect(defaultSettings.getPackages()).toEqual([]);
+		expect(defaultSettings.getProfile("work")?.packages).toEqual(["official:fixture"]);
+	});
+
 	it("installs, lists, resolves, updates and removes without executing bundled code", async () => {
 		const h = await harness();
 		const events: ProgressEvent[] = [];
