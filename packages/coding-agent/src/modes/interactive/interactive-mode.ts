@@ -396,9 +396,9 @@ interface ResourceDisplayItem {
 	sourceInfo?: SourceInfo;
 }
 
-interface CompactResourcePath {
+interface CompactExtensionLabelCandidates {
 	path: string;
-	segments: string[];
+	labels: string[];
 }
 
 type ResourceScope = "user" | "project" | "path";
@@ -1674,6 +1674,8 @@ export class InteractiveMode {
 
 	private getCompactPackageSourceLabel(sourceInfo?: SourceInfo): string {
 		const source = sourceInfo?.source ?? "";
+		if (sourceInfo?.official) return sourceInfo.official.id;
+		if (source.startsWith("official:")) return source.slice("official:".length) || source;
 		if (source.startsWith("npm:")) {
 			return source.slice("npm:".length) || source;
 		}
@@ -1686,25 +1688,30 @@ export class InteractiveMode {
 		return source;
 	}
 
+	private getCompactPackageExtensionPath(resourcePath: string, sourceInfo?: SourceInfo): string {
+		const normalizedPath = resourcePath.replace(/\\/g, "/");
+		const baseDir = sourceInfo?.baseDir?.replace(/\\/g, "/").replace(/\/+$/, "");
+		const shortPath =
+			baseDir && normalizedPath.startsWith(`${baseDir}/`)
+				? normalizedPath.slice(baseDir.length + 1)
+				: this.getShortPath(normalizedPath, sourceInfo).replace(/\\/g, "/");
+		return shortPath.startsWith("extensions/") ? shortPath.slice("extensions/".length) : shortPath;
+	}
+
 	private getCompactExtensionLabel(resourcePath: string, sourceInfo?: SourceInfo): string {
-		if (!this.isPackageSource(sourceInfo)) {
-			return this.getCompactPathLabel(resourcePath, sourceInfo);
-		}
-
 		const sourceLabel = this.getCompactPackageSourceLabel(sourceInfo);
-		if (!sourceLabel) {
+		if (sourceInfo?.official || sourceInfo?.source.startsWith("official:")) return sourceLabel;
+		if (!this.isPackageSource(sourceInfo) || !sourceLabel) {
 			return this.getCompactPathLabel(resourcePath, sourceInfo);
 		}
 
-		const shortPath = this.getShortPath(resourcePath, sourceInfo).replace(/\\/g, "/");
-		const packagePath = shortPath.startsWith("extensions/") ? shortPath.slice("extensions/".length) : shortPath;
+		const packagePath = this.getCompactPackageExtensionPath(resourcePath, sourceInfo);
 		const parsedPath = path.posix.parse(packagePath);
-
 		if (parsedPath.name === "index") {
 			return !parsedPath.dir || parsedPath.dir === "." ? sourceLabel : `${sourceLabel}:${parsedPath.dir}`;
 		}
 
-		return `${sourceLabel}:${packagePath}`;
+		return `${sourceLabel}:${packagePath.replace(/\.[tj]s$/, "")}`;
 	}
 
 	private getCompactDisplayPathSegments(resourcePath: string): string[] {
@@ -1714,54 +1721,64 @@ export class InteractiveMode {
 			.filter((segment) => segment.length > 0 && segment !== "~");
 	}
 
-	private getCompactNonPackageExtensionLabel(allPaths: CompactResourcePath[]): Map<string, string> {
-		const suffixCounts = new Map<string, number>();
+	private getCompactExtensionLabelCandidates(extension: ResourceDisplayItem): CompactExtensionLabelCandidates {
+		const { sourceInfo, path: resourcePath } = extension;
+		const labels: string[] = [];
+		if (this.isPackageSource(sourceInfo) || sourceInfo?.official || sourceInfo?.source.startsWith("official:")) {
+			const sourceLabel = this.getCompactPackageSourceLabel(sourceInfo);
+			const packagePath = this.getCompactPackageExtensionPath(resourcePath, sourceInfo);
+			const normalizedPath = packagePath.replace(/(?:^|\/)index\.[tj]s$/, "").replace(/\.[tj]s$/, "");
+			labels.push(
+				this.getCompactExtensionLabel(resourcePath, sourceInfo),
+				sourceInfo?.source ?? sourceLabel,
+				`${sourceLabel}:${normalizedPath || packagePath}`,
+				`${sourceInfo?.source}:${packagePath}`,
+			);
+		} else {
+			const originalSegments = this.getCompactDisplayPathSegments(resourcePath);
+			const segments = [...originalSegments];
+			const lastSegment = segments.at(-1) ?? "";
+			if (segments.length > 1 && /^index\.[tj]s$/.test(lastSegment)) {
+				segments.pop();
+			} else if (segments.length > 0) {
+				segments[segments.length - 1] = lastSegment.replace(/\.[tj]s$/, "");
+			}
+			for (let count = 1; count <= segments.length; count += 1) {
+				labels.push(segments.slice(-count).join("/"));
+			}
+			// Retain filenames only when normalization loses the distinguishing suffix.
+			for (let count = 1; count <= originalSegments.length; count += 1) {
+				labels.push(originalSegments.slice(-count).join("/"));
+			}
+		}
+		// Original filenames distinguish resources that normalize to the same full label.
+		labels.push(this.formatDisplayPath(resourcePath).replace(/\\/g, "/"));
+		return { path: resourcePath, labels: [...new Set(labels)] };
+	}
+
+	private getUniqueCompactExtensionLabels(allPaths: CompactExtensionLabelCandidates[]): Map<string, string> {
+		const labelCounts = new Map<string, number>();
 		for (const item of allPaths) {
-			for (let segmentCount = 1; segmentCount <= item.segments.length; segmentCount += 1) {
-				const suffix = item.segments.slice(-segmentCount).join("/");
-				suffixCounts.set(suffix, (suffixCounts.get(suffix) ?? 0) + 1);
+			for (const label of item.labels) {
+				labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
 			}
 		}
 
 		const labels = new Map<string, string>();
 		for (const item of allPaths) {
-			if (labels.has(item.path)) continue;
-			let label = item.segments.join("/");
-			for (let segmentCount = 1; segmentCount <= item.segments.length; segmentCount += 1) {
-				const suffix = item.segments.slice(-segmentCount).join("/");
-				if (suffixCounts.get(suffix) !== 1) continue;
-				label = suffix;
-				break;
-			}
-			labels.set(item.path, label || this.getCompactPathLabel(item.path));
+			const label = item.labels.find((candidate) => labelCounts.get(candidate) === 1);
+			labels.set(item.path, label ?? this.formatDisplayPath(item.path).replace(/\\/g, "/"));
 		}
 		return labels;
 	}
 
 	private getCompactExtensionLabels(extensions: ResourceDisplayItem[]): string[] {
-		const nonPackageExtensions = extensions
-			.map((extension) => {
-				const segments = this.getCompactDisplayPathSegments(extension.path);
-				const lastSegment = segments[segments.length - 1];
-				if (segments.length > 1 && (lastSegment === "index.ts" || lastSegment === "index.ts")) {
-					segments.pop();
-				}
-				return {
-					path: extension.path,
-					sourceInfo: extension.sourceInfo,
-					segments,
-				};
-			})
-			.filter((extension) => !this.isPackageSource(extension.sourceInfo));
-
-		const nonPackageLabels = this.getCompactNonPackageExtensionLabel(nonPackageExtensions);
-		return extensions.map((extension) => {
-			if (this.isPackageSource(extension.sourceInfo)) {
-				return this.getCompactExtensionLabel(extension.path, extension.sourceInfo);
-			}
-
-			return nonPackageLabels.get(extension.path) ?? this.getCompactPathLabel(extension.path, extension.sourceInfo);
-		});
+		const uniqueExtensions = new Map(extensions.map((extension) => [extension.path, extension]));
+		const candidates = Array.from(uniqueExtensions.values(), (extension) =>
+			this.getCompactExtensionLabelCandidates(extension),
+		);
+		const labels = this.getUniqueCompactExtensionLabels(candidates);
+		return extensions.map((extension) => labels.get(extension.path) ?? this.getCompactPathLabel(extension.path));
 	}
 
 	private getDisplaySourceInfo(sourceInfo?: SourceInfo): ResourceSourceDisplayInfo {

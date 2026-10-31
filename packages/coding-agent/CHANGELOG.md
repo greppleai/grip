@@ -80,6 +80,10 @@ All notable changes to Grip are documented in this file.
 
 - Added Planner as an official extension source.
 
+### Fixed
+
+- Show readable, collision-safe startup extension names for JavaScript/TypeScript entry points and official packages, including Planner, while preserving detailed paths.
+
 ## [0.2.1](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.0...@greppleai/grip-v0.2.1) (2026-10-28)
 
 
