@@ -351,13 +351,16 @@ describe("InteractiveMode.showLoadedResources", () => {
 				(InteractiveMode as any).prototype.getCompactExtensionLabel.call(fakeThis, p, sourceInfo),
 			getCompactDisplayPathSegments: (p: string) =>
 				(InteractiveMode as any).prototype.getCompactDisplayPathSegments.call(fakeThis, p),
-			getCompactNonPackageExtensionLabel: (InteractiveMode as any).prototype.getCompactNonPackageExtensionLabel,
+			getCompactPackageExtensionPath: (InteractiveMode as any).prototype.getCompactPackageExtensionPath,
+			getCompactExtensionLabelCandidates: (InteractiveMode as any).prototype.getCompactExtensionLabelCandidates,
+			getUniqueCompactExtensionLabels: (InteractiveMode as any).prototype.getUniqueCompactExtensionLabels,
 			getCompactExtensionLabels: (extensions: ExtensionFixture[]) =>
 				(InteractiveMode as any).prototype.getCompactExtensionLabels.call(fakeThis, extensions),
 			formatDiagnostics: () => "diagnostics",
 			getBuiltInCommandConflictDiagnostics: () => [],
 		};
 		const loadedResourceMethodNames = [
+			"showLoadedResources",
 			"getLoadedResourceSnapshot",
 			"renderLoadedResourceListing",
 			"renderContextFilesSection",
@@ -393,6 +396,18 @@ describe("InteractiveMode.showLoadedResources", () => {
 			scope: options.scope,
 			origin: options.origin,
 			baseDir: options.baseDir,
+		};
+	}
+
+	function createPackagedExtension(filePath: string, source: string, baseDir: string): ExtensionFixture {
+		return {
+			path: filePath,
+			sourceInfo: createSourceInfo(filePath, {
+				source,
+				scope: "user",
+				origin: "package",
+				baseDir,
+			}),
 		};
 	}
 
@@ -533,6 +548,166 @@ describe("InteractiveMode.showLoadedResources", () => {
 		expect(output).not.toContain("commit");
 	});
 
+	test.each(["extensions/index.js", "dist/extensions/index.js"])(
+		"uses official provenance for the planner entry at %s",
+		(entry) => {
+			const baseDir = "/fixtures/official/planner/versions/1.0.0-hash";
+			const resourcePath = `${baseDir}/${entry}`;
+			const extensions: ExtensionFixture[] = [
+				{ path: "/fixtures/extensions/cursorless-software-cursor/index.js" },
+				{
+					path: resourcePath,
+					sourceInfo: {
+						path: resourcePath,
+						source: "official:planner",
+						scope: "user",
+						origin: "package",
+						baseDir,
+						official: { id: "planner", version: "1.0.0" },
+					},
+				},
+				{ path: "/fixtures/extensions/intentional-compaction.ts" },
+				{ path: "/fixtures/extensions/task-time.js" },
+			];
+			const fakeThis = createShowLoadedResourcesThis({ quietStartup: false, extensions });
+			expect(fakeThis.getCompactExtensionLabels(extensions)).toEqual([
+				"cursorless-software-cursor",
+				"planner",
+				"intentional-compaction",
+				"task-time",
+			]);
+			fakeThis.showLoadedResources({ force: false });
+			// Rendering retains its existing alphabetical sort; helper output follows resource order.
+			expect(normalizeRenderedOutput(fakeThis.chatContainer)).toBe(
+				"[Extensions]\n  cursorless-software-cursor, intentional-compaction, planner, task-time",
+			);
+
+			const expanded = createShowLoadedResourcesThis({
+				quietStartup: false,
+				toolOutputExpanded: true,
+				useRealScopeGroups: true,
+				extensions,
+			});
+			expanded.showLoadedResources({ force: false });
+			const detailedOutput = normalizeRenderedOutput(expanded.chatContainer);
+			expect(detailedOutput).toContain(resourcePath.replace(/\/index\.js$/, ""));
+			expect(detailedOutput).toContain("/fixtures/extensions/cursorless-software-cursor");
+			expect(detailedOutput).toContain("/fixtures/extensions/intentional-compaction.ts");
+			expect(detailedOutput).toContain("/fixtures/extensions/task-time.js");
+		},
+	);
+
+	test.each([
+		{
+			paths: ["/fixtures/alpha/tools/index.ts", "/fixtures/beta/tools/index.js"],
+			expected: ["alpha/tools", "beta/tools"],
+		},
+		{
+			paths: ["/fixtures/extensions/tool.ts", "/fixtures/extensions/tool.js"],
+			expected: ["tool.ts", "tool.js"],
+		},
+		{
+			paths: ["C:\\fixtures\\alpha\\tools\\index.js", "C:\\fixtures\\beta\\tools\\index.ts"],
+			expected: ["alpha/tools", "beta/tools"],
+		},
+	])("disambiguates normalized local labels for $paths", ({ paths, expected }) => {
+		const extensions = paths.map((resourcePath) => ({ path: resourcePath }));
+		const fakeThis = createShowLoadedResourcesThis({ quietStartup: false, extensions });
+		expect(fakeThis.getCompactExtensionLabels(extensions)).toEqual(expected);
+		expect(fakeThis.getCompactExtensionLabels([...extensions].reverse())).toEqual([...expected].reverse());
+	});
+
+	test.each([
+		{
+			name: "package/local collision",
+			extensions: [
+				{ path: "/fixtures/local/tool/index.js" },
+				createPackagedExtension("/fixtures/npm/tool/extensions/index.js", "npm:tool", "/fixtures/npm/tool"),
+			],
+			expected: ["local/tool", "npm:tool"],
+		},
+		{
+			name: "official/local collision",
+			extensions: [
+				{ path: "/fixtures/local/planner.ts" },
+				createPackagedExtension("/fixtures/official/extensions/index.js", "official:planner", "/fixtures/official"),
+			],
+			expected: ["local/planner", "official:planner"],
+		},
+		{
+			name: "scoped npm multi-entry package",
+			extensions: [
+				createPackagedExtension("/fixtures/npm/extensions/index.js", "npm:@scope/tool", "/fixtures/npm"),
+				createPackagedExtension("/fixtures/npm/extensions/alpha/index.ts", "npm:@scope/tool", "/fixtures/npm"),
+				createPackagedExtension("/fixtures/npm/extensions/beta.js", "npm:@scope/tool", "/fixtures/npm"),
+			],
+			expected: ["@scope/tool", "@scope/tool:alpha", "@scope/tool:beta"],
+		},
+		{
+			name: "same-stem packaged entry points",
+			extensions: [
+				createPackagedExtension("/fixtures/npm/extensions/tool.ts", "npm:@scope/tool", "/fixtures/npm"),
+				createPackagedExtension("/fixtures/npm/extensions/tool.js", "npm:@scope/tool", "/fixtures/npm"),
+			],
+			expected: ["npm:@scope/tool:tool.ts", "npm:@scope/tool:tool.js"],
+		},
+		{
+			name: "git multi-entry package",
+			extensions: [
+				createPackagedExtension("/fixtures/git/extensions/index.js", "git:github.com/owner/tool", "/fixtures/git"),
+				createPackagedExtension("/fixtures/git/extensions/extra.ts", "git:github.com/owner/tool", "/fixtures/git"),
+			],
+			expected: ["owner/tool", "owner/tool:extra"],
+		},
+		{
+			name: "official compiled multi-entry package",
+			extensions: [
+				createPackagedExtension("/fixtures/official/extensions/index.js", "official:planner", "/fixtures/official"),
+				createPackagedExtension(
+					"/fixtures/official/dist/extensions/index.js",
+					"official:planner",
+					"/fixtures/official",
+				),
+			],
+			expected: ["planner:index.js", "planner:dist/extensions"],
+		},
+		{
+			name: "same-stem official entries",
+			extensions: [
+				createPackagedExtension("/fixtures/official/extensions/tool.ts", "official:planner", "/fixtures/official"),
+				createPackagedExtension("/fixtures/official/extensions/tool.js", "official:planner", "/fixtures/official"),
+			],
+			expected: ["official:planner:tool.ts", "official:planner:tool.js"],
+		},
+		{
+			name: "Windows package-relative paths",
+			extensions: [
+				createPackagedExtension("C:\\fixtures\\npm\\extensions\\index.js", "npm:@scope/tool", "C:\\fixtures\\npm"),
+				createPackagedExtension("C:\\fixtures\\npm\\extensions\\extra.ts", "npm:@scope/tool", "C:\\fixtures\\npm"),
+			],
+			expected: ["@scope/tool", "@scope/tool:extra"],
+		},
+		{
+			name: "missing metadata does not infer official membership from a cache path",
+			extensions: [{ path: "/fixtures/official/planner/versions/hash/extensions/index.js" }],
+			expected: ["extensions"],
+		},
+	])("keeps $name distinguishable without changing resources", ({ extensions, expected }) => {
+		const original = structuredClone(extensions);
+		const fakeThis = createShowLoadedResourcesThis({ quietStartup: false, extensions });
+		expect(fakeThis.getCompactExtensionLabels(extensions)).toEqual(expected);
+		expect(fakeThis.getCompactExtensionLabels([...extensions].reverse())).toEqual([...expected].reverse());
+		expect(extensions).toEqual(original);
+	});
+
+	test("keeps repeated paths and empty lists stable", () => {
+		const fakeThis = createShowLoadedResourcesThis({ quietStartup: false });
+		expect(fakeThis.getCompactExtensionLabels([])).toEqual([]);
+		expect(
+			fakeThis.getCompactExtensionLabels([{ path: "/fixtures/tool/index.js" }, { path: "/fixtures/tool/index.js" }]),
+		).toEqual(["tool", "tool"]);
+	});
+
 	test("abbreviates extensions in compact listing", () => {
 		const fakeThis = createShowLoadedResourcesThis({
 			quietStartup: false,
@@ -545,7 +720,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 		const output = renderAll(fakeThis.chatContainer);
 		expect(output).toContain("[Extensions]");
-		expect(output).toContain("answer.ts, btw.ts");
+		expect(output).toContain("answer, btw");
 		expect(output).not.toContain("extensions/answer.ts");
 	});
 
@@ -562,7 +737,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 		expect(normalizeRenderedOutput(fakeThis.chatContainer)).toMatchInlineSnapshot(`
 "[Extensions]
-  @scope/pi-scoped, answer.ts, cli-extension.ts, HazAT/pi-interactive-subagents, HazAT/pi-interactive-subagents:subagents, local-index, pi-markdown-preview, user-index"`);
+  @scope/pi-scoped, answer, cli-extension, HazAT/pi-interactive-subagents, HazAT/pi-interactive-subagents:subagents, local-index, pi-markdown-preview, user-index"`);
 	});
 
 	test("adds more parent folders until local extension labels are unique", () => {
@@ -642,8 +817,8 @@ describe("InteractiveMode.showLoadedResources", () => {
 	test("strips index.js from local extension label, showing parent dir", () => {
 		const extensions: ExtensionFixture[] = [
 			{
-				path: "/tmp/extensions/plan-mode/index.ts",
-				sourceInfo: createSourceInfo("/tmp/extensions/plan-mode/index.ts", {
+				path: "/tmp/extensions/plan-mode/index.js",
+				sourceInfo: createSourceInfo("/tmp/extensions/plan-mode/index.js", {
 					source: "local",
 					scope: "project",
 					origin: "top-level",
@@ -701,7 +876,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 		expect(normalizeRenderedOutput(fakeThis.chatContainer)).toMatchInlineSnapshot(`
 "[Extensions]
-  plan-mode, webfetch.ts"`);
+  plan-mode, webfetch"`);
 	});
 
 	test("multiple index.ts with unique parent dirs need no disambiguation", () => {
@@ -803,7 +978,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 		expect(normalizeRenderedOutput(fakeThis.chatContainer)).toMatchInlineSnapshot(`
 "[Extensions]
-  main.ts"`);
+  main"`);
 	});
 
 	test("package extensions still strip index.ts correctly (regression guard)", () => {
