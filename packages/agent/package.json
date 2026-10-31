@@ -1,6 +1,6 @@
 {
 	"name": "@greppleai/grip-agent-core",
-	"version": "0.2.5",
+	"version": "0.2.6",
 	"description": "General-purpose agent with transport abstraction, state management, and attachment support",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -29,7 +29,7 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"dependencies": {
-		"@greppleai/grip-ai": "^0.2.5",
+		"@greppleai/grip-ai": "^0.2.6",
 		"ignore": "7.0.13",
 		"typebox": "1.4.3",
 		"yaml": "2.9.1"

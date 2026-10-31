@@ -2,6 +2,22 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.2.6](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.5...@greppleai/grip-v0.2.6) (2026-10-31)
+
+
+### Bug Fixes
+
+* **coding-agent:** extension-display-names - Clarify startup labels ([b7492ff](https://github.com/greppleai/grip/commit/b7492ffd339f74286d1c1581ad400c3f4d630374))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.2.5 to ^0.2.6
+    * @greppleai/grip-ai bumped from ^0.2.5 to ^0.2.6
+    * @greppleai/grip-tui bumped from ^0.2.5 to ^0.2.6
+
 ## [0.2.5](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.4...@greppleai/grip-v0.2.5) (2026-10-30)
 
 
