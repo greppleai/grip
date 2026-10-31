@@ -3,10 +3,13 @@ import { fauxAssistantMessage, fauxToolCall } from "@greppleai/grip-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../../src/core/agent-session.ts";
+import type { PackageManager } from "../../src/core/package-manager.ts";
+import { ExtensionManagerController } from "../../src/modes/interactive/extension-manager.ts";
 import {
 	ExtensionManagerReloadCoordinator,
 	type ExtensionManagerReloadStatus,
 } from "../../src/modes/interactive/extension-manager-reload.ts";
+import { GIT_EXTENSION_URL, gitExtensionReview } from "../fixtures/git-extension-review.ts";
 import { createHarness, type Harness, type HarnessOptions } from "./harness.ts";
 
 function gate(): PromiseWithResolvers<void> {
@@ -66,6 +69,51 @@ describe("extension manager reload coordination", () => {
 		expect(harness.session.extensionRunner).not.toBe(previous);
 		expect(statuses.map((status) => status.phase)).toEqual(["reloading", "applied"]);
 		expect(coordinator.reloadRequired).toBe(false);
+	});
+
+	it("routes a settled Git approval through host close/idle reconciliation without interrupting tools", async () => {
+		const started = gate();
+		const released = gate();
+		const { harness, coordinator, statuses, reload } = await setup({ tools: [blockedTool(started, released)] });
+		const review = gitExtensionReview("project");
+		const installPreparedGitExtension = vi.fn(async () => `${review.source}@${review.commit}`);
+		const manager = new ExtensionManagerController({
+			resourceLoader: harness.session.resourceLoader,
+			packageManager: {
+				getOfficialCatalog: vi.fn<PackageManager["getOfficialCatalog"]>(),
+				installAndPersist: vi.fn<PackageManager["installAndPersist"]>(),
+				removeAndPersist: vi.fn<PackageManager["removeAndPersist"]>(),
+				prepareGitExtension: vi.fn(async () => review),
+				installPreparedGitExtension,
+				discardGitExtension: vi.fn(),
+			},
+			onChange: () => {},
+		});
+		await manager.initialize();
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("hold", {}), { stopReason: "toolUse" }),
+			fauxAssistantMessage("finished"),
+		]);
+		const prompt = harness.session.prompt("hold while Git is installed");
+		await started.promise;
+		manager.openGitInput();
+		manager.requestGitPreparation(GIT_EXTENSION_URL);
+		await manager.prepareGit("project");
+		expect(installPreparedGitExtension).not.toHaveBeenCalled();
+		expect(await manager.approveGit()).toBe(true);
+		expect(manager.getState().notice).toContain("Activation is pending");
+		expect(await manager.dispose()).toBe(true);
+		// The component forwards this disposal flag to the unchanged interactive host.
+		const reconciliation = coordinator.request();
+		await tick();
+		expect(statuses.at(-1)?.phase).toBe("pending");
+		expect(reload).not.toHaveBeenCalled();
+		expect(harness.session.isIdle).toBe(false);
+		released.resolve();
+		await Promise.all([prompt, reconciliation]);
+		expect(reload).toHaveBeenCalledExactlyOnceWith(harness.session);
+		expect(statuses.at(-1)?.phase).toBe("applied");
+		expect(installPreparedGitExtension).toHaveBeenCalledExactlyOnceWith(review.id);
 	});
 
 	it("waits through tools, follow-up responses and settlement without aborting work", async () => {

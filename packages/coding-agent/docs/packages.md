@@ -19,6 +19,8 @@ Grip packages bundle extensions, skills, rules, prompt templates, and themes so 
 
 > **Security:** Grip packages run with full system access. Extensions execute arbitrary code, and skills can instruct the model to perform any action including running executables. Review source code before installing third-party packages.
 
+For interactive third-party extension installation, use `/extensions` → **Install from Git URL**. It accepts explicit HTTPS/SSH Git URLs, requires concrete `grip.extensions` file declarations, prepares without running npm/importing extensions, and presents a separate default-Cancel trust review. See [Git extension authoring and installation](git-extensions.md) for the exact manifest, URL, scope, pinning and recovery contract. The CLI commands below retain their existing npm/Git/local behavior and do not provide this prepare/review boundary.
+
 ```bash
 grip install npm:@foo/bar@1.0.0
 grip install git:github.com/user/repo@v1
@@ -79,6 +81,8 @@ Example:
 
 ### git
 
+These source forms describe CLI/settings support. The interactive [Git URL flow](git-extensions.md#install-and-review) is intentionally narrower: HTTPS/SSH URLs only, with an optional `git:` prefix and `@ref`; it saves the full reviewed commit.
+
 ```
 git:github.com/user/repo@v1
 git:git@github.com:user/repo@v1
@@ -120,6 +124,8 @@ Local paths point to files or directories on disk and are added to settings with
 ## Creating a Grip Package
 
 Add a `grip` manifest to `package.json` or use conventional directories. The `grip-package` keyword in this example is optional descriptive metadata; Grip does not require it for package discovery or provide a verified gallery.
+
+For **Install from Git URL**, use the [explicit extension-file manifest](git-extensions.md#minimal-author-repository) instead: the directory/glob declarations below and convention-only discovery do not satisfy that flow's recognition contract.
 
 ```json
 {

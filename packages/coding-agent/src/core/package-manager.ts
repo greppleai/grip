@@ -42,6 +42,11 @@ import { CONFIG_DIR_NAME, VERSION } from "../config.ts";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.ts";
 import { type GitSource, isSafeGitInstallPath, parseGitUrl } from "../utils/git.ts";
 import { canonicalizePath, isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
+import {
+	GitExtensionInstaller,
+	type GitExtensionPreparation,
+	type GitExtensionPrepareOptions,
+} from "./git-extension-installer.ts";
 import { type GripManifest, readGripManifest } from "./grip-manifest.ts";
 import {
 	assertOfficialScope,
@@ -152,6 +157,9 @@ export interface ExtensionSourceResolutionOptions extends PackageScopeOptions {
 }
 
 export interface PackageManager {
+	prepareGitExtension(source: string, options: GitExtensionPrepareOptions): Promise<GitExtensionPreparation>;
+	installPreparedGitExtension(id: string): Promise<string>;
+	discardGitExtension(id: string): void;
 	resolve(onMissing?: (source: string) => Promise<MissingSourceAction>): Promise<ResolvedPaths>;
 	install(source: string, options?: PackageMutationOptions): Promise<void>;
 	installAndPersist(source: string, options?: PackageMutationOptions): Promise<void>;
@@ -960,6 +968,7 @@ export class DefaultPackageManager implements PackageManager {
 	private globalNpmRootCommandKey: string | undefined;
 	private progressCallback: ProgressCallback | undefined;
 	private readonly officialInstaller: OfficialExtensionInstaller;
+	private readonly gitExtensionInstaller: GitExtensionInstaller;
 
 	constructor(options: PackageManagerOptions) {
 		this.cwd = resolvePath(options.cwd);
@@ -969,6 +978,52 @@ export class DefaultPackageManager implements PackageManager {
 			{ agentDir: this.agentDir, settingsManager: this.settingsManager, gripVersion: VERSION },
 			options.officialDependencies,
 		);
+		this.gitExtensionInstaller = new GitExtensionInstaller({
+			getTarget: (source, scope) => this.getGitInstallPath(source, scope),
+			getProfile: () => this.settingsManager.getActiveProfile() ?? null,
+			isOffline: isOfflineModeEnabled,
+			validateResources: (root) => this.validateManagedGitResourceInputs(root),
+			runGit: (args, cwd) =>
+				this.runCommandCapture("git", args, {
+					cwd,
+					timeoutMs: NETWORK_TIMEOUT_MS,
+					env: { GIT_TERMINAL_PROMPT: "0" },
+				}),
+			installDependencies: (root) => this.runNpmCommand(this.getGitDependencyInstallArgs(), { cwd: root }),
+			beforePublish: (scope) => {
+				const root = this.getGitInstallRoot(scope);
+				if (root) this.ensureGitIgnore(root, true);
+			},
+			persist: async (source, scope, profile) => {
+				await this.settingsManager.reload();
+				if ((this.settingsManager.getActiveProfile() ?? null) !== profile)
+					throw new Error("Active profile changed.");
+				const settingsScope = scope === "project" ? "project" : "global";
+				if (this.settingsManager.getLoadError(settingsScope)) throw new Error("Settings are unreadable.");
+				this.addSourceToSettings(source, { local: scope === "project" });
+				await this.settingsManager.flush();
+				// flush records rather than throws write failures. Read back persisted membership.
+				await this.settingsManager.reload();
+				if (this.settingsManager.getLoadError(settingsScope)) throw new Error("Settings could not be read back.");
+				const settings =
+					scope === "project" ? this.settingsManager.getProjectSettings() : this.settingsManager.getUserSettings();
+				if (!settings.packages?.some((pkg) => this.getPackageSourceString(pkg) === source)) {
+					throw new Error("Package selection was not persisted.");
+				}
+			},
+		});
+	}
+
+	prepareGitExtension(source: string, options: GitExtensionPrepareOptions): Promise<GitExtensionPreparation> {
+		return this.gitExtensionInstaller.prepare(source, options);
+	}
+
+	installPreparedGitExtension(id: string): Promise<string> {
+		return this.gitExtensionInstaller.install(id);
+	}
+
+	discardGitExtension(id: string): void {
+		this.gitExtensionInstaller.discard(id);
 	}
 
 	private officialOperationOptions(

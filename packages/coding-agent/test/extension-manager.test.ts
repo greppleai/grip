@@ -5,6 +5,7 @@ import type { OfficialOperationOptions } from "../src/core/official-installer.ts
 import { OfficialExtensionError } from "../src/core/official-transport.ts";
 import type { PackageManager } from "../src/core/package-manager.ts";
 import { ExtensionManagerController } from "../src/modes/interactive/extension-manager.ts";
+import { GIT_EXTENSION_URL, gitExtensionReview } from "./fixtures/git-extension-review.ts";
 
 function installation(source = "official:fixture", managed = true): InstalledExtension {
 	return {
@@ -57,13 +58,37 @@ function harness(rows: InstalledExtension[] = []) {
 	const getOfficialCatalog = vi.fn<PackageManager["getOfficialCatalog"]>(async () => catalog());
 	const installAndPersist = vi.fn<PackageManager["installAndPersist"]>(async () => {});
 	const removeAndPersist = vi.fn<PackageManager["removeAndPersist"]>(async () => true);
+	const prepareGitExtension = vi.fn<PackageManager["prepareGitExtension"]>(async (_source, options) =>
+		gitExtensionReview(options.scope),
+	);
+	const installPreparedGitExtension = vi.fn<PackageManager["installPreparedGitExtension"]>(
+		async () => `${GIT_EXTENSION_URL}@${"a".repeat(40)}`,
+	);
+	const discardGitExtension = vi.fn<PackageManager["discardGitExtension"]>();
 	const onChange = vi.fn();
 	const manager = new ExtensionManagerController({
 		resourceLoader: { getExtensionInventory },
-		packageManager: { getOfficialCatalog, installAndPersist, removeAndPersist },
+		packageManager: {
+			getOfficialCatalog,
+			installAndPersist,
+			removeAndPersist,
+			prepareGitExtension,
+			installPreparedGitExtension,
+			discardGitExtension,
+		},
 		onChange,
 	});
-	return { manager, getExtensionInventory, getOfficialCatalog, installAndPersist, removeAndPersist, onChange };
+	return {
+		manager,
+		getExtensionInventory,
+		getOfficialCatalog,
+		installAndPersist,
+		removeAndPersist,
+		onChange,
+		prepareGitExtension,
+		installPreparedGitExtension,
+		discardGitExtension,
+	};
 }
 
 async function selectCatalog(manager: ExtensionManagerController): Promise<void> {
@@ -465,5 +490,244 @@ describe("extension manager controller", () => {
 		await h.manager.confirm();
 		expect(await closing).toBe(false);
 		expect(h.installAndPersist).not.toHaveBeenCalled();
+	});
+});
+
+describe("Git extension manager controller", () => {
+	it.each([
+		"npm:extension",
+		"./extension",
+		"http://example.com/repo",
+		"git@example.com:repo",
+		"https://token@example.com/repo",
+	])("rejects unsupported input %s without preparing", async (source) => {
+		const h = harness();
+		await h.manager.initialize();
+		h.manager.openGitInput();
+		h.manager.requestGitPreparation(source);
+		await h.manager.prepareGit("user");
+		expect(h.manager.getState().page).toBe("git-input");
+		expect(h.manager.getState().notice).toMatch(/HTTPS or SSH|credentials/);
+		expect(h.prepareGitExtension).not.toHaveBeenCalled();
+		expect(h.installAndPersist).not.toHaveBeenCalled();
+		expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+		expect(await h.manager.dispose()).toBe(false);
+	});
+
+	it.each(["user", "project"] as const)(
+		"prepares %s scope and requires a separate explicit approval",
+		async (scope) => {
+			const h = harness();
+			await h.manager.initialize();
+			h.manager.openGitInput();
+			h.manager.requestGitPreparation(` ${GIT_EXTENSION_URL}@main `);
+			expect(h.prepareGitExtension).not.toHaveBeenCalled();
+			expect(h.manager.getState().page).toBe("git-scope");
+			await h.manager.prepareGit(scope);
+			expect(h.prepareGitExtension).toHaveBeenCalledWith(`${GIT_EXTENSION_URL}@main`, {
+				scope,
+				signal: expect.any(AbortSignal),
+			});
+			expect(h.manager.getState().gitPreparation).toEqual(gitExtensionReview(scope));
+			expect(h.manager.getState().page).toBe("git-review");
+			expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+			expect(h.manager.getState().reloadRequired).toBe(false);
+			expect(h.manager.back()).toBe(false);
+			expect(h.discardGitExtension).toHaveBeenCalledExactlyOnceWith("review-fixture");
+			expect(h.manager.getState().gitPreparation).toBeNull();
+			expect(await h.manager.approveGit()).toBe(false);
+			expect(await h.manager.dispose()).toBe(false);
+		},
+	);
+
+	it("retains actionable preparation errors without selecting or running code", async () => {
+		const h = harness();
+		h.prepareGitExtension.mockRejectedValue(new Error("No concrete grip.extensions entries"));
+		await h.manager.initialize();
+		h.manager.openGitInput();
+		h.manager.requestGitPreparation(GIT_EXTENSION_URL);
+		await h.manager.prepareGit("user");
+		expect(h.manager.getState()).toMatchObject({
+			page: "git-scope",
+			notice: "No concrete grip.extensions entries",
+			gitPreparation: null,
+			reloadRequired: false,
+		});
+		expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+		expect(await h.manager.dispose()).toBe(false);
+	});
+
+	it("aborts preparation, awaits its late result and discards it exactly once", async () => {
+		const h = harness();
+		const pending = deferred<ReturnType<typeof gitExtensionReview>>();
+		h.prepareGitExtension.mockReturnValue(pending.promise);
+		await h.manager.initialize();
+		h.manager.openGitInput();
+		h.manager.requestGitPreparation(GIT_EXTENSION_URL);
+		const preparing = h.manager.prepareGit("project");
+		await vi.waitFor(() => expect(h.prepareGitExtension).toHaveBeenCalledOnce());
+		expect(h.manager.back()).toBe(false);
+		expect(h.prepareGitExtension.mock.calls[0][1].signal.aborted).toBe(true);
+		expect(h.manager.getState().activity?.cancelRequested).toBe(true);
+		await h.manager.prepareGit("project");
+		expect(h.discardGitExtension).not.toHaveBeenCalled();
+		pending.resolve(gitExtensionReview("project"));
+		await preparing;
+		expect(h.discardGitExtension).toHaveBeenCalledExactlyOnceWith("review-fixture");
+		expect(h.manager.getState()).toMatchObject({
+			page: "git-input",
+			gitPreparation: null,
+			activity: null,
+			reloadRequired: false,
+		});
+		expect(h.manager.getState().notice).toContain("No code was approved");
+		expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+		await h.manager.dispose();
+	});
+
+	it("waits for in-flight preparation on disposal and suppresses its late review", async () => {
+		const h = harness();
+		const pending = deferred<ReturnType<typeof gitExtensionReview>>();
+		h.prepareGitExtension.mockReturnValue(pending.promise);
+		await h.manager.initialize();
+		h.manager.openGitInput();
+		h.manager.requestGitPreparation(GIT_EXTENSION_URL);
+		const preparing = h.manager.prepareGit("user");
+		await vi.waitFor(() => expect(h.prepareGitExtension).toHaveBeenCalledOnce());
+		const closing = h.manager.dispose();
+		const count = h.onChange.mock.calls.length;
+		let settled = false;
+		void closing.then(() => {
+			settled = true;
+		});
+		await Promise.resolve();
+		expect(settled).toBe(false);
+		pending.resolve(gitExtensionReview());
+		await preparing;
+		expect(await closing).toBe(false);
+		expect(h.onChange).toHaveBeenCalledTimes(count);
+		expect(h.manager.getState().gitPreparation).toBeNull();
+		expect(h.discardGitExtension).toHaveBeenCalledExactlyOnceWith("review-fixture");
+		expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+	});
+
+	it("discards completed reviews on close without installing", async () => {
+		const h = harness();
+		await h.manager.initialize();
+		h.manager.openGitInput();
+		h.manager.requestGitPreparation(GIT_EXTENSION_URL);
+		await h.manager.prepareGit("user");
+		expect(await h.manager.dispose()).toBe(false);
+		await h.manager.dispose();
+		expect(h.discardGitExtension).toHaveBeenCalledExactlyOnceWith("review-fixture");
+		expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+	});
+
+	it("settles approval once, ignores cancellation and duplicate approval, then refreshes inventory", async () => {
+		const h = harness();
+		const install = deferred<string>();
+		const inventory = deferred<InstalledExtension[]>();
+		h.installPreparedGitExtension.mockReturnValue(install.promise);
+		await h.manager.initialize();
+		h.manager.openGitInput();
+		h.manager.requestGitPreparation(GIT_EXTENSION_URL);
+		await h.manager.prepareGit("user");
+		h.getExtensionInventory.mockReturnValueOnce(inventory.promise);
+		const approving = h.manager.approveGit();
+		await vi.waitFor(() => expect(h.installPreparedGitExtension).toHaveBeenCalledExactlyOnceWith("review-fixture"));
+		expect(await h.manager.approveGit()).toBe(false);
+		expect(h.manager.back()).toBe(false);
+		expect(h.manager.getState().activity).toMatchObject({
+			kind: "git-install",
+			cancelable: false,
+			cancelRequested: false,
+		});
+		expect(h.discardGitExtension).not.toHaveBeenCalled();
+		install.resolve(`${GIT_EXTENSION_URL}@${"a".repeat(40)}`);
+		await vi.waitFor(() => expect(h.getExtensionInventory).toHaveBeenCalledTimes(2));
+		expect(h.manager.getState().activity?.kind).toBe("git-install");
+		inventory.resolve([]);
+		expect(await approving).toBe(true);
+		expect(h.manager.getState().notice).toContain("Activation is pending");
+		expect(h.manager.getState().reloadRequired).toBe(true);
+		expect(h.installAndPersist).not.toHaveBeenCalled();
+		expect(await h.manager.dispose()).toBe(true);
+	});
+
+	it.each(["Dependency scripts failed", "Files installed, but package selection could not be verified"])(
+		"reconciles inventory after approved failure: %s",
+		async (message) => {
+			const h = harness();
+			h.installPreparedGitExtension.mockRejectedValue(new Error(message));
+			await h.manager.initialize();
+			h.manager.openGitInput();
+			h.manager.requestGitPreparation(GIT_EXTENSION_URL);
+			await h.manager.prepareGit("user");
+			expect(await h.manager.approveGit()).toBe(false);
+			expect(h.getExtensionInventory).toHaveBeenCalledTimes(2);
+			expect(h.manager.getState()).toMatchObject({
+				page: "installed",
+				gitPreparation: null,
+				reloadRequired: true,
+				activity: null,
+			});
+			expect(h.manager.getState().notice).toContain(message);
+			expect(h.manager.getState().notice).toContain("Review inventory/settings");
+			expect(h.discardGitExtension).not.toHaveBeenCalled();
+			expect(await h.manager.dispose()).toBe(true);
+		},
+	);
+
+	it("does not close as a successful install if inventory reconciliation fails", async () => {
+		const h = harness();
+		await h.manager.initialize();
+		h.manager.openGitInput();
+		h.manager.requestGitPreparation(GIT_EXTENSION_URL);
+		await h.manager.prepareGit("user");
+		h.getExtensionInventory.mockRejectedValueOnce(new Error("Cannot read settings"));
+		expect(await h.manager.approveGit()).toBe(false);
+		expect(h.manager.getState().inventoryError).toBe("Cannot read settings");
+		expect(h.manager.getState().reloadRequired).toBe(true);
+		await h.manager.dispose();
+	});
+
+	it("discards an unused approval if a synchronous close prevents installation from starting", async () => {
+		const h = harness();
+		await h.manager.initialize();
+		h.manager.openGitInput();
+		h.manager.requestGitPreparation(GIT_EXTENSION_URL);
+		await h.manager.prepareGit("user");
+		let closing: Promise<boolean> | null = null;
+		h.onChange.mockImplementation(() => {
+			closing = h.manager.dispose();
+		});
+		expect(await h.manager.approveGit()).toBe(false);
+		expect(await closing).toBe(false);
+		expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+		expect(h.discardGitExtension).toHaveBeenCalledExactlyOnceWith("review-fixture");
+	});
+
+	it("awaits uncancelable approved installation on disposal without discarding its checkout", async () => {
+		const h = harness();
+		const pending = deferred<string>();
+		h.installPreparedGitExtension.mockReturnValue(pending.promise);
+		await h.manager.initialize();
+		h.manager.openGitInput();
+		h.manager.requestGitPreparation(GIT_EXTENSION_URL);
+		await h.manager.prepareGit("user");
+		const approving = h.manager.approveGit();
+		await vi.waitFor(() => expect(h.installPreparedGitExtension).toHaveBeenCalledOnce());
+		const closing = h.manager.dispose();
+		let settled = false;
+		void closing.then(() => {
+			settled = true;
+		});
+		await Promise.resolve();
+		expect(settled).toBe(false);
+		expect(h.discardGitExtension).not.toHaveBeenCalled();
+		pending.resolve("pinned source");
+		expect(await approving).toBe(false);
+		expect(await closing).toBe(true);
+		expect(h.getExtensionInventory).toHaveBeenCalledOnce();
 	});
 });

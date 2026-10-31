@@ -72,6 +72,10 @@ All notable changes to Grip are documented in this file.
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Custom `PackageManager` implementations must provide Git extension preparation, approved installation and discard methods; see the [Git approval lifecycle](docs/git-extensions.md#package-manager-hosts).
+
 ### Changed
 
 - Publish official extensions automatically after main-branch tests, with independent versioning and immutable artifacts.
@@ -79,6 +83,7 @@ All notable changes to Grip are documented in this file.
 ### Added
 
 - Added Planner as an official extension source.
+- Added third-party Git URL installation in `/extensions`, with explicit extension-file manifests, data-only preparation, default-safe trust review, scoped commit-pinned selection and idle reload.
 
 ### Fixed
 

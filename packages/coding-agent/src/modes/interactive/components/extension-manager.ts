@@ -44,6 +44,7 @@ export class ExtensionManagerComponent implements Component, Focusable {
 	private readonly options: ExtensionManagerComponentOptions;
 	private readonly controller: ExtensionManagerController;
 	private readonly searches: Record<ExtensionManagerList, Input> = { installed: new Input(), catalog: new Input() };
+	private readonly gitInput = new Input();
 	private readonly selections: Record<ExtensionManagerList, string | null> = { installed: null, catalog: null };
 	private readonly border: DynamicBorder;
 	private state: ExtensionManagerState;
@@ -86,6 +87,8 @@ export class ExtensionManagerComponent implements Component, Focusable {
 
 	private updateFocus(): void {
 		const page = this.listPage();
+		this.gitInput.focused =
+			this._focused && !this.disposed && !this.closing && !this.state.activity && this.state.page === "git-input";
 		for (const name of ["installed", "catalog"] as const) {
 			this.searches[name].focused =
 				this._focused && !this.disposed && !this.closing && !this.state.activity && page === name;
@@ -172,6 +175,11 @@ export class ExtensionManagerComponent implements Component, Focusable {
 		);
 	}
 
+	private openGitInput(): void {
+		this.gitInput.setValue("");
+		this.controller.openGitInput();
+	}
+
 	private installedChoices(): ManagerChoice[] {
 		const rows = fuzzyFilter(
 			this.state.inventory,
@@ -180,6 +188,7 @@ export class ExtensionManagerComponent implements Component, Focusable {
 		);
 		return [
 			{ value: "browse", label: "Install extension", run: () => void this.controller.openCatalog() },
+			...this.gitInstallChoice(),
 			...rows.map(
 				(row): ManagerChoice => ({
 					value: `installed:${row.identity}`,
@@ -208,8 +217,22 @@ export class ExtensionManagerComponent implements Component, Focusable {
 				}),
 			),
 			{ value: "refresh", label: "Refresh catalog", run: () => void this.controller.openCatalog(true) },
+			...this.gitInstallChoice(),
 			{ value: "back", label: "Back", run: () => this.back() },
 		];
+	}
+
+	private gitInstallChoice(): ManagerChoice[] {
+		return this.state.inventoryReady && !this.state.inventoryError
+			? [
+					{
+						value: "git",
+						label: "Install from Git URL",
+						description: "Third-party / unverified",
+						run: () => this.openGitInput(),
+					},
+				]
+			: [];
 	}
 
 	private selectedInstallation(): InstalledExtension | undefined {
@@ -232,6 +255,26 @@ export class ExtensionManagerComponent implements Component, Focusable {
 		if (this.state.page === "installed") return this.installedChoices();
 		if (this.state.page === "catalog") return this.catalogChoices();
 		const back: ManagerChoice = { value: "back", label: "Back", run: () => this.back() };
+		if (this.state.page === "git-input") return [];
+		if (this.state.page === "git-scope")
+			return [
+				{ value: "user", label: "User / active profile", run: () => void this.controller.prepareGit("user") },
+				{ value: "project", label: "Project", run: () => void this.controller.prepareGit("project") },
+				back,
+			];
+		if (this.state.page === "git-review")
+			return [
+				{ value: "cancel", label: "Cancel — do not install", run: () => this.back() },
+				{
+					value: "approve-git",
+					label: "Trust and install this commit",
+					run: () => {
+						void this.controller.approveGit().then(async (completed) => {
+							if (completed) await this.close();
+						});
+					},
+				},
+			];
 		if (this.state.page === "confirm") {
 			return [
 				{ value: "cancel", label: "Cancel", run: () => this.back() },
@@ -274,6 +317,23 @@ export class ExtensionManagerComponent implements Component, Focusable {
 				width,
 			),
 		];
+		if (!row.source.startsWith("official:")) {
+			lines.push(
+				...this.text(
+					"Third-party / unverified package. Not part of official automatic updates. Git installs from this manager are pinned; use the CLI install command with a new ref to change the commit.",
+					width,
+					"warning",
+				),
+			);
+		}
+		if (row.status === "failed")
+			lines.push(
+				...this.text(
+					"Installation is not successful activation. Review the load/factory errors below; disable or uninstall this extension, then /reload or restart.",
+					width,
+					"warning",
+				),
+			);
 		if (!row.removal) {
 			lines.push(
 				...this.text(
@@ -334,6 +394,38 @@ export class ExtensionManagerComponent implements Component, Focusable {
 		return lines;
 	}
 
+	private gitDetails(width: number): string[] {
+		const review = this.state.gitPreparation;
+		if (this.state.page === "git-scope")
+			return [
+				...this.text(`Source: ${this.state.gitSource}`, width),
+				...this.text(
+					"Choose the install destination. User uses the active profile when one is selected. Preparation does not approve or execute extension code.",
+					width,
+				),
+			];
+		if (this.state.page !== "git-review" || !review) return [];
+		return [
+			...this.text("Third-party / unverified Git package — not official", width, "warning"),
+			...this.text(`${review.name ?? "Unnamed package"} | ${review.version ?? "version unknown"}`, width),
+			...this.text(`Source: ${review.source}`, width),
+			...this.text(`Requested ref: ${review.requestedRef ?? "default branch"}`, width),
+			...this.text(`Resolved commit: ${review.commit}`, width),
+			...this.text(`Destination: ${review.scope} | user profile: ${review.profile ?? "default"}`, width),
+			...review.entries.flatMap((entry) => this.text(`Entry: ${entry}`, width)),
+			...this.text(review.warning, width, "warning"),
+			...this.text(
+				"Approval permits dependency install scripts and extension code with full filesystem, network and credential access as your user. A Git host, commit hash or valid manifest does not establish trust. Install only code you trust.",
+				width,
+				"warning",
+			),
+			...this.text(
+				"The reviewed commit will be pinned, not automatically updated. Saving is not activation: after idle reload/restart, use /extensions to inspect load/factory errors. Disable or uninstall failed extensions before /reload.",
+				width,
+			),
+		];
+	}
+
 	private catalogStatus(width: number): string[] {
 		const catalog = this.state.catalog;
 		const lines: string[] = [];
@@ -386,6 +478,7 @@ export class ExtensionManagerComponent implements Component, Focusable {
 			if (this.state.notice) lines.push(...this.text(this.state.notice, width, "warning"));
 			if (this.state.page === "catalog") lines.push(...this.catalogStatus(width));
 			if (this.state.page === "detail" || this.state.page === "confirm") lines.push(...this.details(width));
+			lines.push(...this.gitDetails(width));
 			lines.push(...this.renderControls(width));
 		}
 		lines.push("", ...this.border.render(width));
@@ -409,6 +502,20 @@ export class ExtensionManagerComponent implements Component, Focusable {
 				),
 			];
 		}
+		if (this.state.page === "git-input")
+			return [
+				...this.text("Install from Git URL — HTTPS or SSH only (optional @ref)", width, "accent"),
+				...this.text(
+					"No npm specs, local paths or shorthand URLs. Do not embed credentials; use your Git credential helper or SSH keys.",
+					width,
+				),
+				...this.gitInput.render(width),
+				...this.text(
+					`${this.hint("tui.input.submit", "continue to destination")} | ${this.hint("tui.select.cancel", "back")}`,
+					width,
+					"dim",
+				),
+			];
 		const lines: string[] = [];
 		const page = this.listPage();
 		if (page) {
@@ -463,16 +570,22 @@ export class ExtensionManagerComponent implements Component, Focusable {
 		if (this.disposed || this.closing) return;
 		if (this.options.keybindings.matches(data, "tui.select.cancel")) {
 			this.back();
-		} else if (!this.state.activity) {
-			if (this.options.keybindings.matches(data, "tui.select.confirm")) {
-				this.choices.find((choice) => choice.value === this.list.getSelectedItem()?.value)?.run();
-			} else if (!this.navigate(data)) {
-				const page = this.listPage();
-				if (page) {
-					const before = this.searches[page].getValue();
-					this.searches[page].handleInput(data);
-					if (before !== this.searches[page].getValue()) this.rebuild(true);
-				}
+			this.options.requestRender();
+			return;
+		}
+		if (this.state.activity) return;
+		if (this.state.page === "git-input") {
+			if (this.options.keybindings.matches(data, "tui.input.submit"))
+				this.controller.requestGitPreparation(this.gitInput.getValue());
+			else this.gitInput.handleInput(data);
+		} else if (this.options.keybindings.matches(data, "tui.select.confirm")) {
+			this.choices.find((choice) => choice.value === this.list.getSelectedItem()?.value)?.run();
+		} else if (!this.navigate(data)) {
+			const page = this.listPage();
+			if (page) {
+				const before = this.searches[page].getValue();
+				this.searches[page].handleInput(data);
+				if (before !== this.searches[page].getValue()) this.rebuild(true);
 			}
 		}
 		this.options.requestRender();
@@ -482,6 +595,7 @@ export class ExtensionManagerComponent implements Component, Focusable {
 		this.list.invalidate();
 		this.searches.installed.invalidate();
 		this.searches.catalog.invalidate();
+		this.gitInput.invalidate();
 		this.border.invalidate();
 	}
 }
