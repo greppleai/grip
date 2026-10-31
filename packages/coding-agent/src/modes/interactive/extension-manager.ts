@@ -1,4 +1,5 @@
 import type { InstalledExtension } from "../../core/extension-inventory.ts";
+import { type GitExtensionPreparation, parseExtensionGitUrl } from "../../core/git-extension-installer.ts";
 import type { OfficialCatalogView } from "../../core/official-catalog-view.ts";
 import type {
 	OfficialOperationOptions,
@@ -6,13 +7,25 @@ import type {
 	OfficialProgressPhase,
 } from "../../core/official-installer.ts";
 import { OfficialExtensionError } from "../../core/official-transport.ts";
-import type { ConfiguredPackageTarget, PackageManager } from "../../core/package-manager.ts";
+import type { ConfiguredPackageTarget, InstalledSourceScope, PackageManager } from "../../core/package-manager.ts";
 import type { ResourceLoader } from "../../core/resource-loader.ts";
 import { parseGitUrl } from "../../utils/git.ts";
 
 export type ExtensionManagerList = "installed" | "catalog";
-export type ExtensionManagerPage = ExtensionManagerList | "detail" | "confirm";
-export type ExtensionManagerActivityKind = "inventory" | "catalog" | "install" | "remove";
+export type ExtensionManagerPage =
+	| ExtensionManagerList
+	| "detail"
+	| "confirm"
+	| "git-input"
+	| "git-scope"
+	| "git-review";
+export type ExtensionManagerActivityKind =
+	| "inventory"
+	| "catalog"
+	| "install"
+	| "remove"
+	| "git-prepare"
+	| "git-install";
 export type ExtensionManagerTarget = { kind: "installed"; identity: string } | { kind: "catalog"; id: string };
 export type ExtensionManagerAction = { kind: "install"; id: string } | { kind: "remove"; identity: string };
 
@@ -28,6 +41,8 @@ export interface ExtensionManagerState {
 	origin: ExtensionManagerList;
 	target: ExtensionManagerTarget | null;
 	confirmation: ExtensionManagerAction | null;
+	gitSource: string;
+	gitPreparation: GitExtensionPreparation | null;
 	inventory: InstalledExtension[];
 	inventoryReady: boolean;
 	inventoryError: string | null;
@@ -39,7 +54,15 @@ export interface ExtensionManagerState {
 }
 
 export interface ExtensionManagerOptions {
-	packageManager: Pick<PackageManager, "getOfficialCatalog" | "installAndPersist" | "removeAndPersist">;
+	packageManager: Pick<
+		PackageManager,
+		| "getOfficialCatalog"
+		| "installAndPersist"
+		| "removeAndPersist"
+		| "prepareGitExtension"
+		| "installPreparedGitExtension"
+		| "discardGitExtension"
+	>;
 	resourceLoader: Pick<ResourceLoader, "getExtensionInventory">;
 	onChange: () => void;
 }
@@ -59,6 +82,8 @@ export class ExtensionManagerController {
 		origin: "installed",
 		target: null,
 		confirmation: null,
+		gitSource: "",
+		gitPreparation: null,
 		inventory: [],
 		inventoryReady: false,
 		inventoryError: null,
@@ -143,8 +168,107 @@ export class ExtensionManagerController {
 		await this.run("inventory", false, () => this.readInventory());
 	}
 
+	private discardGitPreparation(): void {
+		const review = this.state.gitPreparation;
+		this.state.gitPreparation = null;
+		if (review) this.options.packageManager.discardGitExtension(review.id);
+	}
+
+	openGitInput(): void {
+		if (this.disposed || this.state.activity || !this.state.inventoryReady || this.state.inventoryError) return;
+		this.discardGitPreparation();
+		this.state.origin = this.state.page === "catalog" ? "catalog" : "installed";
+		this.state.page = "git-input";
+		this.state.gitSource = "";
+		this.state.notice = null;
+		this.changed();
+	}
+
+	requestGitPreparation(source: string): void {
+		if (this.disposed || this.state.activity || this.state.page !== "git-input") return;
+		try {
+			parseExtensionGitUrl(source);
+			this.state.gitSource = source.trim();
+			this.state.page = "git-scope";
+			this.state.notice = null;
+		} catch (error) {
+			this.state.notice = error instanceof Error ? error.message : String(error);
+		}
+		this.changed();
+	}
+
+	async prepareGit(scope: InstalledSourceScope): Promise<void> {
+		if (
+			this.disposed ||
+			this.state.activity ||
+			this.state.page !== "git-scope" ||
+			!this.state.inventoryReady ||
+			this.state.inventoryError
+		)
+			return;
+		await this.run("git-prepare", true, async (signal) => {
+			try {
+				const review = await this.options.packageManager.prepareGitExtension(this.state.gitSource, {
+					scope,
+					signal,
+				});
+				if (this.disposed || signal.aborted) {
+					this.options.packageManager.discardGitExtension(review.id);
+					if (!this.disposed) {
+						this.state.page = "git-input";
+						this.state.notice = "Preparation canceled. No code was approved.";
+					}
+					return;
+				}
+				this.state.gitPreparation = review;
+				this.state.page = "git-review";
+			} catch (error) {
+				if (signal.aborted && !this.disposed) {
+					this.state.page = "git-input";
+					this.state.notice = "Preparation canceled. No code was approved.";
+				} else throw error;
+			}
+		});
+	}
+
+	async approveGit(): Promise<boolean> {
+		if (
+			this.disposed ||
+			this.state.activity ||
+			this.state.page !== "git-review" ||
+			!this.state.inventoryReady ||
+			this.state.inventoryError
+		)
+			return false;
+		const review = this.state.gitPreparation;
+		if (!review) return false;
+		this.state.page = "installed";
+		let completed = false;
+		await this.run("git-install", false, async () => {
+			// Keep ownership until this action starts: synchronous disposal must discard an unused approval.
+			this.state.gitPreparation = null;
+			this.state.reloadRequired = true;
+			try {
+				await this.options.packageManager.installPreparedGitExtension(review.id);
+				completed = true;
+				if (!this.disposed)
+					this.state.notice =
+						"Git package saved at the reviewed commit. Activation is pending reload/restart; check /extensions for load/factory errors. Disable or uninstall a failed extension before retrying /reload.";
+			} catch (error) {
+				if (!this.disposed) {
+					const message = error instanceof Error ? error.message : String(error);
+					this.state.notice = `${message}. Review inventory/settings before retrying; scripts and committed changes cannot be rolled back automatically.`;
+				}
+			} finally {
+				if (!this.disposed) await this.readInventory();
+			}
+		});
+		return !this.disposed && completed && !this.state.inventoryError;
+	}
+
 	async openCatalog(refresh = false): Promise<void> {
 		if (this.disposed || this.state.activity) return;
+		this.discardGitPreparation();
 		this.state.page = "catalog";
 		this.state.target = null;
 		this.state.confirmation = null;
@@ -166,6 +290,7 @@ export class ExtensionManagerController {
 				: this.state.catalog?.extensions.some((row) => row.id === target.id);
 		if (!exists) return;
 		this.state.origin = this.state.page === "catalog" ? "catalog" : "installed";
+		this.discardGitPreparation();
 		this.state.target = structuredClone(target);
 		this.state.confirmation = null;
 		this.state.page = "detail";
@@ -279,7 +404,14 @@ export class ExtensionManagerController {
 			return false;
 		}
 		if (this.state.page === "installed") return true;
-		if (this.state.page === "confirm") {
+		if (this.state.page === "git-review") {
+			this.discardGitPreparation();
+			this.state.page = "git-input";
+		} else if (this.state.page === "git-scope") {
+			this.state.page = "git-input";
+		} else if (this.state.page === "git-input") {
+			this.state.page = this.state.origin;
+		} else if (this.state.page === "confirm") {
 			this.state.confirmation = null;
 			this.state.page = "detail";
 		} else if (this.state.page === "detail") {
@@ -296,6 +428,7 @@ export class ExtensionManagerController {
 	async dispose(): Promise<boolean> {
 		this.disposed = true;
 		this.abort?.abort();
+		this.discardGitPreparation();
 		await this.pending;
 		return this.state.reloadRequired;
 	}

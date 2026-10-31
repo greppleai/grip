@@ -17,7 +17,9 @@ In interactive mode, enter `/extensions`:
 
 Use the configured selection keys shown in the footer; type to search. Installed and catalog searches/selections are retained when returning from details. **Refresh catalog** retries discovery; cached, stale, offline and unavailable states are distinguished. Browsing does not execute catalog code or install unselected entries.
 
-The initial installed/configured view includes official packages, third-party packages and manual extensions. Details show the source, scope, known version, entry points and loaded/disabled/missing/failed status. An unreported version remains unknown. **Refresh installed** refreshes inventory; when inventory is unavailable, management actions are blocked rather than guessing ownership.
+The initial installed/configured view includes official and other remote npm/Git packages. Local/manual source files remain managed at their source. Details show the source, scope, known version, entry points and loaded/disabled/missing/failed status. An unreported version remains unknown. **Refresh installed** refreshes inventory; when inventory is unavailable, management actions are blocked rather than guessing ownership.
+
+**Install from Git URL** is also available in the installed and catalog views. It is a separate [third-party/unverified prepare-and-trust flow](git-extensions.md), not an official catalog entry or verified official artifact. It supports user/project scope and pins the reviewed commit; it does not inherit official verification or automatic updates. Official catalog installation and its confirmation remain unchanged.
 
 The built-in command remains available with no extensions, factory failures or `--no-extensions`. That flag disables official factories and automatic official updates, not management; installing does not override it.
 
@@ -104,6 +106,7 @@ For hosts implementing package/resource contracts:
 
 - Await `PackageManager.getInstalledPath()` and `listConfiguredPackages()`; both return Promises. Configured rows include nullable `version` and `error` values, including failed/missing selections.
 - Implement the required `PackageManager.getOfficialCatalog()` and `startupOfficialUpdates(noExtensions)` methods. Catalog browsing returns presentation metadata/cache diagnostics, not executable extension instances.
+- Implement `prepareGitExtension()`, `installPreparedGitExtension()` and `discardGitExtension()` for the separate [Git approval lifecycle](git-extensions.md#package-manager-hosts). Preparation is not permission to run downloaded code; approval consumes a backend-owned preparation ID.
 - Use `installAndPersist()` / `removeAndPersist()` for official mutations. The generic synchronous settings-membership helpers reject official sources; do not split their installation and membership commit.
 - `PackageMutationOptions.official` contains official-only cancellation, offline, refresh and timeout controls. It does not promise cancellation of existing npm/Git subprocesses, and `offline: false` cannot override environment offline mode.
 - Include `diagnostics` in `ResolvedPaths` and implement `ResourceLoader.getExtensionInventory()`. Consume its scoped `removal` target rather than deriving deletion rights from a path or catalog ID. Provenance includes official identity/version and load-error source information.

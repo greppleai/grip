@@ -8,6 +8,7 @@ import type { PackageManager } from "../src/core/package-manager.ts";
 import type { SourceScope } from "../src/core/source-info.ts";
 import { ExtensionManagerComponent } from "../src/modes/interactive/components/extension-manager.ts";
 import type { Theme } from "../src/modes/interactive/theme/theme.ts";
+import { GIT_EXTENSION_URL, gitExtensionReview } from "./fixtures/git-extension-review.ts";
 
 function installation(source = "official:fixture", scope: SourceScope = "user", managed = true): InstalledExtension {
 	return {
@@ -72,6 +73,13 @@ function harness(rows: InstalledExtension[] = [], view = catalog()) {
 	const getOfficialCatalog = vi.fn<PackageManager["getOfficialCatalog"]>(async () => view);
 	const installAndPersist = vi.fn<PackageManager["installAndPersist"]>(async () => {});
 	const removeAndPersist = vi.fn<PackageManager["removeAndPersist"]>(async () => true);
+	const prepareGitExtension = vi.fn<PackageManager["prepareGitExtension"]>(async (_source, options) =>
+		gitExtensionReview(options.scope),
+	);
+	const installPreparedGitExtension = vi.fn<PackageManager["installPreparedGitExtension"]>(
+		async () => `${GIT_EXTENSION_URL}@${"a".repeat(40)}`,
+	);
+	const discardGitExtension = vi.fn<PackageManager["discardGitExtension"]>();
 	const requestRender = vi.fn();
 	const onClose = vi.fn();
 	const themes: Pick<Theme, "fg">[] = [{ fg: (_color, text) => text }];
@@ -80,7 +88,14 @@ function harness(rows: InstalledExtension[] = [], view = catalog()) {
 		getTheme: () => themes[0],
 		requestRender,
 		onClose,
-		packageManager: { getOfficialCatalog, installAndPersist, removeAndPersist },
+		packageManager: {
+			getOfficialCatalog,
+			installAndPersist,
+			removeAndPersist,
+			prepareGitExtension,
+			installPreparedGitExtension,
+			discardGitExtension,
+		},
 		resourceLoader: { getExtensionInventory },
 	});
 	component.focused = true;
@@ -91,6 +106,9 @@ function harness(rows: InstalledExtension[] = [], view = catalog()) {
 		getOfficialCatalog,
 		installAndPersist,
 		removeAndPersist,
+		prepareGitExtension,
+		installPreparedGitExtension,
+		discardGitExtension,
 		requestRender,
 		onClose,
 		themes,
@@ -124,6 +142,14 @@ async function openInstallConfirmation(component: ExtensionManagerComponent): Pr
 	await openCatalog(component);
 	activate(component, "Fixture");
 	activate(component, "Install");
+}
+
+async function openGitReview(component: ExtensionManagerComponent, scope = "User / active profile"): Promise<void> {
+	activate(component, "Install from Git URL");
+	component.handleInput(`${GIT_EXTENSION_URL}@main`);
+	component.handleInput("\r");
+	activate(component, scope);
+	await vi.waitFor(() => expect(text(component)).toContain("Trust and install this commit"));
 }
 
 afterEach(() => {
@@ -552,4 +578,225 @@ describe("extension manager component", () => {
 		expect(h.requestRender).toHaveBeenCalledTimes(renderCount);
 		expect(h.getExtensionInventory).toHaveBeenCalledTimes(1);
 	});
+});
+
+describe("Git extension manager component", () => {
+	it("offers Git installation from both lists without depending on the official catalog", async () => {
+		const h = harness();
+		await h.component.initialize();
+		expect(text(h.component)).toContain("Install from Git URL");
+		await openCatalog(h.component);
+		expect(text(h.component)).toContain("Install from Git URL");
+		activate(h.component, "Install from Git URL");
+		expect(text(h.component)).toContain("HTTPS or SSH only");
+		expect(h.prepareGitExtension).not.toHaveBeenCalled();
+		h.component.handleInput("\x1b");
+		expect(text(h.component)).toContain("Official catalog");
+		await h.component.dispose();
+	});
+
+	it.each(["user", "project"] as const)(
+		"reviews %s destination, captured profile and full permissions with Cancel selected",
+		async (scope) => {
+			const h = harness();
+			await h.component.initialize();
+			await openGitReview(h.component, scope === "user" ? "User / active profile" : "Project");
+			const screen = text(h.component);
+			expect(screen).toContain("Third-party / unverified Git package");
+			expect(screen).toContain(`Source: ${GIT_EXTENSION_URL}`);
+			expect(screen).toContain("Requested ref: main");
+			expect(screen).toContain("a".repeat(40));
+			expect(screen).toContain(`Destination: ${scope} | user profile: work`);
+			expect(screen).toContain("Entry: extension.ts");
+			expect(screen).toContain("dependency install scripts");
+			expect(screen).toContain("filesystem, network and credential access");
+			expect(screen).toContain("not sandboxing or publisher authentication");
+			expect(screen).toContain("skills, rules, prompts and themes");
+			expect(screen).toContain("does not establish trust");
+			expect(screen).toContain("Saving is not activation");
+			expect(screen).toContain("not automatically updated");
+			expect(screen).toContain("→ Cancel");
+			expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+			h.component.handleInput("\r");
+			expect(text(h.component)).toContain("HTTPS or SSH only");
+			expect(h.discardGitExtension).toHaveBeenCalledExactlyOnceWith("review-fixture");
+			expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+			expect(await h.component.dispose()).toBe(false);
+		},
+	);
+
+	it.each(["npm:third-party", "./local", "https://token@example.com/extension"])(
+		"rejects %s visibly before preparing",
+		async (source) => {
+			const h = harness();
+			await h.component.initialize();
+			activate(h.component, "Install from Git URL");
+			h.component.handleInput(source);
+			h.component.handleInput("\r");
+			expect(text(h.component)).toMatch(/Other sources are not supported|Do not embed credentials/);
+			expect(text(h.component)).toContain("HTTPS or SSH only");
+			expect(h.prepareGitExtension).not.toHaveBeenCalled();
+			expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+			await h.component.dispose();
+		},
+	);
+
+	it("shows preparation errors without an approval action or package selection", async () => {
+		const h = harness();
+		h.prepareGitExtension.mockRejectedValue(new Error("Missing package.json grip.extensions"));
+		await h.component.initialize();
+		activate(h.component, "Install from Git URL");
+		h.component.handleInput(GIT_EXTENSION_URL);
+		h.component.handleInput("\r");
+		activate(h.component, "Project");
+		await vi.waitFor(() => expect(text(h.component)).toContain("Missing package.json grip.extensions"));
+		expect(text(h.component)).not.toContain("Trust and install");
+		expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+		expect(h.onClose).not.toHaveBeenCalled();
+		await h.component.dispose();
+	});
+
+	it("shows cancelable preparation progress and cleans a late review before accepting more input", async () => {
+		const h = harness();
+		const pending = deferred<ReturnType<typeof gitExtensionReview>>();
+		h.prepareGitExtension.mockReturnValue(pending.promise);
+		await h.component.initialize();
+		activate(h.component, "Install from Git URL");
+		h.component.handleInput(GIT_EXTENSION_URL);
+		h.component.handleInput("\r");
+		activate(h.component, "User / active profile");
+		await vi.waitFor(() => expect(h.prepareGitExtension).toHaveBeenCalledOnce());
+		expect(text(h.component)).toContain("git-prepare: working");
+		expect(text(h.component)).toContain("request cancellation");
+		h.component.handleInput("\r");
+		h.component.handleInput("\x1b");
+		expect(text(h.component)).toContain("Cancellation requested; waiting for settlement");
+		expect(h.onClose).not.toHaveBeenCalled();
+		expect(h.prepareGitExtension.mock.calls[0][1].signal.aborted).toBe(true);
+		pending.resolve(gitExtensionReview());
+		await vi.waitFor(() => expect(text(h.component)).toContain("No code was approved"));
+		expect(text(h.component)).not.toContain("Trust and install");
+		expect(h.discardGitExtension).toHaveBeenCalledExactlyOnceWith("review-fixture");
+		expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+		await h.component.dispose();
+	});
+
+	it("installs once only on affirmative trust, waits through settlement and inventory, then asks the host to reload", async () => {
+		const h = harness();
+		const installing = deferred<string>();
+		const inventory = deferred<InstalledExtension[]>();
+		h.installPreparedGitExtension.mockReturnValue(installing.promise);
+		await h.component.initialize();
+		await openGitReview(h.component);
+		h.getExtensionInventory.mockReturnValueOnce(inventory.promise);
+		activate(h.component, "Trust and install this commit");
+		await vi.waitFor(() => expect(h.installPreparedGitExtension).toHaveBeenCalledExactlyOnceWith("review-fixture"));
+		expect(text(h.component)).toContain("git-install: working");
+		expect(text(h.component)).toContain("Wait for this operation to settle");
+		h.component.handleInput("\r");
+		h.component.handleInput("\x1b");
+		expect(text(h.component)).not.toContain("Cancellation requested");
+		expect(h.onClose).not.toHaveBeenCalled();
+		installing.resolve("pinned source");
+		await vi.waitFor(() => expect(h.getExtensionInventory).toHaveBeenCalledTimes(2));
+		expect(h.onClose).not.toHaveBeenCalled();
+		inventory.resolve([]);
+		await vi.waitFor(() => expect(h.onClose).toHaveBeenCalledExactlyOnceWith(true));
+		expect(h.installPreparedGitExtension).toHaveBeenCalledOnce();
+		expect(h.installAndPersist).not.toHaveBeenCalled();
+		expect(h.discardGitExtension).not.toHaveBeenCalled();
+	});
+
+	it.each(["Dependency installation failed", "Files installed, but package selection could not be verified"])(
+		"keeps %s visible, refreshes inventory and gives reconciliation guidance",
+		async (message) => {
+			const h = harness();
+			h.installPreparedGitExtension.mockRejectedValue(new Error(message));
+			await h.component.initialize();
+			await openGitReview(h.component);
+			activate(h.component, "Trust and install this commit");
+			await vi.waitFor(() => expect(text(h.component)).toContain(message));
+			expect(text(h.component)).toContain("Review inventory/settings before retrying");
+			expect(text(h.component)).toMatch(/cannot be\s+rolled back automatically/);
+			expect(text(h.component)).toContain("Reload/restart pending");
+			expect(h.getExtensionInventory).toHaveBeenCalledTimes(2);
+			expect(h.onClose).not.toHaveBeenCalled();
+			await h.component.dispose();
+		},
+	);
+
+	it("uses remapped input, selection and cancellation bindings without granting trust", async () => {
+		const h = harness();
+		await h.component.initialize();
+		activate(h.component, "Install from Git URL");
+		h.keybindings.setUserBindings({
+			"tui.input.submit": "ctrl+s",
+			"tui.select.confirm": "ctrl+y",
+			"tui.select.cancel": "ctrl+x",
+			"tui.select.down": "ctrl+n",
+		});
+		h.component.handleInput(GIT_EXTENSION_URL);
+		expect(text(h.component)).toContain("ctrl+s continue to destination");
+		h.component.handleInput("\r");
+		expect(text(h.component)).toContain("HTTPS or SSH only");
+		h.component.handleInput("\x13");
+		expect(text(h.component)).toContain("Choose the install destination");
+		h.component.handleInput("\x0e");
+		h.component.handleInput("\x19");
+		await vi.waitFor(() => expect(text(h.component)).toContain("Trust and install this commit"));
+		expect(h.prepareGitExtension.mock.calls[0][1].scope).toBe("project");
+		expect(text(h.component)).toContain("→ Cancel");
+		h.component.handleInput("\x18");
+		expect(h.discardGitExtension).toHaveBeenCalledExactlyOnceWith("review-fixture");
+		expect(h.installPreparedGitExtension).not.toHaveBeenCalled();
+		await h.component.dispose();
+	});
+
+	it("renders narrow Git input/review safely and follows focus", async () => {
+		const h = harness();
+		const review = gitExtensionReview();
+		review.name = "\x1b[31muntrusted\x1b[0m\nname";
+		review.entries = [`${"nested/".repeat(20)}entry.ts`];
+		h.prepareGitExtension.mockResolvedValue(review);
+		await h.component.initialize();
+		activate(h.component, "Install from Git URL");
+		expect(h.component.render(40).join("\n")).toContain(CURSOR_MARKER);
+		h.component.focused = false;
+		expect(h.component.render(40).join("\n")).not.toContain(CURSOR_MARKER);
+		h.component.focused = true;
+		h.component.handleInput(GIT_EXTENSION_URL);
+		h.component.handleInput("\r");
+		activate(h.component, "User / active profile");
+		await vi.waitFor(() => expect(text(h.component)).toContain("Trust and install this commit"));
+		expect(h.component.render(40).join("\n")).not.toContain("\x1b[31m");
+		for (const width of [1, 7, 20, 40, 80]) {
+			for (const line of h.component.render(width)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+		}
+		expect(h.component.render(40).join("\n")).not.toContain(CURSOR_MARKER);
+		await h.component.dispose();
+	});
+
+	it.each(["failed", "disabled", "not-loaded"] as const)(
+		"preserves %s inventory after reload rather than equating selection with activation",
+		async (status) => {
+			const row = installation(`${GIT_EXTENSION_URL}@${"a".repeat(40)}`);
+			row.status = status;
+			if (status === "failed") row.errors = ["Extension must export a default factory function"];
+			const h = harness([row]);
+			await h.component.initialize();
+			activate(h.component, "https://example.com/");
+			expect(text(h.component)).toContain(status);
+			expect(text(h.component)).toContain("Third-party / unverified");
+			expect(text(h.component)).toContain("Not part of official automatic updates");
+			if (status === "failed") {
+				expect(text(h.component)).toContain("default factory function");
+				expect(text(h.component)).toContain("disable or uninstall");
+			}
+			if (status !== "failed") expect(text(h.component)).not.toContain("successful activation");
+			activate(h.component, "Uninstall");
+			expect(text(h.component)).toContain("Only this managed package selection/install is removed");
+			expect(h.removeAndPersist).not.toHaveBeenCalled();
+			await h.component.dispose();
+		},
+	);
 });
