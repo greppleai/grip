@@ -715,7 +715,7 @@ describe("remote canonical workspace tool routing", () => {
 			expect(select).toHaveBeenCalledWith(
 				`Run on host (no shell)?\n\nReason: "Run direct program?"\n\nExplanation (unverified):\n  "Refresh refs without exposing credentials"\n\nExecutable: ${JSON.stringify(process.execPath)}\nArguments: ${JSON.stringify(args)}\nHost cwd: ${JSON.stringify(hostRoot)}`,
 				["No", "Yes"],
-				{ signal: undefined },
+				{ signal: undefined, timeout: 60_000 },
 			);
 			await ctx.execHostProcess(process.execPath, args, { question: "No explanation", cwd: guestRoot });
 			expect(select.mock.calls[2][0]).not.toContain("Explanation (unverified):");
@@ -1059,6 +1059,108 @@ describe("remote canonical workspace tool routing", () => {
 			await operations.dispose();
 			await server.close();
 			faux.unregister();
+		}
+	});
+	it("keeps host approval expiry separate from execution and rejects late approval", async () => {
+		const guestRoot = await createTemporaryDirectory();
+		const hostRoot = await createTemporaryDirectory();
+		const { server, address } = await createServer(guestRoot);
+		const deferred = new DeferredRemoteToolOperations(hostRoot);
+		const harness = await createHarness({ toolOperations: deferred });
+		const select = vi.fn<ExtensionUIContext["select"]>().mockResolvedValue("Yes");
+		try {
+			await harness.session.activateSandboxDaemon({
+				url: address.url,
+				token: "",
+				expectedCwd: guestRoot,
+				hostWorkspaceRoot: hostRoot,
+			});
+			await harness.session.bindExtensions({ uiContext: { select } as unknown as ExtensionUIContext });
+			const ctx = harness.session.extensionRunner.createContext();
+			for (const approvalTimeoutMs of [0, -1, 1.5, NaN, Infinity, 2_147_483_648]) {
+				await expect(
+					ctx.execHostProcess(process.execPath, [], {
+						question: "Invalid deadline",
+						approvalTimeoutMs,
+					}),
+				).rejects.toThrow("positive integer");
+				await expect(
+					ctx.execHostCommand("echo invalid", {
+						question: "Invalid deadline",
+						approvalTimeoutMs,
+					}),
+				).rejects.toThrow("positive integer");
+			}
+			expect(select).not.toHaveBeenCalled();
+			const result = await ctx.execHostProcess(
+				process.execPath,
+				["-e", "setTimeout(() => process.stdout.write('done'), 200)"],
+				{
+					question: "Independent budgets",
+					approvalTimeoutMs: 25,
+					timeout: 2_000,
+				},
+			);
+			expect(result).toMatchObject({ stdout: "done", code: 0, killed: false });
+			expect(select).toHaveBeenLastCalledWith(expect.any(String), ["No", "Yes"], { signal: undefined, timeout: 25 });
+
+			let lateApprove: (() => void) | undefined;
+			select.mockImplementationOnce(
+				(_title, _choices, options) =>
+					new Promise((resolve) => {
+						lateApprove = () => resolve("Yes");
+						setTimeout(() => resolve(undefined), options?.timeout);
+					}),
+			);
+			const marker = join(hostRoot, "expired-approval.txt");
+			await expect(
+				ctx.execHostProcess(
+					process.execPath,
+					["-e", "require('node:fs').writeFileSync(process.argv[1], 'ran')", marker],
+					{
+						question: "Expire without executing",
+						approvalTimeoutMs: 10,
+						timeout: 2_000,
+					},
+				),
+			).rejects.toThrow("Host process was not approved");
+			lateApprove?.();
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			await expect(readFile(marker)).rejects.toThrow();
+
+			// Even a custom UI that returns a late Yes instead of expiring must fail closed.
+			select.mockImplementationOnce(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 30));
+				return "Yes";
+			});
+			await expect(
+				ctx.execHostProcess(
+					process.execPath,
+					["-e", "require('node:fs').writeFileSync(process.argv[1], 'ran')", marker],
+					{
+						question: "Reject delayed approval",
+						approvalTimeoutMs: 10,
+					},
+				),
+			).rejects.toThrow("Host process was not approved");
+			await expect(readFile(marker)).rejects.toThrow();
+
+			if (process.platform !== "win32") {
+				const signalled = await ctx.execHostProcess(
+					process.execPath,
+					["-e", "process.kill(process.pid, 'SIGTERM')"],
+					{
+						question: "External signal fixture",
+						timeout: 2_000,
+					},
+				);
+				expect(signalled).toMatchObject({ code: null, killed: false });
+			}
+		} finally {
+			await harness.session.dispose();
+			await deferred.dispose();
+			await server.close();
+			harness.cleanup();
 		}
 	});
 });

@@ -23,7 +23,7 @@ export interface ExecOptions {
 export interface ExecResult {
 	stdout: string;
 	stderr: string;
-	code: number;
+	code: number | null;
 	killed: boolean;
 }
 
@@ -94,14 +94,15 @@ export async function execCommand(
 				if (options?.signal) {
 					options.signal.removeEventListener("abort", killProcess);
 				}
-				resolve({ stdout, stderr, code: code ?? 0, killed });
+				resolve({ stdout, stderr, code, killed });
 			})
-			.catch((_err) => {
+			.catch((err: unknown) => {
 				if (timeoutId) clearTimeout(timeoutId);
 				if (options?.signal) {
 					options.signal.removeEventListener("abort", killProcess);
 				}
-				resolve({ stdout, stderr, code: 1, killed });
+				const message = err instanceof Error ? err.message : String(err);
+				resolve({ stdout, stderr: stderr ? `${stderr}\n${message}` : message, code: null, killed });
 			});
 	});
 }

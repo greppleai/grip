@@ -330,6 +330,8 @@ export interface ExtensionHostProcessOptions extends ExecOptions {
 	question: string;
 	/** Optional unverified explanation to show separately in the approval dialog (may originate from the agent). */
 	explanation?: string;
+	/** Approval-only deadline in milliseconds; defaults to 60 seconds. Expiration denies without executing. */
+	approvalTimeoutMs?: number;
 }
 export interface ExtensionContext {
 	/** UI methods for user interaction */
