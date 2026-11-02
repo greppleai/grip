@@ -3,7 +3,8 @@ import { Container, type TUI } from "@greppleai/grip-tui";
 import { describe, expect, test } from "vitest";
 import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
-import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { UserMessageComponent } from "../src/modes/interactive/components/user-message.ts";
+import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
@@ -86,6 +87,18 @@ describe("AssistantMessageComponent", () => {
 		expect(component.render(40).join("\n")).not.toMatch(/\x1b\[48;/);
 		component.updateContent({ ...message, stopReason: "aborted" }, false);
 		expect(component.render(40).join("\n")).not.toMatch(/\x1b\[48;/);
+	});
+
+	test.each(["dark", "light"])("distinguishes assistant and user stripes in the %s theme", (name) => {
+		initTheme(name);
+		const assistant = new AssistantMessageComponent(createAssistantMessage([{ type: "text", text: "reply" }]));
+		const user = new UserMessageComponent("question");
+		const assistantMarker = theme.bgFromFg("success", " ");
+		const userMarker = theme.bgFromFg("accent", " ");
+
+		expect(assistantMarker).not.toBe(userMarker);
+		expect(assistant.render(40)[1]).toBe(assistantMarker);
+		expect(user.render(40)[0]).toBe(OSC133_ZONE_START + userMarker);
 	});
 
 	test("leaves a blank row between a failed tool border and the final answer border", () => {

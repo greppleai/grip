@@ -33,13 +33,13 @@ function stripeFinalAnswer(lines: string[], width: number): void {
 	if (lines.length === 0) return;
 	// Keep the leading spacer uncolored so neighboring message stripes do not touch.
 	lines[0] = "";
-	const marker = theme.bgFromFg("accent", " ");
+	const marker = theme.bgFromFg("success", " ");
 	if (lines.length === 1) return;
 	for (let index = 1; index < lines.length; index++) {
 		const content = lines[index].trimEnd();
 		lines[index] = width <= 2 || !content ? marker : `${marker}${content}`;
 	}
-	// Pad inside the accent stripe, leaving the leading row as a separator from prior messages.
+	// Pad inside the stripe, leaving the leading row as a separator from prior messages.
 	lines.splice(1, 0, marker);
 	lines.push(marker);
 }
