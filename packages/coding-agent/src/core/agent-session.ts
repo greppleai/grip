@@ -1032,9 +1032,9 @@ function hasValidHostProcessApproval(options: ExtensionHostProcessOptions | unde
 	);
 }
 
-function assertValidHostCommandApprovalTimeout(timeout: number | undefined): void {
-	if (timeout !== undefined && (!Number.isSafeInteger(timeout) || timeout <= 0)) {
-		throw new Error("Host command approval timeout must be a positive integer in milliseconds");
+function assertValidHostApprovalTimeout(timeout: number | undefined): void {
+	if (timeout !== undefined && (!Number.isSafeInteger(timeout) || timeout <= 0 || timeout > 2_147_483_647)) {
+		throw new Error("Host approval timeout must be a positive integer in milliseconds, at most 2147483647");
 	}
 }
 
@@ -5206,7 +5206,7 @@ export class AgentSession {
 		) {
 			throw new Error("Host command and approval question must be non-empty strings");
 		}
-		assertValidHostCommandApprovalTimeout(options.approvalTimeoutMs);
+		assertValidHostApprovalTimeout(options.approvalTimeoutMs);
 		const operations = this._sandboxToolOperations;
 		if (!operations || operations !== this._toolOperations || operations.isDisconnected()) {
 			throw new Error("A connected sandbox is required for approved host commands");
@@ -5250,6 +5250,7 @@ export class AgentSession {
 		) {
 			throw new Error("Host executable, argv and approval question must be valid strings");
 		}
+		assertValidHostApprovalTimeout(options.approvalTimeoutMs);
 		const operations = this._sandboxToolOperations;
 		if (!operations || operations !== this._toolOperations || operations.isDisconnected()) {
 			throw new Error("A connected sandbox is required for approved host processes");
@@ -5270,8 +5271,15 @@ export class AgentSession {
 			`Arguments: ${JSON.stringify(args)}`,
 			`Host cwd: ${JSON.stringify(hostCwd)}`,
 		].join("\n");
-		const choice = await runner.getUIContext().select(approval, ["No", "Yes"], { signal });
-		if (choice !== "Yes" || signal?.aborted) throw new Error("Host process was not approved");
+		const approvalTimeoutMs = options.approvalTimeoutMs ?? 60_000;
+		const approvalDeadline = performance.now() + approvalTimeoutMs;
+		const choice = await runner.getUIContext().select(approval, ["No", "Yes"], {
+			signal,
+			timeout: approvalTimeoutMs,
+		});
+		if (choice !== "Yes" || signal?.aborted || performance.now() >= approvalDeadline) {
+			throw new Error("Host process was not approved");
+		}
 		if (
 			runner !== this._extensionRunner ||
 			operations !== this._sandboxToolOperations ||
