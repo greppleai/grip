@@ -1,5 +1,6 @@
 import assert from "node:assert";
-import { describe, it, mock } from "node:test";
+import childProcess from "node:child_process";
+import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { HStack } from "../src/components/h-stack.ts";
 import { Image } from "../src/components/image.ts";
 import { ScrollView } from "../src/components/scroll-view.ts";
@@ -85,6 +86,16 @@ function clearMultiplexerEnvironment(): void {
 	delete process.env.STY;
 	delete process.env.TERM;
 }
+
+const originalEnv = process.env;
+beforeEach(() => {
+	process.env = { ...originalEnv };
+	delete process.env.TMUX;
+	delete process.env.TMUX_PANE;
+});
+afterEach(() => {
+	process.env = originalEnv;
+});
 
 describe("TuiAltScreen", () => {
 	it("renders a terminal-height viewport and preserves manual scroll position", async () => {
@@ -1523,6 +1534,7 @@ describe("TuiAltScreen", () => {
 	});
 
 	it("uses button-motion tracking and preserves mouse interactions in multiplexer environments", async () => {
+		const copy = mock.method(childProcess, "execFileSync", () => Buffer.alloc(0));
 		const keys = ["TMUX", "ZELLIJ", "STY", "TERM"] as const;
 		const previous = new Map(keys.map((key) => [key, process.env[key]]));
 		try {
@@ -1569,7 +1581,20 @@ describe("TuiAltScreen", () => {
 					terminal.sendInput("\x1b[<0;4;1m");
 					await terminal.waitForRender();
 					const selectionWrites: string = collectRecordedWrites(terminal);
-					assert.ok(selectionWrites.includes(copiedText), `${name} should preserve text selection`);
+					if (process.env.TMUX) {
+						assert.deepStrictEqual(copy.mock.calls[0]?.arguments, [
+							"tmux",
+							["load-buffer", "-w", "-"],
+							{
+								input: "line",
+								stdio: ["pipe", "ignore", "ignore"],
+								timeout: 5000,
+							},
+						]);
+						assert.ok(!selectionWrites.includes(copiedText));
+					} else {
+						assert.ok(selectionWrites.includes(copiedText), `${name} should preserve text selection`);
+					}
 
 					terminal.sendInput("\x1b[<0;10;1M");
 					terminal.sendInput("\x1b[<32;10;5M");
@@ -1583,6 +1608,7 @@ describe("TuiAltScreen", () => {
 				assertMouseModeWrites(shutdownWrites, "l", ALL_MOUSE_MODES, name);
 			}
 		} finally {
+			copy.mock.restore();
 			for (const key of keys) {
 				const value = previous.get(key);
 				if (value === undefined) delete process.env[key];

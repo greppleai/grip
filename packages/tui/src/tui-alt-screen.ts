@@ -1,3 +1,4 @@
+import childProcess from "node:child_process";
 import { AltScreenFlashContainer } from "./components/alt-screen-flash.ts";
 import { ScrollView } from "./components/scroll-view.ts";
 import { getKeybindings, type Keybinding } from "./keybindings.ts";
@@ -968,8 +969,23 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		}
 		const text = lines.join("\n");
 		if (text.length === 0) return;
-		this.terminal.write(`\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`);
-		this.flash("Copied!");
+		try {
+			if (process.env.TMUX) {
+				// tmux's default set-clipboard=external ignores application OSC 52.
+				// Ask tmux itself to write to the attached client's clipboard instead.
+				// Pass text on stdin, not through a shell or command-line argument.
+				childProcess.execFileSync("tmux", ["load-buffer", "-w", "-"], {
+					input: text,
+					stdio: ["pipe", "ignore", "ignore"],
+					timeout: 5000,
+				});
+			} else {
+				this.terminal.write(`\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`);
+			}
+			this.flash("Copied!");
+		} catch {
+			this.flash("Failed to copy to clipboard");
+		}
 	}
 
 	private applySelectionHighlight(text: string): string {
