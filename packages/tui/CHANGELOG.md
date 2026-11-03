@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Copy mouse-selected text through tmux's clipboard command instead of emitting OSC 52 that tmux ignores by default, and report command failures rather than showing "Copied!".
+
 All notable changes to `@greppleai/grip-tui` are documented in this file.
 
 ## [0.2.5](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.2.4...@greppleai/grip-tui-v0.2.5) (2026-10-30)
