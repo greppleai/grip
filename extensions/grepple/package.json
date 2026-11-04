@@ -1,7 +1,7 @@
 {
   "name": "@grip-extensions/grepple",
   "version": "1.0.0",
-  "description": "Grepple-first workflow and install command for Grip",
+  "description": "Grepple-first workflow with latest CLI and matching skill installation for Grip",
   "type": "module",
   "license": "MIT",
   "engines": {

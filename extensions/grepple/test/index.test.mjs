@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -14,6 +14,7 @@ function harness(initialTools) {
 	const notifications = [];
 	let jobFactory;
 	let active = [...initialTools];
+	let reloads = 0;
 	extension({
 		registerJobFactory(factory) {
 			jobFactory = factory;
@@ -45,8 +46,12 @@ function harness(initialTools) {
 		isSandbox: () => false,
 		execToolBackend: async () => ({ exitCode: 1, output: "", cancelled: false, truncated: false }),
 		execHostCommand: async () => { throw new Error("Host call not expected"); },
+		reload: async () => {
+			reloads++;
+			await events.get("resources_discover")({ reason: "reload" }, ctx);
+		},
 	};
-	return { events, registered, commands, selections, notifications, ctx, getActive: () => active, jobFactory };
+	return { events, registered, commands, selections, notifications, ctx, getActive: () => active, jobFactory, getReloads: () => reloads };
 }
 
 test("jobs receive Grepple workflow hooks without the installation command", async () => {
@@ -85,7 +90,7 @@ test("jobs receive Grepple workflow hooks without the installation command", asy
 test("deactivates direct tools without registering overrides or affecting unrelated tools", () => {
 	const h = harness(["read", "bash", "grep", "edit", "write", "grepple", "other", "websearch"]);
 	assert.deepEqual(h.registered, []);
-	assert.deepEqual([...h.events.keys()], ["session_start", "before_agent_start", "tool_call"]);
+	assert.deepEqual([...h.events.keys()], ["session_start", "before_agent_start", "tool_call", "resources_discover"]);
 	assert.deepEqual([...h.commands.keys()], ["grepple-install"]);
 	h.events.get("session_start")();
 	assert.deepEqual(h.getActive(), ["bash", "other", "websearch"]);
@@ -242,7 +247,9 @@ test("install command is explicit and installs only once without a sandbox", asy
 	assert.match(executions[0].shell, /https:\/\/raw\.githubusercontent\.com\/greppleai\/grepple\/main\/install\.sh/);
 	assert.match(executions[0].shell, /--bin-dir "\$HOME\/\.local\/bin"/);
 	assert.doesNotMatch(executions[0].shell, /\|\s*sh\b|\bsudo\b/);
-	assert.deepEqual(h.notifications, [{ message: "Grepple installed in the local backend (also the host).", level: "info" }]);
+	assert.match(executions[0].shell, /"\$HOME\/\.local\/bin\/grepple" setup grip --skills-dir /);
+	assert.deepEqual(h.notifications, [{ message: "Latest Grepple CLI and matching skills installed in the local backend (also the host).", level: "info" }]);
+	assert.equal(h.getReloads(), 1);
 });
 
 test("sandbox install uses the backend, then asks for separate host approval", async () => {
@@ -260,12 +267,14 @@ test("sandbox install uses the backend, then asks for separate host approval", a
 	};
 	await h.commands.get("grepple-install").handler("", h.ctx);
 	assert.deepEqual(executions.map(({ side }) => side), ["sandbox", "host"]);
-	assert.equal(executions[0].shell, executions[1].shell);
+	assert.match(executions[0].shell, /"\$HOME\/\.local\/bin\/grepple" setup grip$/);
+	assert.match(executions[1].shell, /"\$HOME\/\.local\/bin\/grepple" setup grip --skills-dir /);
 	assert.equal(executions[1].options.cwd, h.ctx.cwd);
 	assert.equal(executions[1].options.timeout, 600);
 	assert.equal(executions[1].options.approvalTimeoutMs, 60_000);
-	assert.match(executions[1].options.question, /host ~\/\.local\/bin/);
-	assert.deepEqual(h.notifications, [{ message: "Grepple installed in both sandbox and host (~/.local/bin).", level: "info" }]);
+	assert.deepEqual(h.notifications, [{ message: "Latest Grepple CLI and matching skills installed in both sandbox and host.", level: "info" }]);
+	assert.equal(h.getReloads(), 1);
+	assert.match(executions[1].options.question, /host ~\/\.local\/bin.*matching Grip skills/);
 });
 
 test("install refuses unmapped sandbox and unrelated remote backend before executing", async () => {
@@ -316,5 +325,149 @@ test("nonzero host exit reports a partial install rather than success", async ()
 	h.ctx.execToolBackend = async () => ({ exitCode: 0, cancelled: false });
 	h.ctx.execHostCommand = async () => ({ exitCode: 1, cancelled: false });
 	await h.commands.get("grepple-install").handler("", h.ctx);
-	assert.deepEqual(h.notifications, [{ message: "Grepple installed in the sandbox, but host installation failed.", level: "error" }]);
+	assert.deepEqual(h.notifications, [{ message: "Grepple CLI and skills installed in the sandbox, but host installation failed.", level: "error" }]);
+	assert.equal(h.getReloads(), 1);
+});
+
+test("startup and reload refresh latest CLI and skills, then expose host skills", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "grepple-grip-skills-"));
+	const previous = process.env.GRIP_CODING_AGENT_DIR;
+	const offline = process.env.GRIP_OFFLINE;
+	try {
+		process.env.GRIP_CODING_AGENT_DIR = join(dir, "agent's $data");
+		delete process.env.GRIP_OFFLINE;
+		const skillsDir = join(process.env.GRIP_CODING_AGENT_DIR, "skills");
+		const h = harness(["bash"]);
+		const executions = [];
+		h.ctx.execToolBackend = async (shell) => {
+			executions.push(shell);
+			mkdirSync(skillsDir, { recursive: true });
+			return { exitCode: 0, cancelled: false };
+		};
+		const discover = h.events.get("resources_discover");
+		assert.deepEqual(await discover({ reason: "startup" }, h.ctx), { skillPaths: [skillsDir] });
+		assert.equal(executions.length, 1);
+		assert.match(executions[0], /install\.sh/);
+		assert.match(executions[0], /setup grip --skills-dir/);
+		assert.ok(executions[0].includes("agent'\\''s $data/skills'"));
+		assert.deepEqual(await discover({ reason: "reload" }, h.ctx), { skillPaths: [skillsDir] });
+		assert.equal(executions.length, 2);
+		assert.equal(h.getReloads(), 0);
+		// A fresh session checks again rather than treating an installed binary as current.
+		await harness(["bash"]).events.get("resources_discover")({ reason: "startup" }, h.ctx);
+		assert.equal(executions.length, 3);
+	} finally {
+		if (previous === undefined) delete process.env.GRIP_CODING_AGENT_DIR;
+		else process.env.GRIP_CODING_AGENT_DIR = previous;
+		if (offline === undefined) delete process.env.GRIP_OFFLINE;
+		else process.env.GRIP_OFFLINE = offline;
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("offline startup discovers installed skills without network or host execution", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "grepple-grip-offline-"));
+	const previous = process.env.GRIP_CODING_AGENT_DIR;
+	const offline = process.env.GRIP_OFFLINE;
+	try {
+		process.env.GRIP_CODING_AGENT_DIR = dir;
+		process.env.GRIP_OFFLINE = "true";
+		const skillsDir = join(dir, "skills");
+		mkdirSync(skillsDir);
+		const h = harness(["bash"]);
+		h.ctx.execToolBackend = async () => { throw new Error("unexpected network command"); };
+		assert.deepEqual(await h.events.get("resources_discover")({ reason: "startup" }, h.ctx), { skillPaths: [skillsDir] });
+		assert.deepEqual(h.notifications, []);
+		await h.commands.get("grepple-install").handler("", h.ctx);
+		assert.match(h.notifications.at(-1).message, /offline mode/);
+		assert.equal(h.getReloads(), 0);
+	} finally {
+		if (previous === undefined) delete process.env.GRIP_CODING_AGENT_DIR;
+		else process.env.GRIP_CODING_AGENT_DIR = previous;
+		if (offline === undefined) delete process.env.GRIP_OFFLINE;
+		else process.env.GRIP_OFFLINE = offline;
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("startup update failures are nonfatal and retain installed skills", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "grepple-grip-failure-"));
+	const previous = process.env.GRIP_CODING_AGENT_DIR;
+	const offline = process.env.GRIP_OFFLINE;
+	try {
+		process.env.GRIP_CODING_AGENT_DIR = dir;
+		delete process.env.GRIP_OFFLINE;
+		const skillsDir = join(dir, "skills");
+		mkdirSync(skillsDir);
+		const h = harness(["bash"]);
+		h.ctx.execToolBackend = async () => { throw new Error("offline network"); };
+		assert.deepEqual(await h.events.get("resources_discover")({ reason: "startup" }, h.ctx), { skillPaths: [skillsDir] });
+		assert.match(h.notifications.at(-1).message, /backend CLI\/skill install failed/);
+		assert.equal(h.getReloads(), 0);
+	} finally {
+		if (previous === undefined) delete process.env.GRIP_CODING_AGENT_DIR;
+		else process.env.GRIP_CODING_AGENT_DIR = previous;
+		if (offline === undefined) delete process.env.GRIP_OFFLINE;
+		else process.env.GRIP_OFFLINE = offline;
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("installer shell uses the downloaded executable and a literal custom skills destination", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "grepple-grip-install-shell-"));
+	const previous = process.env.GRIP_CODING_AGENT_DIR;
+	const offline = process.env.GRIP_OFFLINE;
+	try {
+		process.env.GRIP_CODING_AGENT_DIR = join(dir, "agent's $data");
+		delete process.env.GRIP_OFFLINE;
+		const skillsDir = join(process.env.GRIP_CODING_AGENT_DIR, "skills");
+		const capture = join(dir, "args.json");
+		const installer = join(dir, "installer.sh");
+		writeFileSync(installer, `#!/bin/sh
+set -eu
+mkdir -p "$HOME/.local/bin"
+cp "$GREPPLE_FIXTURE" "$HOME/.local/bin/grepple"
+chmod +x "$HOME/.local/bin/grepple"
+`);
+		const binary = join(dir, "binary.cjs");
+		writeFileSync(binary, `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "--version") process.exit(0);
+fs.writeFileSync(process.env.CAPTURE, JSON.stringify(args));
+if (process.env.FAIL_SKILLS) process.exit(1);
+fs.mkdirSync(args[3], { recursive: true });
+`);
+		const curl = join(dir, "curl");
+		writeFileSync(curl, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+require("node:fs").copyFileSync(process.env.INSTALLER_FIXTURE, args[args.indexOf("--output") + 1]);
+`);
+		chmodSync(curl, 0o755);
+		const h = harness(["bash"]);
+		h.ctx.cwd = dir;
+		let failSkills = false;
+		h.ctx.execToolBackend = async (shell) => {
+			const result = spawnSync("sh", ["-c", shell], {
+				cwd: dir,
+				encoding: "utf8",
+				env: { ...process.env, HOME: dir, PATH: `${dir}:${process.env.PATH}`, CAPTURE: capture,
+					INSTALLER_FIXTURE: installer, GREPPLE_FIXTURE: binary, FAIL_SKILLS: failSkills ? "1" : "" },
+			});
+			assert.equal(result.stderr, "");
+			return { exitCode: result.status, cancelled: false };
+		};
+		assert.deepEqual(await h.events.get("resources_discover")({ reason: "startup" }, h.ctx), { skillPaths: [skillsDir] });
+		assert.deepEqual(JSON.parse(readFileSync(capture, "utf8")), ["setup", "grip", "--skills-dir", skillsDir]);
+		failSkills = true;
+		await h.commands.get("grepple-install").handler("", h.ctx);
+		assert.equal(h.getReloads(), 1);
+		assert.match(h.notifications.at(-1).message, /CLI\/skill install failed/);
+	} finally {
+		if (previous === undefined) delete process.env.GRIP_CODING_AGENT_DIR;
+		else process.env.GRIP_CODING_AGENT_DIR = previous;
+		if (offline === undefined) delete process.env.GRIP_OFFLINE;
+		else process.env.GRIP_OFFLINE = offline;
+		rmSync(dir, { recursive: true, force: true });
+	}
 });

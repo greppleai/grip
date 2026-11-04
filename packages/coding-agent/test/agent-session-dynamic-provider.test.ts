@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getModel } from "@greppleai/grip-ai";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import type { ExtensionFactory } from "../src/core/extensions/types.ts";
@@ -16,12 +17,19 @@ describe("AgentSession dynamic provider registration", () => {
 	let agentDir: string;
 
 	beforeEach(() => {
+		// Keep startup from replacing the test catalog with network data or a user's cache.
+		vi.stubEnv("GRIP_OFFLINE", "1");
+		vi.stubEnv(
+			"GRIP_MODEL_CATALOG_CACHE_PATH",
+			fileURLToPath(new URL("../../ai/test/data/model-catalog-fixture.json", import.meta.url)),
+		);
 		tempDir = join(tmpdir(), `pi-dynamic-provider-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		agentDir = join(tempDir, "agent");
 		mkdirSync(agentDir, { recursive: true });
 	});
 
 	afterEach(() => {
+		vi.unstubAllEnvs();
 		if (tempDir && existsSync(tempDir)) {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
