@@ -2,6 +2,20 @@
 
 All notable changes to `@greppleai/grip-agent-core` are documented in this file.
 
+## [0.3.1](https://github.com/greppleai/grip/compare/@greppleai/grip-agent-core-v0.3.0...@greppleai/grip-agent-core-v0.3.1) (2026-11-04)
+
+
+### Features
+
+* **jobs:** preload child context with tool calls ([43cc4b7](https://github.com/greppleai/grip/commit/43cc4b71bb9a23cb59707db931e761e31362d323))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-ai bumped from ^0.3.0 to ^0.3.1
+
 ## [0.3.0](https://github.com/greppleai/grip/compare/@greppleai/grip-agent-core-v0.2.5...@greppleai/grip-agent-core-v0.3.0) (2026-11-04)
 
 
