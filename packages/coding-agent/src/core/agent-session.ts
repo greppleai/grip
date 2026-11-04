@@ -2389,6 +2389,7 @@ export class AgentSession {
 		);
 		this._restoreCompressionContextState(previous);
 		this.agent.state.messages = this.session.buildSessionContext().messages;
+		cleanupSessionResources(this.sessionId);
 		this._compressionDetector.reset(this.agent.state.messages, this.getContextUsage()?.percent ?? null);
 		this._stateCompressionApplied = true;
 		this._emit({ type: "state_compressed" });
@@ -4569,6 +4570,8 @@ export class AgentSession {
 		);
 		const newEntries = this.session.getEntries();
 		this.agent.state.messages = this.session.buildSessionContext().messages;
+		// Provider continuation caches can still own the pre-compaction request body.
+		cleanupSessionResources(this.sessionId);
 		this._compressionDetector.reset(this.agent.state.messages, this.getContextUsage()?.percent ?? null);
 		const savedCompactionEntry = newEntries.find(
 			(entry): entry is CompactionEntry => entry.type === "compaction" && entry.summary === result.summary,
@@ -4844,6 +4847,7 @@ export class AgentSession {
 		);
 		const newEntries = this.session.getEntries();
 		this.agent.state.messages = this.session.buildSessionContext().messages;
+		cleanupSessionResources(this.sessionId);
 		this._compressionDetector.reset(this.agent.state.messages, this.getContextUsage()?.percent ?? null);
 		const savedCompactionEntry = newEntries.find(
 			(entry): entry is CompactionEntry => entry.type === "compaction" && entry.summary === result.summary,

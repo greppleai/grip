@@ -35,6 +35,7 @@ import type {
 	SessionListProgress,
 	SessionMessageEntry,
 } from "../types.ts";
+import { archiveSessionEntry, isArchivedSessionEntry, materializeSessionEntry } from "./archived-entry.ts";
 import { InMemorySessionStore } from "./in-memory-session-store.ts";
 
 function isMessageWithContent(message: AgentMessage): message is Message {
@@ -78,6 +79,48 @@ const SAFE_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 interface JsonlRecordLocation {
 	line: number;
 	byteOffset: number;
+	byteLength?: number;
+}
+
+interface ArchivedRecordLocation extends JsonlRecordLocation {
+	byteLength: number;
+}
+
+interface ArchivedRecordSource {
+	reference: string;
+	location: ArchivedRecordLocation;
+}
+
+function readArchivedRecordBytes(source: ArchivedRecordSource, bytes: Buffer): void {
+	const fd = openSync(source.reference, "r");
+	try {
+		let offset = 0;
+		while (offset < bytes.length) {
+			const count = readSync(fd, bytes, offset, bytes.length - offset, source.location.byteOffset + offset);
+			if (count === 0) throw new Error("Archived session entry was truncated");
+			offset += count;
+		}
+	} finally {
+		closeSync(fd);
+	}
+}
+
+function archivedEntryReader(source: ArchivedRecordSource, id: string): () => SessionEntry {
+	return () => {
+		const { reference, location } = source;
+		const bytes = Buffer.allocUnsafe(location.byteLength);
+		const record = { bytes, line: location.line, start: location.byteOffset, terminated: true };
+		try {
+			readArchivedRecordBytes(source, bytes);
+			const entry = parseStrictEntry(record, 3);
+			if (entry.id !== id) throw new JsonlDecodeFailure("state", `no longer contains archived entry ${id}`);
+			return entry;
+		} catch (error) {
+			const cause = error instanceof Error ? error : new Error(String(error));
+			if (cause instanceof JsonlDecodeFailure) throw invalidJsonl(reference, record, cause, "open");
+			throw jsonlStorageError(reference, "open", `Failed to read archived entry ${id}: ${cause.message}`, cause);
+		}
+	};
 }
 
 function parseSessionEntryLine(line: string): FileEntry | null {
@@ -625,6 +668,8 @@ function validateCurrentSessionEntrySchema(
 			new JsonlDecodeFailure("state", `has an unexpected session header at logical entry ${index + 1}`),
 		);
 	}
+	// Archived shells are frozen, already-validated records. Do not hydrate their payloads on every append.
+	if (isArchivedSessionEntry(entry)) return;
 	try {
 		const encodedEntry = new TextEncoder().encode(JSON.stringify(entry));
 		parseStrictEntry({ bytes: encodedEntry, line: index + 1, start: 0, terminated: true }, 3);
@@ -767,7 +812,7 @@ function scanJsonlRecord(
 		} else {
 			state.entries.push(parseStrictEntry(record, state.header.version ?? 1));
 		}
-		state.locations.push({ line: record.line, byteOffset: record.start });
+		state.locations.push({ line: record.line, byteOffset: record.start, byteLength: record.bytes.length });
 		return "continue";
 	} catch (error) {
 		const failure = error instanceof Error ? error : new Error(String(error));
@@ -1212,6 +1257,8 @@ export class JsonlSessionStore extends InMemorySessionStore {
 	private writeFence: Error | undefined;
 	private nextAppendLine = 1;
 	private nextAppendOffset = 0;
+	private entrySources = new Map<string, ArchivedRecordSource>();
+	private retainedEntryIds: ReadonlySet<string> | undefined;
 
 	constructor(
 		preloaded?: PreloadedSessionEntries,
@@ -1269,6 +1316,57 @@ export class JsonlSessionStore extends InMemorySessionStore {
 		return entries;
 	}
 
+	setEntries(entries: FileEntry[]): void {
+		super.setEntries(entries);
+		this.entrySources = new Map();
+		this.retainedEntryIds = undefined;
+		const locations = getJsonlEntryLocations(entries);
+		if (locations) {
+			for (let index = 0; index < entries.length; index++) {
+				const location = locations[index];
+				if (location?.byteLength !== undefined)
+					this.recordEntrySource(entries[index], { ...location, byteLength: location.byteLength });
+			}
+		}
+	}
+
+	retainContextEntries(entryIds: ReadonlySet<string>): void {
+		this.retainedEntryIds = entryIds;
+		if (!this.reference || !this.flushed || this.writeFence) return;
+		for (let index = 0; index < this.fileEntries.length; index++) {
+			const entry = this.fileEntries[index];
+			if (entry.type === "session") continue;
+			const source = this.entrySources.get(entry.id);
+			if (!source) continue; // Never evict an entry without a successfully persisted copy.
+			const replacement = entryIds.has(entry.id)
+				? materializeSessionEntry(entry)
+				: isArchivedSessionEntry(entry)
+					? entry
+					: archiveSessionEntry(entry, archivedEntryReader(source, entry.id));
+			if (replacement === entry) continue;
+			this.fileEntries[index] = replacement;
+			this.byId.set(entry.id, replacement);
+		}
+	}
+
+	private recordEntrySource(entry: FileEntry, location: ArchivedRecordLocation): void {
+		if (entry.type === "session" || !this.reference) return;
+		const source = this.entrySources.get(entry.id);
+		if (source?.reference === this.reference) source.location = location;
+		else this.entrySources.set(entry.id, { reference: this.reference, location });
+	}
+
+	private recordSnapshotPositions(entries: FileEntry[]): void {
+		let byteOffset = 0;
+		for (let index = 0; index < entries.length; index++) {
+			const byteLength = Buffer.byteLength(`${JSON.stringify(entries[index])}\n`);
+			this.recordEntrySource(entries[index], { line: index + 1, byteOffset, byteLength });
+			byteOffset += byteLength;
+		}
+		this.nextAppendLine = entries.length + 1;
+		this.nextAppendOffset = byteOffset;
+	}
+
 	private updateNextAppendPosition(filePath: string): void {
 		const position = getNextAppendPosition(readFileSync(filePath));
 		this.nextAppendLine = position.line;
@@ -1306,13 +1404,16 @@ export class JsonlSessionStore extends InMemorySessionStore {
 		prospectiveEntries: FileEntry[],
 	): void {
 		if (wasFlushed) {
+			this.recordEntrySource(prospectiveEntries[prospectiveEntries.length - 1], {
+				line: this.nextAppendLine,
+				byteOffset: this.nextAppendOffset,
+				byteLength: Buffer.byteLength(serializedEntry!),
+			});
 			this.nextAppendLine++;
 			this.nextAppendOffset += Buffer.byteLength(serializedEntry!);
 			return;
 		}
-		const position = getNextAppendPosition(new TextEncoder().encode(serializeJsonlEntries(prospectiveEntries)));
-		this.nextAppendLine = position.line;
-		this.nextAppendOffset = position.byteOffset;
+		this.recordSnapshotPositions(prospectiveEntries);
 	}
 
 	appendEntry(entry: SessionEntry): void {
@@ -1376,13 +1477,14 @@ export class JsonlSessionStore extends InMemorySessionStore {
 	saveSnapshot(options: JsonlSnapshotOptions = {}): void {
 		if (!this.reference) return;
 		this.assertWritable();
-		serializeJsonlEntries(this.getFileEntries());
+		const entries = this.getFileEntries().map(materializeSessionEntry);
+		serializeJsonlEntries(entries);
 		try {
 			if (this.flushed) {
-				this.writeOperations.publish(this.reference, this.getFileEntries(), {
+				this.writeOperations.publish(this.reference, entries, {
 					phase: options.phase ?? "replace",
 				});
-			} else this.publishFirstSnapshot(this.getFileEntries());
+			} else this.publishFirstSnapshot(entries);
 		} catch (error) {
 			if (error instanceof SessionAlreadyExistsError) throw error;
 			const cause = error instanceof Error ? error : new Error(String(error));
@@ -1395,11 +1497,13 @@ export class JsonlSessionStore extends InMemorySessionStore {
 			);
 			throw this.writeFence;
 		}
-		const position = getNextAppendPosition(new TextEncoder().encode(serializeJsonlEntries(this.getFileEntries())));
-		this.nextAppendLine = position.line;
-		this.nextAppendOffset = position.byteOffset;
+		const leafId = this.getLeafId();
+		super.setEntries(entries);
+		this.setLeafId(leafId);
+		this.recordSnapshotPositions(entries);
 		this.flushed = true;
 		this.allowExistingEmptyFile = false;
+		if (this.retainedEntryIds) this.retainContextEntries(this.retainedEntryIds);
 	}
 
 	commitSnapshot(): void {

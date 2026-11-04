@@ -118,6 +118,9 @@ All notable changes to Grip are documented in this file.
 - Show readable, collision-safe startup extension names for JavaScript/TypeScript entry points and official packages, including Planner, while preserving detailed paths.
 - Distinguish completed assistant responses from user messages with a green success-colored stripe instead of the shared accent color.
 
+- Evict compacted message payloads and retained job transcripts from local session memory while preserving disk-backed history access.
+- Cache compact job UI snapshots and reuse completed result views without rereading child messages during redraws.
+
 ## [0.2.1](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.0...@greppleai/grip-v0.2.1) (2026-10-28)
 
 

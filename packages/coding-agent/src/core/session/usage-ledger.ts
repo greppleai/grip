@@ -81,12 +81,22 @@ function addJobResultUsage(totals: UsageTotals, result: unknown): void {
 	}
 }
 
+// Finalized entries are immutable. Cache only numeric totals, not retained job transcripts.
+const jobUsageCache = new WeakMap<SessionEntry, UsageTotals>();
+
 function addJobUsage(totals: UsageTotals, entry: SessionEntry): void {
 	if (entry.type !== "message" || entry.replayedFromId || entry.message.role !== "toolResult") return;
 	if (entry.message.toolName !== "job") return;
-	const details: unknown = entry.message.details;
-	if (!details || typeof details !== "object" || !("results" in details) || !Array.isArray(details.results)) return;
-	for (const result of details.results as unknown[]) addJobResultUsage(totals, result);
+	let usage = jobUsageCache.get(entry);
+	if (!usage) {
+		usage = emptyTotals();
+		const details: unknown = entry.message.details;
+		if (details && typeof details === "object" && "results" in details && Array.isArray(details.results)) {
+			for (const result of details.results as unknown[]) addJobResultUsage(usage, result);
+		}
+		jobUsageCache.set(entry, usage);
+	}
+	for (const key of Object.keys(usage) as (keyof UsageTotals)[]) totals[key] += usage[key];
 }
 
 /** Latest persisted parent checkpoint plus uncheckpointed responses and all recorded job results. */

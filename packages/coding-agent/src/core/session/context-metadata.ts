@@ -1,5 +1,6 @@
 import type { AgentMessage, CustomMessage } from "@greppleai/grip-agent-core";
 import { createCustomMessage } from "../messages.ts";
+import { projectSessionContextEntries } from "./context.ts";
 import type { SessionEntry, SessionMessageEntry } from "./types.ts";
 
 function createMetadataNotice(content: string): CustomMessage {
@@ -54,7 +55,7 @@ function indexBranchMessages(branch: SessionEntry[]): ContextMessageIndex {
 
 /** Model-only notices are placed after complete tool-result batches to preserve provider tool-call ordering. */
 export function annotateContextMetadata(messages: AgentMessage[], branch: SessionEntry[]): AgentMessage[] {
-	const { entries, identityIds, assistantIds } = indexBranchMessages(branch);
+	const { entries, identityIds, assistantIds } = indexBranchMessages(projectSessionContextEntries(branch));
 	const usedIds = new Set<string>();
 	const annotated: AgentMessage[] = [];
 	const toolNotices: string[] = [];
