@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.2.5...@greppleai/grip-tui-v0.3.0) (2026-11-04)
+
+
+### Bug Fixes
+
+* **tui:** fix/tmux-clipboard - copy selections through tmux ([701a20f](https://github.com/greppleai/grip/commit/701a20f855cd4c3a93061101fb8c4498f6831831))
+
 ## [Unreleased]
 
 ### Fixed
