@@ -1,4 +1,6 @@
-import type { ExtensionAPI, ExtensionContext } from "@greppleai/grip";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@greppleai/grip";
 
 const INACTIVE_TOOLS = new Set(["read", "grep", "edit", "write", "grepple"]);
 
@@ -6,9 +8,9 @@ const INSTALL_COMMAND = [
 	"set -eu",
 	"installer=$(mktemp)",
 	"trap 'rm -f \"$installer\"' 0",
-	"curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 120 --output \"$installer\" https://raw.githubusercontent.com/greppleai/grepple/main/install.sh",
+	"curl --disable --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 120 --max-filesize 1048576 --output \"$installer\" https://raw.githubusercontent.com/greppleai/grepple/main/install.sh",
 	'sh "$installer" --bin-dir "$HOME/.local/bin"',
-	'PATH="$HOME/.local/bin:$PATH" grepple --version',
+	'"$HOME/.local/bin/grepple" --version',
 ].join("\n");
 const MAX_GUARD_REQUEST_BYTES = 1024 * 1024;
 const GREPPLE_REMINDER = [
@@ -94,17 +96,48 @@ async function validateInstallTarget(ctx: ExtensionContext, sandbox: boolean): P
 	}
 }
 
-async function installGreppleBackend(ctx: ExtensionContext): Promise<boolean> {
+async function installGrepple(ctx: ExtensionContext, skillsDir: string): Promise<boolean> {
+	const sandbox = ctx.isSandbox();
+	if (!(await validateInstallTarget(ctx, sandbox))) return false;
+	const hostCommand = `${INSTALL_COMMAND}\n"$HOME/.local/bin/grepple" setup grip --skills-dir ${shellQuote(skillsDir)}`;
+	const backendCommand = sandbox ? `${INSTALL_COMMAND}\n"$HOME/.local/bin/grepple" setup grip` : hostCommand;
 	try {
-		const guest = await ctx.execToolBackend(INSTALL_COMMAND, { cwd: ctx.cwd, timeout: 600 });
-		if (guest.cancelled || guest.exitCode !== 0) {
-			ctx.ui.notify("Grepple install failed in the active tool backend; host install was not attempted.", "error");
+		const backend = await ctx.execToolBackend(backendCommand, { cwd: ctx.cwd, timeout: 600 });
+		if (backend.cancelled || backend.exitCode !== 0) {
+			ctx.ui.notify(
+				"Grepple CLI/skill install failed in the active tool backend; host install was not attempted. Retry /grepple-install.",
+				"error",
+			);
 			return false;
 		}
+	} catch (error) {
+		ctx.ui.notify(
+			`Grepple backend CLI/skill install failed: ${error instanceof Error ? error.message : String(error)}`,
+			"error",
+		);
+		return false;
+	}
+	if (!sandbox) {
+		ctx.ui.notify("Latest Grepple CLI and matching skills installed in the local backend (also the host).", "info");
+		return true;
+	}
+	try {
+		const host = await ctx.execHostCommand(hostCommand, {
+			question:
+				"Install the latest Grepple into host ~/.local/bin and synchronize its matching Grip skills? The official installer downloads and checksum-verifies the latest published release.",
+			cwd: ctx.cwd,
+			timeout: 600,
+			approvalTimeoutMs: 60_000,
+		});
+		if (host.cancelled || host.exitCode !== 0) {
+			ctx.ui.notify("Grepple CLI and skills installed in the sandbox, but host installation failed.", "error");
+			return false;
+		}
+		ctx.ui.notify("Latest Grepple CLI and matching skills installed in both sandbox and host.", "info");
 		return true;
 	} catch (error) {
 		ctx.ui.notify(
-			`Grepple backend install failed: ${error instanceof Error ? error.message : String(error)}`,
+			`Grepple CLI and skills installed in the sandbox, but host installation was not completed: ${error instanceof Error ? error.message : String(error)}`,
 			"error",
 		);
 		return false;
@@ -114,37 +147,29 @@ async function installGreppleBackend(ctx: ExtensionContext): Promise<boolean> {
 export default function greppleExtension(pi: ExtensionAPI): void {
 	pi.registerJobFactory(registerGreppleWorkflow);
 	pi.registerCommand("grepple-install", {
-		description: "Install Grepple in the workspace backend and, with approval, on the host",
+		description: "Refresh the latest Grepple CLI and matching Grip skills (host approval in sandboxes)",
 		handler: async (_args, ctx) => {
-			const sandbox = ctx.isSandbox();
-			if (!(await validateInstallTarget(ctx, sandbox))) return;
-			if (!(await installGreppleBackend(ctx))) return;
-			if (!sandbox) {
-				ctx.ui.notify("Grepple installed in the local backend (also the host).", "info");
+			if (/^(1|true|yes)$/i.test(process.env.GRIP_OFFLINE ?? "")) {
+				ctx.ui.notify("Grepple CLI and skill updates are disabled in offline mode.", "warning");
 				return;
 			}
-			try {
-				const host = await ctx.execHostCommand(INSTALL_COMMAND, {
-					question:
-						"Install Grepple from the official installer into host ~/.local/bin? The installer downloads and checksum-verifies the latest published release.",
-					cwd: ctx.cwd,
-					timeout: 600,
-					approvalTimeoutMs: 60_000,
-				});
-				if (host.cancelled || host.exitCode !== 0) {
-					ctx.ui.notify("Grepple installed in the sandbox, but host installation failed.", "error");
-					return;
-				}
-				ctx.ui.notify("Grepple installed in both sandbox and host (~/.local/bin).", "info");
-			} catch (error) {
-				ctx.ui.notify(
-					`Grepple installed in the sandbox, but host installation was not completed: ${error instanceof Error ? error.message : String(error)}`,
-					"error",
-				);
-			}
+			// Resource discovery performs the install once, then scans the new skills.
+			await ctx.reload();
 		},
 	});
 	registerGreppleWorkflow(pi);
+	pi.on("resources_discover", async (_event, ctx) => {
+		const skillsDir = resolve(getAgentDir(), "skills");
+		// Includes first activation by /extensions, which uses reason "reload".
+		// Jobs receive only the workflow factory and never perform installation.
+		if (!/^(1|true|yes)$/i.test(process.env.GRIP_OFFLINE ?? "")) {
+			await installGrepple(ctx, skillsDir);
+		}
+		// Resource discovery runs after the initial skill scan. Returning the local
+		// host path makes newly installed skills available before the first prompt,
+		// including when workspace tools run in a remote sandbox.
+		if (existsSync(skillsDir)) return { skillPaths: [skillsDir] };
+	});
 }
 
 function registerGreppleWorkflow(pi: ExtensionAPI): void {

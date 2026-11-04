@@ -130,6 +130,7 @@ All notable changes to Grip are documented in this file.
 ### Changed
 
 - Publish official extensions automatically after main-branch tests, with independent versioning and immutable artifacts.
+- Refresh the Grepple CLI and its version-matched Grip skills at parent-session startup and through `/grepple-install`, honoring offline mode and sandbox host approval.
 
 ### Added
 

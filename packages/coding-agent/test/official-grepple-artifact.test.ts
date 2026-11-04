@@ -12,11 +12,14 @@ import type {
 	ExtensionContext,
 	ExtensionFactory,
 	ExtensionHandler,
+	ResourcesDiscoverEvent,
+	ResourcesDiscoverResult,
 	SessionStartEvent,
 	ToolCallEvent,
 	ToolCallEventResult,
 } from "../src/core/extensions/types.ts";
 import { decodeOfficialArtifact, type OfficialArtifactFile } from "../src/core/official-artifact.ts";
+import { loadSkills } from "../src/core/skills.ts";
 
 const directories: string[] = [];
 const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -93,7 +96,11 @@ test("packages and loads the actual Grepple artifact with parent and job hooks",
 		await mkdir(dirname(path), { recursive: true });
 		await writeFile(path, Buffer.from(file.base64, "base64"));
 	}
-	const jiti = createJiti(import.meta.url, { moduleCache: false, tryNative: false });
+	const jiti = createJiti(import.meta.url, {
+		moduleCache: false,
+		tryNative: false,
+		virtualModules: { "@greppleai/grip": { getAgentDir: () => target } },
+	});
 	const factory = await jiti.import<ExtensionFactory>(join(target, "index.js"), { default: true });
 	const parent = harness();
 	await factory(parent.api);
@@ -107,8 +114,19 @@ test("packages and loads the actual Grepple artifact with parent and job hooks",
 	let backendCalls = 0;
 	const context = {
 		cwd: target,
-		execToolBackend: async () => {
+		isSandbox: () => false,
+		getToolBackendInfo: () => ({ type: "local", cwd: target }),
+		ui: { notify: () => {} } as unknown as ExtensionContext["ui"],
+		execToolBackend: async (command: string) => {
 			backendCalls++;
+			if (command.includes("setup grip")) {
+				const directory = join(target, "skills", "grepple-test");
+				await mkdir(directory, { recursive: true });
+				await writeFile(
+					join(directory, "SKILL.md"),
+					"---\nname: grepple-test\ndescription: Test Grepple workflow\n---\nUse Grepple.\n",
+				);
+			}
 			return {
 				exitCode: 0,
 				cancelled: false,
@@ -116,13 +134,43 @@ test("packages and loads the actual Grepple artifact with parent and job hooks",
 				output: JSON.stringify({ blocked: true, reason: "Use Grepple" }),
 			};
 		},
-	} satisfies Pick<ExtensionContext, "cwd" | "execToolBackend">;
+	} satisfies Pick<ExtensionContext, "cwd" | "execToolBackend" | "isSandbox" | "getToolBackendInfo" | "ui">;
 	const extensionContext = context as unknown as ExtensionContext;
 	for (const instance of [parent, child]) {
-		expect([...instance.handlers.keys()]).toEqual(["session_start", "before_agent_start", "tool_call"]);
+		expect([...instance.handlers.keys()]).toEqual([
+			"session_start",
+			"before_agent_start",
+			"tool_call",
+			...(instance === parent ? ["resources_discover"] : []),
+		]);
 		const start = instance.handlers.get("session_start") as ExtensionHandler<SessionStartEvent>;
 		await start({ type: "session_start", reason: "startup" }, extensionContext);
 		expect(instance.active()).toEqual(["bash", "other"]);
+		if (instance === parent) {
+			expect(loadSkills({ cwd: target, agentDir: target, skillPaths: [], includeDefaults: true }).skills).toEqual(
+				[],
+			);
+			const discover = instance.handlers.get("resources_discover") as ExtensionHandler<
+				ResourcesDiscoverEvent,
+				ResourcesDiscoverResult
+			>;
+			const discovered = await discover(
+				{ type: "resources_discover", reason: "startup", cwd: target },
+				extensionContext,
+			);
+			expect(discovered).toEqual({ skillPaths: [join(target, "skills")] });
+			const loaded = loadSkills({
+				cwd: target,
+				agentDir: target,
+				skillPaths: discovered?.skillPaths ?? [],
+				includeDefaults: false,
+			});
+			expect(loaded.diagnostics).toEqual([]);
+			expect(loaded.skills.map((skill) => skill.name)).toEqual(["grepple-test"]);
+			expect(
+				await discover({ type: "resources_discover", reason: "reload", cwd: target }, extensionContext),
+			).toEqual({ skillPaths: [join(target, "skills")] });
+		}
 		const prompt = instance.handlers.get("before_agent_start") as ExtensionHandler<
 			BeforeAgentStartEvent,
 			BeforeAgentStartEventResult
@@ -156,5 +204,5 @@ test("packages and loads the actual Grepple artifact with parent and job hooks",
 			),
 		).toMatchObject({ block: true });
 	}
-	expect(backendCalls).toBe(2);
+	expect(backendCalls).toBe(4);
 });
