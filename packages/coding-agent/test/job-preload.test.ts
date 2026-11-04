@@ -125,6 +125,7 @@ describe("job context preload", () => {
 				expect(getMessageText(results[0])).toContain(sub);
 				expect(getMessageText(results[1])).toContain("PRELOADED SOURCE");
 				expect(JSON.stringify(context.messages)).toContain("Parent-supplied context preload");
+				expect(context.messages.every((message) => !("preload" in message))).toBe(true);
 				return fauxAssistantMessage("child answer");
 			},
 			fauxAssistantMessage("parent answer"),
@@ -133,6 +134,9 @@ describe("job context preload", () => {
 		const result = jobDetails(session.messages).results[0];
 		expect(result.status, result.stderr || result.errorMessage).toBe("completed");
 		expect(result.usage.turns).toBe(1);
+		expect(
+			result.messages.filter((message) => message.role === "assistant").map((message) => message.preload),
+		).toEqual([true, true, undefined]);
 		expect(result.messages.filter((message) => message.role === "toolResult")).toHaveLength(2);
 		expect(harness.faux.state.callCount).toBe(3);
 		expect(session.getToolOperations().cwd).toBe(cwd);

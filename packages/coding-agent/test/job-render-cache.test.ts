@@ -125,6 +125,36 @@ describe("job row display cache", () => {
 		expect(text(component)).toContain("Fresh progress");
 	});
 
+	describe.each(["single", "chain", "parallel"] as const)("%s preload calls", (mode) => {
+		it.each(["running", "completed", "failed"] as const)("distinguishes %s output and snapshots", (status) => {
+			const result = job(status);
+			result.step = 1;
+			result.messages = [
+				{ ...fauxAssistantMessage(fauxToolCall("bash", { command: "pwd" })), preload: true },
+				fauxAssistantMessage(fauxToolCall("bash", { command: "echo child" })),
+				fauxAssistantMessage("Final answer"),
+			];
+			// Persisted job details must rebuild provenance without the live presentation cache.
+			const details = JSON.parse(JSON.stringify({ mode, results: [result] })) as JobDetails;
+			const partial = status === "running";
+			const component = render(details, undefined, false, partial);
+			for (const expanded of [false, true]) {
+				render(details, component, expanded, partial);
+				const output = text(component);
+				expect(output).toContain("-> [preload] $ pwd");
+				expect(output).toContain("-> $ echo child");
+				expect(output.match(/\[preload\]/g)).toHaveLength(1);
+				expect(component.render(100).join("\n")).toContain(theme.fg("warning", "[preload] "));
+			}
+			if (!partial) details.results[0].messages.length = 0;
+			expect(setTheme("light").success).toBe(true);
+			component.invalidate();
+			render(details, component, true, partial);
+			expect(text(component)).toContain("-> [preload] $ pwd");
+			expect(component.render(100).join("\n")).toContain(theme.fg("warning", "[preload] "));
+		});
+	});
+
 	it("snapshots tool-call previews without retaining or rereading their large arguments", () => {
 		const result = job();
 		const args = { path: "/tmp/output.ts", content: "large source content\n".repeat(2000) };

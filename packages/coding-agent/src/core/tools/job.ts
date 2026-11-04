@@ -129,7 +129,8 @@ function describeToolCall(toolName: string, args: Record<string, unknown>): JobT
 
 function formatToolCall(item: JobToolCallDisplayItem, themeFg: JobToolThemeForeground): string {
 	const parts = item.type === "toolCallPreview" ? item.parts : describeToolCall(item.name, item.args);
-	return parts.map((part) => themeFg(part.color, part.text)).join("");
+	const prefix = item.preload ? themeFg("warning", "[preload] ") : "";
+	return prefix + parts.map((part) => themeFg(part.color, part.text)).join("");
 }
 
 export interface JobUsageStats {
@@ -155,11 +156,13 @@ export interface JobExecutionContext {
 	preloadedSkills: string[];
 }
 
+export type JobMessage = Message & JobMessageSource;
+
 export interface JobResult {
 	status: JobStatus;
 	task: string;
 	exitCode: number;
-	messages: Message[];
+	messages: JobMessage[];
 	stderr: string;
 	usage: JobUsageStats;
 	model?: string;
@@ -192,9 +195,9 @@ interface RetainedJobMessageState {
 	retainedSizes: number[];
 }
 
-const presentationCache = new WeakMap<Message[], JobPresentationState>();
+const presentationCache = new WeakMap<JobMessage[], JobPresentationState>();
 
-function appendPresentationMessage(state: JobPresentationState, message: Message): void {
+function appendPresentationMessage(state: JobPresentationState, message: JobMessage): void {
 	const segment: PresentationSegment = { displayItemCount: 0 };
 	if (message.role === "assistant") {
 		const textParts: string[] = [];
@@ -204,7 +207,12 @@ function appendPresentationMessage(state: JobPresentationState, message: Message
 				textParts.push(part.text);
 				segment.displayItemCount++;
 			} else if (part.type === "toolCall") {
-				state.displayItems.push({ type: "toolCall", name: part.name, args: part.arguments });
+				state.displayItems.push({
+					type: "toolCall",
+					name: part.name,
+					args: part.arguments,
+					preload: message.preload,
+				});
 				segment.displayItemCount++;
 			}
 		}
@@ -223,7 +231,7 @@ function removeOldestPresentationMessage(state: JobPresentationState): void {
 	if (segment.assistantOutput !== undefined) state.assistantOutputs.shift();
 }
 
-function getPresentationState(messages: Message[]): JobPresentationState {
+function getPresentationState(messages: JobMessage[]): JobPresentationState {
 	const cached = presentationCache.get(messages);
 	if (cached) return cached;
 	const state: JobPresentationState = { displayItems: [], assistantOutputs: [], segments: [] };
@@ -232,7 +240,7 @@ function getPresentationState(messages: Message[]): JobPresentationState {
 	return state;
 }
 
-function getFinalOutput(messages: Message[]): string {
+function getFinalOutput(messages: JobMessage[]): string {
 	return getPresentationState(messages).assistantOutputs.at(-1) ?? "";
 }
 
@@ -277,12 +285,14 @@ function truncateParallelOutput(output: string): string {
 	return `${truncated}\n\n[Output truncated: ${byteLength - Buffer.byteLength(truncated, "utf8")} bytes omitted.]`;
 }
 
-type JobToolCallDisplayItem =
-	| { type: "toolCall"; name: string; args: Record<string, unknown> }
-	| { type: "toolCallPreview"; parts: JobToolCallPart[] };
+type JobToolCallDisplayItem = JobMessageSource &
+	(
+		| { type: "toolCall"; name: string; args: Record<string, unknown> }
+		| { type: "toolCallPreview"; parts: JobToolCallPart[] }
+	);
 type DisplayItem = { type: "text"; text: string } | JobToolCallDisplayItem;
 
-function getDisplayItems(messages: Message[]): DisplayItem[] {
+function getDisplayItems(messages: JobMessage[]): DisplayItem[] {
 	return getPresentationState(messages).displayItems;
 }
 
@@ -315,7 +325,7 @@ function truncateRetainedText(text: string): string {
 	return `${text.slice(0, MAX_RETAINED_MESSAGE_CHARS)}\n\n[Retained output truncated: ${text.length - MAX_RETAINED_MESSAGE_CHARS} characters omitted.]`;
 }
 
-function compactRetainedMessage(message: Message): Message | undefined {
+function compactRetainedMessage(message: JobMessage): JobMessage | undefined {
 	if (JSON.stringify(message).length <= MAX_RETAINED_MESSAGE_CHARS) return message;
 	if (message.role === "assistant") {
 		const text = message.content
@@ -343,7 +353,7 @@ function compactRetainedMessage(message: Message): Message | undefined {
 	}
 	return undefined;
 }
-function retainJobMessage(result: JobResult, state: RetainedJobMessageState, message: Message): void {
+function retainJobMessage(result: JobResult, state: RetainedJobMessageState, message: JobMessage): void {
 	const retainedMessage = compactRetainedMessage(message);
 	if (!retainedMessage) return;
 
@@ -501,7 +511,7 @@ async function runSingleJob(
 		});
 	};
 	const onMessage = (message: Message, source?: JobMessageSource): void => {
-		retainJobMessage(currentResult, retainedMessageState, message);
+		retainJobMessage(currentResult, retainedMessageState, source?.preload ? { ...message, preload: true } : message);
 		if (message.role === "assistant" && !source?.preload) recordJobAssistantMessage(currentResult, message);
 		emitUpdate();
 	};
@@ -1189,7 +1199,7 @@ function renderJobResult(result: AgentToolResult<JobDetails>, expanded: boolean,
 function snapshotJobDisplayItem(item: DisplayItem): DisplayItem {
 	if (item.type === "text") return { type: "text", text: item.text };
 	if (item.type === "toolCallPreview") return item;
-	return { type: "toolCallPreview", parts: describeToolCall(item.name, item.args) };
+	return { type: "toolCallPreview", parts: describeToolCall(item.name, item.args), preload: item.preload };
 }
 
 function snapshotJobResult(result: JobResult, completed: WeakMap<JobResult, JobResult>): JobResult {
