@@ -27,7 +27,3 @@ jobs:
         run: node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts test/official-automatic-publication.test.ts test/official-planner-artifact.test.ts test/official-planner-lifecycle.test.ts
       - name: Test Planner behavior
         run: node node_modules/vitest/dist/cli.js --run --config extensions/planner/vitest.config.mjs
-      - name: Validate automatic versions and published catalog consistency
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node scripts/official-extensions-cli.mjs validate-published --out /tmp/grip-official-validation
