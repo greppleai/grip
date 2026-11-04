@@ -584,6 +584,7 @@ interface ExtensionResourcePath {
 interface ToolRegistryRefreshOptions {
 	activeToolNames?: string[];
 	includeAllExtensionTools?: boolean;
+	preserveActiveToolNames?: boolean;
 }
 
 interface BuildRuntimeOptions extends ToolRegistryRefreshOptions {
@@ -4931,6 +4932,13 @@ export class AgentSession {
 		this._refreshToolRegistry({ activeToolNames: this._withCurrentDefaultTools(this.getActiveToolNames()) });
 	}
 
+	/** Update the built-in job catalog without reloading session resources. */
+	refreshJobModelCatalog(): void {
+		if (this._baseToolsOverride) return;
+		this._baseToolDefinitions.set("job", this._createJobToolDefinition());
+		this._refreshToolRegistry({ preserveActiveToolNames: true });
+	}
+
 	bindExtensions(bindings: ExtensionBindings): Promise<void> {
 		return this._runActivity("extension binding", () => this._bindExtensions(bindings));
 	}
@@ -5478,6 +5486,7 @@ export class AgentSession {
 		const nextActiveToolNames = (
 			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
 		).filter((name) => this._isToolPermitted(name));
+		if (options?.preserveActiveToolNames) return nextActiveToolNames;
 		if (this._allowedToolNames) {
 			nextActiveToolNames.push(
 				...Array.from(this._toolRegistry.keys()).filter((toolName) => this._allowedToolNames?.has(toolName)),
@@ -5628,6 +5637,14 @@ export class AgentSession {
 		};
 	}
 
+	private _createJobToolDefinition(): ToolDefinition {
+		return createJobToolDefinition({
+			runner: this._jobRunner,
+			getConfiguredModel: () => this.settingsManager.getJobModel(),
+			getModelOptions: () => this.settingsManager.getJobModels(),
+		}) as unknown as ToolDefinition;
+	}
+
 	private _createRuntimeBaseToolDefinitions(
 		workspaceToolHost: WorkspaceToolHost | undefined,
 	): Record<string, ToolDefinition> {
@@ -5670,10 +5687,7 @@ export class AgentSession {
 					return credential?.type === "api_key" ? credential.key : undefined;
 				},
 			) as unknown as ToolDefinition,
-			job: createJobToolDefinition({
-				runner: this._jobRunner,
-				getConfiguredModel: () => this.settingsManager.getJobModel(),
-			}) as unknown as ToolDefinition,
+			job: this._createJobToolDefinition(),
 		};
 	}
 

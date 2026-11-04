@@ -30,7 +30,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "extensions", description: "Browse installed extensions and install or uninstall official extensions" },
 	{ name: "model", description: "Switch models or refresh the model catalog (/model --refresh)" },
 	{ name: "image", description: "Show or set the Codex image-generation model" },
-	{ name: "job", description: "Show or configure the active profile's job model" },
+	{ name: "job", description: "Show or configure the active profile's job model and catalog" },
 	{ name: "system-prompt", description: "View the effective system prompt without sending it to a model" },
 	{
 		name: "context-compression",

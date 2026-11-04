@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AutocompleteProvider } from "@greppleai/grip-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseJobCommand } from "../src/core/job-command.ts";
+import { completeJobCommand, parseJobCommand } from "../src/core/job-command.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
@@ -24,6 +24,7 @@ function fixture() {
 		{ provider: "openai", id: "gpt-5" },
 		{ provider: "anthropic", id: "claude-sonnet" },
 	];
+	const refreshJobModelCatalog = vi.fn();
 	const showStatus = vi.fn();
 	const showWarning = vi.fn();
 	const mode = Object.assign(Object.create(InteractiveMode.prototype) as InteractiveMode, {
@@ -34,6 +35,7 @@ function fixture() {
 				getToolOperations: () => ({ cwd }),
 				model: models[0],
 				modelRegistry: { getAvailable: () => models },
+				refreshJobModelCatalog,
 				promptTemplates: [],
 				extensionRunner: { getRegisteredCommands: () => [] },
 			},
@@ -54,6 +56,8 @@ function fixture() {
 		cwd,
 		showStatus,
 		showWarning,
+		refreshJobModelCatalog,
+		models,
 	};
 }
 
@@ -111,7 +115,13 @@ describe("/job model command", () => {
 		const { mode } = fixture();
 		const provider = mode.createBaseAutocompleteProvider();
 		expect((await complete(provider, "/job "))?.map(({ label }) => label)).toEqual(["model"]);
-		expect((await complete(provider, "/job model "))?.map(({ label }) => label)).toEqual(["show", "set", "clear"]);
+		expect((await complete(provider, "/job model "))?.map(({ label }) => label)).toEqual([
+			"show",
+			"set",
+			"clear",
+			"add",
+			"remove",
+		]);
 		expect((await complete(provider, "/job model set "))?.[0]).toEqual({
 			label: "--model",
 			text: "/job model set --model ",
@@ -120,5 +130,98 @@ describe("/job model command", () => {
 			"openai/gpt-5",
 			"anthropic/claude-sonnet",
 		]);
+		expect(completeJobCommand("  model\tset --mo", [])).toEqual([{ value: "model set --model ", label: "--model" }]);
+		expect(completeJobCommand("  mod", [])).toEqual([{ value: "model ", label: "model" }]);
+		expect(completeJobCommand("model add openai/gpt-5 ", ["openai/gpt-5"])).toEqual([]);
+		expect(completeJobCommand("model show ", ["openai/gpt-5"])).toEqual([]);
+	});
+	it("parses descriptions and rejects malformed or blank quotes", () => {
+		expect(parseJobCommand('model add gpt-5 "fast model"')).toEqual({
+			action: "add",
+			model: "gpt-5",
+			description: "fast model",
+		});
+		expect(parseJobCommand("model add gpt-5 fast model")).toEqual({
+			action: "add",
+			model: "gpt-5",
+			description: "fast model",
+		});
+		expect(parseJobCommand("model add gpt-5 don't guess")).toEqual({
+			action: "add",
+			model: "gpt-5",
+			description: "don't guess",
+		});
+		expect(parseJobCommand('model add gpt-5 "say \\"hello\\" and \\\\ path"')).toEqual({
+			action: "add",
+			model: "gpt-5",
+			description: 'say "hello" and \\ path',
+		});
+		for (const input of [
+			'model add gpt-5 "bad',
+			'model add gpt-5 "bad\\"',
+			"model add gpt-5 '  '",
+			"model remove gpt-5 extra",
+		]) {
+			expect(parseJobCommand(input)).toEqual({ action: "invalid" });
+		}
+	});
+
+	it("persists catalog updates without changing the default and refreshes the session", async () => {
+		const { mode, manager, cwd, refreshJobModelCatalog, showStatus } = fixture();
+		await mode.handleBuiltInEditorCommand("/job model set --model openai/gpt-5");
+		await mode.handleBuiltInEditorCommand('/job model add gpt-5 "Fast model"');
+		await mode.handleBuiltInEditorCommand("/job model add openai/gpt-5 Updated description");
+		expect(manager.getJobModel()).toBe("openai/gpt-5");
+		expect(manager.getJobModels()).toEqual([{ model: "openai/gpt-5", description: "Updated description" }]);
+		expect(JSON.parse(readFileSync(join(cwd, "settings.json"), "utf8")).jobModels).toEqual(manager.getJobModels());
+		await mode.handleBuiltInEditorCommand("/job model show");
+		expect(showStatus.mock.lastCall?.[0]).toContain("openai/gpt-5: Updated description");
+		await mode.handleBuiltInEditorCommand("/job model remove gpt-5");
+		expect(manager.getJobModels()).toEqual([]);
+		expect(manager.getJobModel()).toBe("openai/gpt-5");
+		expect(refreshJobModelCatalog).toHaveBeenCalledTimes(3);
+	});
+
+	it("rejects unavailable and ambiguous models and completes stale registered choices", async () => {
+		const { mode, manager, models, showWarning, showStatus } = fixture();
+		models.push({ provider: "other", id: "gpt-5" });
+		await mode.handleBuiltInEditorCommand("/job model add gpt-5 ambiguous");
+		await mode.handleBuiltInEditorCommand("/job model add missing/model nope");
+		expect(showWarning).toHaveBeenCalledTimes(2);
+		expect(manager.getJobModels()).toEqual([]);
+		manager.setJobModels([{ model: "old/luna", description: "stale" }]);
+		await manager.flush();
+		const provider = mode.createBaseAutocompleteProvider();
+		expect((await complete(provider, "/job model remove "))?.map(({ label }) => label)).toEqual(["old/luna"]);
+		expect(await complete(provider, "/job model add openai/gpt-5 description ")).toBeUndefined();
+		await mode.handleBuiltInEditorCommand("/job model show");
+		expect(showStatus.mock.lastCall?.[0]).toContain("old/luna (unavailable): stale");
+		await mode.handleBuiltInEditorCommand("/job model remove luna");
+		expect(manager.getJobModels()).toEqual([]);
+	});
+	it("isolates profile catalog changes from global settings", async () => {
+		const { mode, manager, cwd } = fixture();
+		await mode.handleBuiltInEditorCommand("/job model add gpt-5 global model");
+		manager.setModelProfile("work", []);
+		await manager.flush();
+		manager.useProfile("work");
+		await mode.handleBuiltInEditorCommand("/job model add claude-sonnet profile model");
+		const saved = JSON.parse(readFileSync(join(cwd, "settings.json"), "utf8"));
+		expect(saved.jobModels).toEqual([{ model: "openai/gpt-5", description: "global model" }]);
+		expect(saved.profiles.work.jobModels).toEqual([
+			{ model: "openai/gpt-5", description: "global model" },
+			{ model: "anthropic/claude-sonnet", description: "profile model" },
+		]);
+	});
+
+	it("does not refresh after a load or save error", async () => {
+		const { mode, manager, refreshJobModelCatalog } = fixture();
+		const load = vi.spyOn(manager, "getLoadError").mockReturnValue(new Error("load failed"));
+		await mode.handleBuiltInEditorCommand("/job model add gpt-5 description");
+		expect(manager.getJobModels()).toEqual([]);
+		load.mockReturnValue(null);
+		vi.spyOn(manager, "drainErrors").mockReturnValue([{ scope: "global", error: new Error("save failed") }]);
+		await mode.handleBuiltInEditorCommand("/job model add gpt-5 description");
+		expect(refreshJobModelCatalog).not.toHaveBeenCalled();
 	});
 });

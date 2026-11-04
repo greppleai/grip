@@ -12,6 +12,7 @@ import { Container, Markdown, Spacer, Text } from "@greppleai/grip-tui";
 import { type Static, Type } from "typebox";
 import { getMarkdownTheme, type Theme, type ThemeColor } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
+import type { JobModelOption } from "../settings-manager.ts";
 import type { ToolOperations } from "./operations.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
@@ -394,6 +395,7 @@ export type JobRunner = (request: JobRunRequest) => Promise<JobRunOutcome>;
 
 interface JobTaskSpec {
 	task: string;
+	model?: string;
 	responseFormat?: string;
 	tools?: string[];
 	skills?: string[];
@@ -438,13 +440,14 @@ export function formatJobTaskPrompt(task: string, responseFormat?: string): stri
 async function runSingleJob(
 	defaultCwd: string,
 	spec: JobTaskSpec,
-	model: string | undefined,
+	defaultModel: string | undefined,
 	runner: JobRunner,
 	step: number | undefined,
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: JobResult[]) => JobDetails,
 ): Promise<JobResult> {
+	const model = spec.model ?? defaultModel;
 	const currentResult: JobResult = {
 		status: "running",
 		task: truncateRetainedTask(spec.task),
@@ -499,6 +502,13 @@ async function runSingleJob(
 
 const TaskItem = Type.Object({
 	task: Type.String({ description: "A bounded job with a concrete deliverable" }),
+	model: Type.Optional(
+		Type.String({
+			minLength: 1,
+			description:
+				"Optional registered job model (provider/model-id or unambiguous exact ID). Omit to use the default. On a batch, this supplies the default for items without their own model.",
+		}),
+	),
 	responseFormat: Type.Optional(Type.String({ description: "Requested response content and structure" })),
 	tools: Type.Optional(Type.Array(Type.String(), { description: "Tool allowlist for this job" })),
 	skills: Type.Optional(
@@ -523,8 +533,10 @@ export type JobToolInput = Static<typeof jobParamsSchema>;
 
 export interface JobToolOptions {
 	runner?: JobRunner;
-	/** Host-controlled globally selected job model; not exposed to the delegated model. */
+	/** Host-controlled default job model, used when the caller omits model. */
 	getConfiguredModel?: () => string | undefined;
+	/** Trusted catalog of models the parent may select, with routing guidance. */
+	getModelOptions?: () => readonly JobModelOption[];
 }
 
 interface JobModeSelection {
@@ -554,6 +566,50 @@ interface JobToolExecutionResult extends AgentToolResult<JobDetails> {
 
 function inheritedJobModelName(model: Model<Api> | undefined): string | undefined {
 	return model ? `${model.provider}/${model.id}` : undefined;
+}
+
+function findRegisteredJobModel(reference: string, catalog: readonly JobModelOption[]): string | undefined {
+	const query = reference.trim().toLowerCase();
+	if (!query) return undefined;
+	const exact = catalog.filter((entry) => entry.model.toLowerCase() === query);
+	const matches = exact.length
+		? exact
+		: catalog.filter((entry) => entry.model.slice(entry.model.indexOf("/") + 1).toLowerCase() === query);
+	return matches.length === 1 ? matches[0].model : undefined;
+}
+
+type JobModelSelection = { params: JobToolInput; error?: never } | { params?: never; error: string };
+
+function selectJobModels(params: JobToolInput, catalog: readonly JobModelOption[]): JobModelSelection {
+	const requested = [
+		params.model,
+		...(params.tasks ?? []).map((task) => task.model),
+		...(params.chain ?? []).map((step) => step.model),
+	];
+	const resolved = new Map<string, string>();
+	for (const reference of requested) {
+		if (reference === undefined) continue;
+		const model = findRegisteredJobModel(reference, catalog);
+		if (!model)
+			return {
+				error: `Unknown or ambiguous registered job model: ${reference}. Choose a model from the job catalog or omit model to use the default.`,
+			};
+		resolved.set(reference, model);
+	}
+	return {
+		params: {
+			...params,
+			model: params.model === undefined ? undefined : resolved.get(params.model),
+			tasks: params.tasks?.map((task) => ({
+				...task,
+				model: task.model === undefined ? undefined : resolved.get(task.model),
+			})),
+			chain: params.chain?.map((step) => ({
+				...step,
+				model: step.model === undefined ? undefined : resolved.get(step.model),
+			})),
+		},
+	};
 }
 
 function selectJobMode(params: JobToolInput): JobModeSelection {
@@ -661,7 +717,7 @@ function createQueuedJobResult(task: JobTaskSpec, model: string | undefined): Jo
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-		model,
+		model: task.model ?? model,
 	};
 }
 
@@ -741,6 +797,7 @@ async function executeSingleJob(
 		{
 			task: params.task ?? "",
 			responseFormat: params.responseFormat,
+			model: params.model,
 			tools: params.tools,
 			skills: params.skills,
 			cwd: params.cwd,
@@ -1099,11 +1156,14 @@ export function createJobToolDefinition(
 	options: JobToolOptions = {},
 ): ToolDefinition<typeof jobParamsSchema, JobDetails> {
 	const runner = options.runner;
+	const catalog = options.getModelOptions?.() ?? [];
+	const modelGuidance = catalog.length
+		? `Registered job models (model: when to use):\n${catalog.map((entry) => `- ${entry.model}: ${entry.description}`).join("\n")}`
+		: "No alternate job models are registered; omit model to use the default.";
 	return {
 		name: "job",
 		label: "Job",
-		description:
-			"Delegate a bounded job to an isolated session. Specify the outcome; intermediate steps needn't enter the parent conversation, but its result does.",
+		description: `Delegate a bounded job to an isolated session. Specify the outcome; intermediate steps needn't enter the parent conversation, but its result does. Select model only from the registered catalog when its guidance fits the task; omit model to keep the default.\n\n${modelGuidance}`,
 		promptSnippet: "Delegate a bounded job to an isolated session",
 		parameters: jobParamsSchema,
 
@@ -1135,11 +1195,19 @@ export function createJobToolDefinition(
 					isError: true,
 				};
 			}
+			const modelSelection = selectJobModels(params, options.getModelOptions?.() ?? []);
+			if (modelSelection.error !== undefined)
+				return {
+					content: [{ type: "text", text: modelSelection.error }],
+					details: makeDetails(selection.mode)([]),
+					isError: true,
+				};
 			const model =
+				modelSelection.params.model ||
 				options.getConfiguredModel?.()?.trim() ||
 				process.env.GRIP_DEFAULT_JOB_MODEL?.trim() ||
 				inheritedJobModelName(ctx.model);
-			return executeSelectedJobMode(params, selection, {
+			return executeSelectedJobMode(modelSelection.params, selection, {
 				workspaceCwd: workspaceOperations.cwd ?? ctx.cwd,
 				workspaceOperations,
 				model,

@@ -112,6 +112,11 @@ export type PackageSource =
 			themes?: string[];
 	  };
 
+export interface JobModelOption {
+	model: string;
+	description: string;
+}
+
 export interface Settings {
 	lastChangelogVersion?: string;
 	defaultProvider?: string;
@@ -144,6 +149,7 @@ export interface Settings {
 	enableSkillCommands?: boolean; // default: true - register skills and rules as /skill:name and /rule:name commands
 	enableJobs?: boolean; // default: true - expose built-in job tools
 	jobModel?: string | null; // trusted global/profile provider/model ID; null defers to environment or parent
+	jobModels?: JobModelOption[]; // trusted global/profile job model catalog
 	imageModel?: string | null; // Codex image model ID; null uses the default
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
@@ -1606,6 +1612,30 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getJobModels(): JobModelOption[] {
+		const active = this.getActiveProfile();
+		const profile = active ? this.getProfile(active) : undefined;
+		const value: unknown = this.runtimeOverrides.jobModels ?? profile?.jobModels ?? this.globalSettings.jobModels;
+		if (!Array.isArray(value)) return [];
+		return value.flatMap((entry: unknown) => {
+			if (
+				!isMergeableObject(entry) ||
+				typeof entry.model !== "string" ||
+				!entry.model.trim() ||
+				typeof entry.description !== "string" ||
+				!entry.description.trim()
+			)
+				return [];
+			return [{ model: entry.model, description: entry.description }];
+		});
+	}
+
+	setJobModels(models: JobModelOption[]): void {
+		this.globalSettings.jobModels = structuredClone(models);
+		this.markModified("jobModels");
+		this.save();
+	}
+
 	getImageModel(): string | undefined {
 		return this.getTrustedModelSetting("imageModel");
 	}
@@ -1761,6 +1791,7 @@ export class SettingsManager {
 		else if (this.globalSettings.compressionDetectionModel) profile.compressionDetectionModel = null;
 		else delete profile.compressionDetectionModel;
 		profile.imageModel = this.getImageModel() ?? (this.globalSettings.imageModel ? null : undefined);
+		profile.jobModels = this.getJobModels();
 		if (selectedModel) {
 			profile.defaultProvider = selectedModel.provider;
 			profile.defaultModel = selectedModel.id;

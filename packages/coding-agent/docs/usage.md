@@ -41,9 +41,11 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/login`, `/logout` | Manage OAuth or API-key credentials |
 | `/websearch login` | Select Tavily (keyless or with an optional API key), DuckDuckGo, Brave Search, or Firecrawl; save or update search API keys |
 | `/model [reference or query]` | Choose a provider and model, select an exact reference, or search across providers |
-| `/job model show` | Show the effective job model and its source |
-| `/job model set --model <provider/model-id>` | Save the single global job model |
-| `/job model clear` | Clear the saved model (fall back to the environment or parent model) |
+| `/job model show` | Show the effective job default and source, and catalog descriptions and unavailability |
+| `/job model set --model <provider/model-id>` | Save the job default in the active profile or globally |
+| `/job model clear` | Clear the saved default (fall back to the environment or parent model) |
+| `/job model add <model> <description...>` | Add or update a catalog entry without changing the default |
+| `/job model remove <model>` | Remove a catalog entry without changing the default |
 | `/system-prompt` | Show the current main-agent system prompt in the TUI without sending a message to the model |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
@@ -181,6 +183,22 @@ Built-in tools include `read_image`, `read`, `bash`, `edit`, `write`, `grep`, `f
 `read_image` is active by default and accepts image files only; it returns the image as model input and rejects text files rather than reading their contents. The separate `read` tool handles text files and remains opt-in: select it explicitly with `--tools read` or include it in an allowlist. Image processing may resize large images to fit provider limits, and image size and supported formats depend on the selected model/provider. Models without vision support cannot interpret image payloads.
 
 The `job` tool is active by default. Disable it through `/settings` or `"enableJobs": false` in `settings.json`. An explicit `--tools` allowlist selects its own subset regardless of that setting; no-tools modes still suppress it. Parent tool allowlists and exclusions bound child tool access.
+
+### Job model routing
+
+Register models available in your setup with descriptions that help the agent choose a suitable model. For example:
+
+```text
+/job model add anthropic/claude-haiku-4-5 Mechanical edits and straightforward checks
+/job model show
+/job model remove anthropic/claude-haiku-4-5
+```
+
+Use an exact available `provider/model-id` where possible. An unambiguous bare exact model ID is also accepted for add, remove, and job invocation; fuzzy aliases are not accepted. Commands and model names support completion. Add upserts the catalog only: it neither sets the default nor automatically registers other models. Show displays the default and its source, catalog descriptions, and unavailable entries. Catalog changes are applied live to the session.
+
+The agent sees the catalog and routing descriptions directly in the `job` tool description. It can supply `model` on a single job, each item in `tasks`, or each `chain` step. A top-level `model` on a batch is its default, overridden by an item's `model`. Every explicit choice must be registered in the trusted catalog and currently available. Unknown, ambiguous, unregistered, or unavailable choices fail before child inference, never silently falling back to a potentially expensive model.
+
+When `model` is omitted, the existing default is used: trusted `jobModel`, then `GRIP_DEFAULT_JOB_MODEL`, then the parent model. The catalog and default are independent. Both are trusted global or active-profile settings; project settings are ignored. Runtime overrides take precedence over profile, then global settings. Catalog arrays replace rather than merge, so a profile's `jobModels: []` suppresses the inherited list. See [settings](settings.md#tool-configuration) and [SDK job preload](sdk.md#job-context-preload).
 
 | `VISUAL`, `EDITOR` | External editor for Ctrl+G |
 

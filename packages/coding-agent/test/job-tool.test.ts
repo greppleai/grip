@@ -101,14 +101,14 @@ describe("job tool", () => {
 		const definition = createJobToolDefinition();
 		expect(definition.name).toBe("job");
 		expect(definition.promptSnippet).toBe("Delegate a bounded job to an isolated session");
-		const forbidden = new Set(["agent", "agentScope", "systemPrompt", "model", "modelHint"]);
+		const forbidden = new Set(["agent", "agentScope", "systemPrompt", "modelHint"]);
 		for (const properties of [
 			jobParamsSchema.properties,
 			jobParamsSchema.properties.tasks.items.properties,
 			jobParamsSchema.properties.chain.items.properties,
 		]) {
 			const names = Object.keys(properties);
-			expect(names).toEqual(expect.arrayContaining(["task", "responseFormat", "tools", "skills", "cwd"]));
+			expect(names).toEqual(expect.arrayContaining(["task", "responseFormat", "model", "tools", "skills", "cwd"]));
 			expect(names.filter((name) => forbidden.has(name))).toEqual([]);
 		}
 		expect(formatJobTaskPrompt("Inspect auth", "Return risks")).toBe(

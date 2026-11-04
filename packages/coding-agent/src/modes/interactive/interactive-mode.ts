@@ -116,7 +116,12 @@ import {
 	type HookExecutionNotice,
 	parseHookExecutionNotice,
 } from "../../core/hooks/types.ts";
-import { completeJobCommand, JOB_COMMAND_USAGE, parseJobCommand } from "../../core/job-command.ts";
+import {
+	completeJobCommand,
+	JOB_COMMAND_USAGE,
+	type JobModelCatalogCommand,
+	parseJobCommand,
+} from "../../core/job-command.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
 import {
@@ -987,10 +992,14 @@ export class InteractiveMode {
 			};
 		}
 		const jobCommand = slashCommands.find((command) => command.name === "job")!;
-		jobCommand.argumentHint = "model <show|set --model <provider/model-id>|clear>";
+		jobCommand.argumentHint = "model <show|set --model <model>|clear|add <model> <description...>|remove <model>>";
 		jobCommand.getArgumentCompletions = (prefix) => {
 			const models = this.session.modelRegistry.getAvailable().map((model) => `${model.provider}/${model.id}`);
-			return completeJobCommand(prefix, models);
+			return completeJobCommand(
+				prefix,
+				models,
+				this.settingsManager.getJobModels().map((entry) => entry.model),
+			);
 		};
 		const systemPromptCommand = slashCommands.find((command) => command.name === "system-prompt")!;
 		systemPromptCommand.argumentHint = "";
@@ -3517,6 +3526,10 @@ export class InteractiveMode {
 			await this.handleJobModelClear();
 			return;
 		}
+		if (parsed.action === "add" || parsed.action === "remove") {
+			await this.handleJobModelCatalogChange(parsed);
+			return;
+		}
 		await this.handleJobModelSet(parsed.model);
 	}
 
@@ -3526,7 +3539,65 @@ export class InteractiveMode {
 		const parent = this.session.model ? `${this.session.model.provider}/${this.session.model.id}` : undefined;
 		const effective = setting ?? environment ?? parent;
 		const source = setting ? "setting" : environment ? "environment" : parent ? "parent model" : "none";
-		this.showStatus(`Job model: ${effective ?? "(unset)"} (${source})`);
+		const available = new Set(
+			this.session.modelRegistry.getAvailable().map((model) => `${model.provider}/${model.id}`.toLowerCase()),
+		);
+		const catalog = this.settingsManager
+			.getJobModels()
+			.map(
+				(entry) =>
+					`${entry.model}${available.has(entry.model.toLowerCase()) ? "" : " (unavailable)"}: ${entry.description}`,
+			);
+		this.showStatus(
+			[
+				`Job model: ${effective ?? "(unset)"} (${source})`,
+				"Job model catalog:",
+				...(catalog.length ? catalog : ["(empty)"]),
+			].join("\n"),
+		);
+	}
+
+	private async handleJobModelCatalogChange(command: JobModelCatalogCommand): Promise<void> {
+		const catalog = this.settingsManager.getJobModels();
+		let reference: string;
+		if (command.action === "add") {
+			const selected = findExactModelReferenceMatch(command.model, this.session.modelRegistry.getAvailable());
+			if (!selected) {
+				this.showWarning(
+					`Unavailable or ambiguous job model: ${command.model}. Choose an available provider/model-id.`,
+				);
+				return;
+			}
+			reference = `${selected.provider}/${selected.id}`;
+		} else {
+			const query = command.model.toLowerCase();
+			const exact = catalog.filter((entry) => entry.model.toLowerCase() === query);
+			const matches = exact.length
+				? exact
+				: catalog.filter((entry) => entry.model.slice(entry.model.indexOf("/") + 1).toLowerCase() === query);
+			if (matches.length !== 1) {
+				this.showWarning(`Unknown or ambiguous registered job model: ${command.model}`);
+				return;
+			}
+			reference = matches[0]!.model;
+		}
+		const loadError = this.settingsManager.getLoadError("global");
+		if (loadError) {
+			this.showError(`Cannot save job model catalog: ${loadError.message}`);
+			return;
+		}
+		try {
+			const next = catalog.filter((entry) => entry.model.toLowerCase() !== reference.toLowerCase());
+			if (command.action === "add") next.push({ model: reference, description: command.description });
+			this.settingsManager.setJobModels(next);
+			await this.settingsManager.flush();
+			const writeError = this.settingsManager.drainErrors().find((entry) => entry.scope === "global");
+			if (writeError) throw writeError.error;
+			this.session.refreshJobModelCatalog();
+			this.showStatus(`Job model ${command.action === "add" ? "registered" : "removed"}: ${reference}`);
+		} catch (error) {
+			this.showError(`Cannot save job model catalog: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	private async handleJobModelClear(): Promise<void> {
