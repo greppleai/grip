@@ -1,6 +1,6 @@
 # Official extensions
 
-[Planner](planner/README.md) is the selected official extension source. Pushes to main can automatically publish selected extensions after tests; local packaging never publishes or updates the production catalog. Tests also generate isolated fixture extensions. For installation, automatic updates, trust, offline use, retained data and SDK contract changes, see the [user guide](../packages/coding-agent/docs/official-extensions.md). For factory APIs and UI, see the [extension API](../packages/coding-agent/docs/extensions.md) and [TUI guide](../packages/coding-agent/docs/tui.md).
+[Planner](planner/README.md) and [Grepple](grepple/README.md) are selected official extension sources. Pushes to main can automatically publish selected extensions after tests; local packaging never publishes or updates the production catalog. Tests also generate isolated fixture extensions. For installation, automatic updates, trust, offline use, retained data and SDK contract changes, see the [user guide](../packages/coding-agent/docs/official-extensions.md). For factory APIs and UI, see the [extension API](../packages/coding-agent/docs/extensions.md) and [TUI guide](../packages/coding-agent/docs/tui.md).
 
 ## Authoring contract
 
@@ -39,12 +39,13 @@ npm run extensions:pack -- --out /tmp/grip-official-artifacts
 # Check against a saved trusted publication catalog:
 npm run extensions:pack -- --out /tmp/grip-official-artifacts --previous /tmp/catalog.json
 cd packages/coding-agent
-node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts test/official-automatic-publication.test.ts test/official-planner-artifact.test.ts test/official-planner-lifecycle.test.ts
+node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts test/official-automatic-publication.test.ts test/official-planner-artifact.test.ts test/official-planner-lifecycle.test.ts test/official-grepple-artifact.test.ts
 cd ../..
 node node_modules/vitest/dist/cli.js --run --config extensions/planner/vitest.config.mjs
+node --import tsx --test extensions/grepple/test/*.test.mjs
 ```
 
-Packaging does not execute entry points, lifecycle scripts, Git cloning, or npm installs. Focused tests execute isolated fixture factories and the packaged Planner factory. Production packaging supports an empty directory and preserves historical published releases. Artifacts are deterministic gzip JSON envelopes with schema version, generated manifest and sorted path/base64 file records. The runtime decoder validates size, digest, bounded decompression, manifest agreement and paths before extraction. Limits: 2 MiB catalog, 32 MiB compressed, 128 MiB expanded JSON, 4096 files.
+Packaging does not execute entry points, lifecycle scripts, Git cloning, or npm installs. Focused tests execute isolated fixture factories and the packaged Planner and Grepple factories; Grepple's installer is mocked and never downloaded or executed by these checks. Production packaging supports an empty directory and preserves historical published releases. Artifacts are deterministic gzip JSON envelopes with schema version, generated manifest and sorted path/base64 file records. The runtime decoder validates size, digest, bounded decompression, manifest agreement and paths before extraction. Limits: 2 MiB catalog, 32 MiB compressed, 128 MiB expanded JSON, 4096 files.
 
 ## Independent publication
 

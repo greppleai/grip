@@ -2,7 +2,7 @@
 
 Official extensions are independently versioned, published releases curated from the [`extensions/` source directory](../../../extensions/README.md). Their package identity is `official:<id>`, not an npm package or Git repository. Grip selects a published stable release compatible with your Grip version; it never installs unpublished code from `main`.
 
-Planner is selected as an official extension source. Pushes to main can publish it automatically after tests; local packaging never publishes. `official:planner` appears once publication updates the production catalog. The manager also supports an empty catalog; examples elsewhere in the repository are not automatically official or installed.
+Planner and Grepple are selected as official extension sources. Pushes to main can publish them automatically after tests; local packaging never publishes. `official:planner` and `official:grepple` appear once publication updates the production catalog. Grepple favors the Grepple CLI through Bash and provides an explicit `/grepple-install` command; installing the extension does not itself download the CLI. The manager also supports an empty catalog; examples elsewhere in the repository are not automatically official or installed.
 
 > **Trust:** Official extensions run as your user with full access to files, commands, network and credentials. They are not sandboxed. Review code and install only extensions you trust. Catalog checksums verify artifact integrity relative to the trusted official repository; they do not independently authenticate the publisher or limit extension behavior.
 
