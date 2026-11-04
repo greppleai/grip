@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Syncs all workspace package versions and local dependency ranges.
+ * Syncs workspace package versions, local dependency ranges and official extension Grip ranges.
  *
  * By default this syncs versioned packages to the highest package version
  * already present and syncs inter-package dependency ranges. Pass --set x.y.z
@@ -224,4 +224,26 @@ if (totalUpdates === 0) {
 	console.log("\nAll inter-package dependencies already in sync.");
 } else {
 	console.log(`\nUpdated ${totalUpdates} dependency version(s).`);
+}
+
+// Official extensions are tested against each Grip release. Preserve their minimum
+// supported version, widening the ceiling only when the new release needs it.
+const gripVersion = versionMap.get("@greppleai/grip");
+if (gripVersion) {
+	const [major, minor] = parseVersion(gripVersion);
+	const upperBound = major === 0 ? `0.${minor + 1}.0` : `${major + 1}.0.0`;
+	for (const directory of expandWorkspacePattern("extensions/*")) {
+		const path = join(directory, "package.json");
+		const extension = readJson(path);
+		if (!extension.grip?.official) continue;
+		const range = extension.engines?.grip;
+		// Keep this script dependency-free: release PRs run it before npm install.
+		const bounds = typeof range === "string" && /^(>=\d+\.\d+\.\d+)\s+<(\d+\.\d+\.\d+)$/.exec(range);
+		if (!bounds) throw new Error(`${path}: expected engines.grip range >=x.y.z <x.y.z`);
+		if (compareVersions(gripVersion, bounds[2]) < 0) continue;
+		const newRange = `${bounds[1]} <${upperBound}`;
+		console.log(`  ${extension.name}: engines.grip ${range} → ${newRange}`);
+		extension.engines.grip = newRange;
+		writeJson(path, extension);
+	}
 }

@@ -58,7 +58,7 @@ test("packages the actual planner reproducibly and loads its standalone artifact
 	expect(first.release.manifest).toMatchObject({
 		name: "@grip-extensions/planner",
 		version: JSON.parse(await readFile(join(plannerRoot, "package.json"), "utf8")).version,
-		engines: { grip: ">=0.2.1 <0.3.0" },
+		engines: JSON.parse(await readFile(join(plannerRoot, "package.json"), "utf8")).engines,
 		grip: {
 			official: { id: "planner", displayName: "Planner" },
 			extensions: ["extensions/index.js"],

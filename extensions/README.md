@@ -4,7 +4,7 @@
 
 ## Authoring contract
 
-Each `extensions/<id>/package.json` is independently versioned and is **not** an npm workspace. Core version synchronization does not touch it. Metadata is generated into the release/catalog, never maintained in another editable listing.
+Each `extensions/<id>/package.json` is independently versioned and is **not** an npm workspace. Core version synchronization leaves its package version unchanged but extends `engines.grip` when a new Grip release reaches its upper bound. Declare a bounded range in the form `>=x.y.z <x.y.z`: synchronization preserves the minimum and advances the ceiling to the next minor for Grip 0.x, or the next major for Grip 1.x and later. Already wider ranges are not narrowed. Release PR synchronization commits these manifest changes automatically; extension tests must pass before merging. Metadata is generated into the release/catalog, never maintained in another editable listing.
 
 ```json
 {
@@ -12,7 +12,7 @@ Each `extensions/<id>/package.json` is independently versioned and is **not** an
   "version": "1.0.0",
   "description": "A concise description",
   "type": "module",
-  "engines": { "grip": ">=0.1.8 <1" },
+  "engines": { "grip": ">=0.1.8 <1.0.0" },
   "files": ["assets/template.txt"],
   "grip": {
     "official": { "id": "example", "displayName": "Example" },
@@ -69,7 +69,7 @@ No actual release/publication is part of local validation. Before release, smoke
 The initial independent version is `1.0.0`, with tag `extension-planner-v1.0.0`; local packaging creates neither a tag nor a publication. Before merging changes to main:
 
 1. Confirm the approved repository MIT license and bundled `yaml@2.9.1` ISC notice in the generated artifact, and review all source/dependency notices.
-2. Review and approve the declared Grip range `>=0.2.1 <0.3.0` against released APIs and the intended executables. Current tests use this checkout; they do not establish compatibility with every release in that range.
+2. Review and approve the Grip range declared in `planner/package.json` against released APIs and the intended executables. Current tests use this checkout; they do not establish compatibility with every release in that range.
 3. Run the local checks above, `npm run check`, inspect the artifact and verify deterministic bytes.
 4. With separate build authorization, run feature-bearing npm-managed and compiled standalone smoke tests outside the checkout with isolated agent/workspace directories and fixture catalog/artifacts. Exercise Planner install, skill and tool discovery, plan preparation, offline restart and uninstall/data preservation. Source/virtual-loader tests do not replace these executable checks.
 5. After approval, merge the source to main to authorize automatic publication. Verify the live catalog before directing users to install it; no core release or npm publication is needed.
