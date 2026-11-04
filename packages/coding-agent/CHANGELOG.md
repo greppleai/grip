@@ -2,6 +2,34 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.3.0](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.5...@greppleai/grip-v0.3.0) (2026-11-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **coding-agent:** Custom PackageManager implementations must provide Git preparation, approved installation, and discard methods.
+
+### Features
+
+* **coding-agent:** git-extensions - add trusted Git installation ([120df90](https://github.com/greppleai/grip/commit/120df90b82da14eb4f327ce65cc613d617dac3ae))
+
+
+### Bug Fixes
+
+* **coding-agent:** distinguish assistant response stripes ([e29684a](https://github.com/greppleai/grip/commit/e29684a8c339e95ccec0c84387c2d7ac7d167e8a))
+* **coding-agent:** extension-display-names - Clarify startup labels ([b7492ff](https://github.com/greppleai/grip/commit/b7492ffd339f74286d1c1581ad400c3f4d630374))
+* **coding-agent:** feat/git-extensions - enforce approval expiry and preserve process failures ([51798e6](https://github.com/greppleai/grip/commit/51798e676d81df9ba22422ddf3215c7286a35d45))
+* **release:** fix/official-extension-grip-range - sync Grip ranges ([8dd4146](https://github.com/greppleai/grip/commit/8dd41463b7380e1eb11b57d72d412334041188b3))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.2.5 to ^0.3.0
+    * @greppleai/grip-ai bumped from ^0.2.5 to ^0.3.0
+    * @greppleai/grip-tui bumped from ^0.2.5 to ^0.3.0
+
 ## [0.2.5](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.4...@greppleai/grip-v0.2.5) (2026-10-30)
 
 
