@@ -8,7 +8,7 @@
 import * as os from "node:os";
 import type { AgentTool, AgentToolResult } from "@greppleai/grip-agent-core";
 import type { Api, AssistantMessage, Message, Model } from "@greppleai/grip-ai";
-import { Container, Markdown, Spacer, Text } from "@greppleai/grip-tui";
+import { type Component, Container, Markdown, Spacer, Text } from "@greppleai/grip-tui";
 import { type Static, Type } from "typebox";
 import { getMarkdownTheme, type Theme, type ThemeColor } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
@@ -53,76 +53,83 @@ function shortenJobToolPath(filePath: string): string {
 	return filePath.startsWith(home) ? `~${filePath.slice(home.length)}` : filePath;
 }
 
-function formatBashToolCall(args: Record<string, unknown>, themeFg: JobToolThemeForeground): string {
-	const command = (args.command as string) || "...";
-	const preview = command.length > 60 ? `${command.slice(0, 60)}...` : command;
-	return themeFg("muted", "$ ") + themeFg("toolOutput", preview);
+interface JobToolCallPart {
+	color: ThemeColor;
+	text: string;
 }
 
-function formatReadToolCall(args: Record<string, unknown>, themeFg: JobToolThemeForeground): string {
+function describeReadToolCall(args: Record<string, unknown>): JobToolCallPart[] {
 	const rawPath = (args.file_path || args.path || "...") as string;
-	const filePath = shortenJobToolPath(rawPath);
+	const parts: JobToolCallPart[] = [
+		{ color: "muted", text: "read " },
+		{ color: "accent", text: shortenJobToolPath(rawPath) },
+	];
 	const offset = args.offset as number | undefined;
 	const limit = args.limit as number | undefined;
-	let text = themeFg("accent", filePath);
 	if (offset !== undefined || limit !== undefined) {
 		const startLine = offset ?? 1;
 		const endLine = limit !== undefined ? startLine + limit - 1 : "";
-		text += themeFg("warning", `:${startLine}${endLine ? `-${endLine}` : ""}`);
+		parts.push({ color: "warning", text: `:${startLine}${endLine ? `-${endLine}` : ""}` });
 	}
-	return themeFg("muted", "read ") + text;
+	return parts;
 }
 
-function formatWriteToolCall(args: Record<string, unknown>, themeFg: JobToolThemeForeground): string {
+function describeWriteToolCall(args: Record<string, unknown>): JobToolCallPart[] {
 	const rawPath = (args.file_path || args.path || "...") as string;
-	const filePath = shortenJobToolPath(rawPath);
-	const content = (args.content || "") as string;
-	const lines = content.split("\n").length;
-	let text = themeFg("muted", "write ") + themeFg("accent", filePath);
-	if (lines > 1) text += themeFg("dim", ` (${lines} lines)`);
-	return text;
+	const lines = ((args.content || "") as string).split("\n").length;
+	const parts: JobToolCallPart[] = [
+		{ color: "muted", text: "write " },
+		{ color: "accent", text: shortenJobToolPath(rawPath) },
+	];
+	if (lines > 1) parts.push({ color: "dim", text: ` (${lines} lines)` });
+	return parts;
 }
 
-function formatToolCall(toolName: string, args: Record<string, unknown>, themeFg: JobToolThemeForeground): string {
+/** Plain themed spans keep UI snapshots independent of large tool arguments. */
+function describeToolCall(toolName: string, args: Record<string, unknown>): JobToolCallPart[] {
 	switch (toolName) {
-		case "bash":
-			return formatBashToolCall(args, themeFg);
+		case "bash": {
+			const command = (args.command as string) || "...";
+			return [
+				{ color: "muted", text: "$ " },
+				{ color: "toolOutput", text: command.length > 60 ? `${command.slice(0, 60)}...` : command },
+			];
+		}
 		case "read":
-			return formatReadToolCall(args, themeFg);
+			return describeReadToolCall(args);
 		case "write":
-			return formatWriteToolCall(args, themeFg);
-		case "edit": {
-			const rawPath = (args.file_path || args.path || "...") as string;
-			return themeFg("muted", "edit ") + themeFg("accent", shortenJobToolPath(rawPath));
-		}
+			return describeWriteToolCall(args);
+		case "edit":
 		case "ls": {
-			const rawPath = (args.path || ".") as string;
-			return themeFg("muted", "ls ") + themeFg("accent", shortenJobToolPath(rawPath));
+			const rawPath = (toolName === "ls" ? args.path || "." : args.file_path || args.path || "...") as string;
+			return [
+				{ color: "muted", text: `${toolName} ` },
+				{ color: "accent", text: shortenJobToolPath(rawPath) },
+			];
 		}
-		case "find": {
-			const pattern = (args.pattern || "*") as string;
-			const rawPath = (args.path || ".") as string;
-			return (
-				themeFg("muted", "find ") +
-				themeFg("accent", pattern) +
-				themeFg("dim", ` in ${shortenJobToolPath(rawPath)}`)
-			);
-		}
+		case "find":
 		case "grep": {
-			const pattern = (args.pattern || "") as string;
-			const rawPath = (args.path || ".") as string;
-			return (
-				themeFg("muted", "grep ") +
-				themeFg("accent", `/${pattern}/`) +
-				themeFg("dim", ` in ${shortenJobToolPath(rawPath)}`)
-			);
+			const pattern =
+				toolName === "find" ? ((args.pattern || "*") as string) : `/${(args.pattern || "") as string}/`;
+			return [
+				{ color: "muted", text: `${toolName} ` },
+				{ color: "accent", text: pattern },
+				{ color: "dim", text: ` in ${shortenJobToolPath((args.path || ".") as string)}` },
+			];
 		}
 		default: {
 			const argsStr = JSON.stringify(args);
-			const preview = argsStr.length > 50 ? `${argsStr.slice(0, 50)}...` : argsStr;
-			return themeFg("accent", toolName) + themeFg("dim", ` ${preview}`);
+			return [
+				{ color: "accent", text: toolName },
+				{ color: "dim", text: ` ${argsStr.length > 50 ? `${argsStr.slice(0, 50)}...` : argsStr}` },
+			];
 		}
 	}
+}
+
+function formatToolCall(item: JobToolCallDisplayItem, themeFg: JobToolThemeForeground): string {
+	const parts = item.type === "toolCallPreview" ? item.parts : describeToolCall(item.name, item.args);
+	return parts.map((part) => themeFg(part.color, part.text)).join("");
 }
 
 export interface JobUsageStats {
@@ -270,7 +277,10 @@ function truncateParallelOutput(output: string): string {
 	return `${truncated}\n\n[Output truncated: ${byteLength - Buffer.byteLength(truncated, "utf8")} bytes omitted.]`;
 }
 
-type DisplayItem = { type: "text"; text: string } | { type: "toolCall"; name: string; args: Record<string, unknown> };
+type JobToolCallDisplayItem =
+	| { type: "toolCall"; name: string; args: Record<string, unknown> }
+	| { type: "toolCallPreview"; parts: JobToolCallPart[] };
+type DisplayItem = { type: "text"; text: string } | JobToolCallDisplayItem;
 
 function getDisplayItems(messages: Message[]): DisplayItem[] {
 	return getPresentationState(messages).displayItems;
@@ -936,7 +946,7 @@ function renderJobDisplayItems(items: DisplayItem[], expanded: boolean, theme: T
 			text += `${theme.fg("toolOutput", preview)}\n`;
 			continue;
 		}
-		text += `${theme.fg("muted", "-> ") + formatToolCall(item.name, item.args, theme.fg.bind(theme))}\n`;
+		text += `${theme.fg("muted", "-> ") + formatToolCall(item, theme.fg.bind(theme))}\n`;
 	}
 	return text.trimEnd();
 }
@@ -971,10 +981,8 @@ function countJobStatuses(results: JobResult[]): JobStatusCounts {
 
 function appendJobToolCalls(container: Container, items: DisplayItem[], theme: Theme): void {
 	for (const item of items) {
-		if (item.type !== "toolCall") continue;
-		container.addChild(
-			new Text(theme.fg("muted", "-> ") + formatToolCall(item.name, item.args, theme.fg.bind(theme)), 0, 0),
-		);
+		if (item.type === "text") continue;
+		container.addChild(new Text(theme.fg("muted", "-> ") + formatToolCall(item, theme.fg.bind(theme)), 0, 0));
 	}
 }
 
@@ -1178,6 +1186,111 @@ function renderJobResult(result: AgentToolResult<JobDetails>, expanded: boolean,
 	return renderJobFallback(result);
 }
 
+function snapshotJobDisplayItem(item: DisplayItem): DisplayItem {
+	if (item.type === "text") return { type: "text", text: item.text };
+	if (item.type === "toolCallPreview") return item;
+	return { type: "toolCallPreview", parts: describeToolCall(item.name, item.args) };
+}
+
+function snapshotJobResult(result: JobResult, completed: WeakMap<JobResult, JobResult>): JobResult {
+	if (result.status !== "completed" && result.status !== "failed") return result;
+	const cached = completed.get(result);
+	if (cached) return cached;
+	const presentation = getPresentationState(result.messages);
+	const messages: Message[] = [];
+	presentationCache.set(messages, {
+		displayItems: presentation.displayItems.map(snapshotJobDisplayItem),
+		assistantOutputs: presentation.assistantOutputs.slice(-1),
+		segments: [],
+	});
+	// The virtual message array is backed only by display data, not child messages or tool arguments.
+	const snapshot: JobResult = {
+		status: result.status,
+		task: result.task,
+		exitCode: result.exitCode,
+		messages,
+		stderr: "",
+		usage: {
+			input: result.usage.input,
+			output: result.usage.output,
+			cacheRead: result.usage.cacheRead,
+			cacheWrite: result.usage.cacheWrite,
+			cost: result.usage.cost,
+			contextTokens: result.usage.contextTokens,
+			turns: result.usage.turns,
+		},
+		model: result.model,
+		execution: result.execution
+			? {
+					cwd: result.execution.cwd,
+					backend: result.execution.backend,
+					model: result.execution.model,
+					tools: [...result.execution.tools],
+					preloadedSkills: [...result.execution.preloadedSkills],
+				}
+			: undefined,
+		stopReason: result.stopReason,
+		errorMessage: result.errorMessage,
+		responseFormat: result.responseFormat,
+		step: result.step,
+	};
+	completed.set(result, snapshot);
+	return snapshot;
+}
+
+interface JobResultRenderView {
+	component: Component;
+	width?: number;
+	lines?: string[];
+}
+
+/** Row-local caches; completed jobs retain only display data, never sessions or child messages. */
+class JobResultRenderComponent implements Component {
+	private completedResults = new WeakMap<JobResult, JobResult>();
+	private sourceDetails = new WeakSet<JobDetails>();
+	private snapshot: JobDetails | undefined;
+	private complete = false;
+	private expanded = false;
+	private theme: Theme | undefined;
+	private views = new Map<boolean, JobResultRenderView>();
+
+	update(details: JobDetails, expanded: boolean, isPartial: boolean, theme: Theme): void {
+		if (!this.complete || isPartial || !this.sourceDetails.has(details)) {
+			this.snapshot = {
+				mode: details.mode,
+				results: details.results.map((result) => snapshotJobResult(result, this.completedResults)),
+			};
+			this.complete =
+				!isPartial &&
+				details.results.every((result) => result.status === "completed" || result.status === "failed");
+			this.sourceDetails = new WeakSet([details]);
+			this.views.clear();
+		}
+		if (this.theme !== theme) this.views.clear();
+		this.theme = theme;
+		this.expanded = expanded;
+	}
+
+	invalidate(): void {
+		// Theme is a stable proxy. Rebuild styled components, not the underlying display snapshot.
+		this.views.clear();
+	}
+
+	render(width: number): string[] {
+		if (!this.snapshot || !this.theme || width < 1) return [];
+		let view = this.views.get(this.expanded);
+		if (!view) {
+			view = { component: renderJobResult({ content: [], details: this.snapshot }, this.expanded, this.theme) };
+			this.views.set(this.expanded, view);
+		}
+		if (!view.lines || view.width !== width) {
+			view.lines = view.component.render(width);
+			view.width = width;
+		}
+		return view.lines;
+	}
+}
+
 export function createJobToolDefinition(
 	options: JobToolOptions = {},
 ): ToolDefinition<typeof jobParamsSchema, JobDetails> {
@@ -1250,8 +1363,23 @@ export function createJobToolDefinition(
 			return renderSingleJobCall(args, theme);
 		},
 
-		renderResult(result, { expanded }, theme, _context) {
-			return renderJobResult(result, expanded, theme);
+		renderResult(result, { expanded, isPartial }, theme, context) {
+			const details = result.details;
+			if (
+				!details ||
+				details.results.length === 0 ||
+				(details.mode !== "chain" &&
+					details.mode !== "parallel" &&
+					(details.mode !== "single" || details.results.length !== 1))
+			) {
+				return renderJobResult(result, expanded, theme);
+			}
+			const component =
+				context.lastComponent instanceof JobResultRenderComponent
+					? context.lastComponent
+					: new JobResultRenderComponent();
+			component.update(details, expanded, isPartial, theme);
+			return component;
 		},
 	};
 }

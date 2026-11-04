@@ -2,7 +2,7 @@ import { statSync } from "node:fs";
 import type { ImageContent, Message, TextContent } from "@greppleai/grip-ai";
 import type { BashExecutionMessage, CustomMessage } from "../messages.ts";
 import { CURRENT_SESSION_VERSION } from "./constants.ts";
-import { buildSessionContext } from "./context.ts";
+import { buildSessionContext, projectSessionContextEntries } from "./context.ts";
 import { createSessionId, generateId, validateSessionId } from "./ids.ts";
 import { migrateToCurrentVersion } from "./migrations.ts";
 import type { SessionManager, SessionResult } from "./session-manager.ts";
@@ -383,6 +383,10 @@ export abstract class Session {
 	 * Uses tree traversal from current leaf.
 	 */
 	buildSessionContext(): SessionContext {
+		if (this.store.retainContextEntries) {
+			const visible = projectSessionContextEntries(this.getBranch());
+			this.store.retainContextEntries(new Set(visible.map((entry) => entry.id)));
+		}
 		return buildSessionContext(this.getEntries(), this.store.getLeafId(), this.store.getEntryIndex());
 	}
 

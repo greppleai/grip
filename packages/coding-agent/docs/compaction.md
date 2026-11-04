@@ -69,6 +69,8 @@ You can also trigger manually with `/compact [instructions]`, where optional ins
 4. **Append entry**: Save `CompactionEntry` with summary and `firstKeptEntryId`
 5. **Reload**: Session reloads, using summary + messages from `firstKeptEntryId` onwards
 
+For local JSONL-backed sessions, rebuilding context evicts message payloads outside the active context from memory, including retained job transcripts. Lightweight tree and usage metadata remain resident. History lookup, `/tree`, export, and forks read archived payloads from disk on demand; reading history does not permanently cache it. The same eviction applies after range compression and when resuming a compacted session. Successful compaction and range compression also reset provider transport resources so continuation caches cannot retain the old request body. In-memory-only sessions retain their history because they have no durable copy. Extensions and bounded editor input history can retain text independently. Garbage collection and a reduction in process RSS are not immediate guarantees.
+
 ```
 Before compaction:
 

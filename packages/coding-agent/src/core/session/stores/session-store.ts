@@ -23,6 +23,8 @@ export interface SessionStore {
 	ensureDir(path: string): void;
 	load(filePath: string): FileEntry[];
 	setEntries(entries: FileEntry[]): void;
+	/** Keep active payloads resident; disk-backed stores may evict the remaining history. */
+	retainContextEntries?(entryIds: ReadonlySet<string>): void;
 	getFileEntries(): FileEntry[];
 	getHeader(): SessionHeader | null;
 	getEntries(): SessionEntry[];
