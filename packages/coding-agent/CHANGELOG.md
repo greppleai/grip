@@ -2,6 +2,29 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.3.1](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.0...@greppleai/grip-v0.3.1) (2026-11-04)
+
+
+### Features
+
+* **extensions:** integrate Grepple as an official extension ([a9d37a7](https://github.com/greppleai/grip/commit/a9d37a7d3a6d3c60348a28f6c4883f674a5098f0))
+* **jobs:** add trusted per-task model routing ([5023cf6](https://github.com/greppleai/grip/commit/5023cf68f41633ece2cf1e49c9ba77db4e0d6c83))
+* **jobs:** preload child context with tool calls ([43cc4b7](https://github.com/greppleai/grip/commit/43cc4b71bb9a23cb59707db931e761e31362d323))
+
+
+### Bug Fixes
+
+* **memory:** release compacted history and cache job views ([607df2c](https://github.com/greppleai/grip/commit/607df2c43b65a73e482cacb7299532876a28abe6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.3.0 to ^0.3.1
+    * @greppleai/grip-ai bumped from ^0.3.0 to ^0.3.1
+    * @greppleai/grip-tui bumped from ^0.3.0 to ^0.3.1
+
 ## [0.3.0](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.2.5...@greppleai/grip-v0.3.0) (2026-11-04)
 
 
