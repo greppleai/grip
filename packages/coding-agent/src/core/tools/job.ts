@@ -379,10 +379,11 @@ export interface JobRunRequest {
 	model?: string;
 	tools?: string[];
 	skills?: string[];
+	preload?: JobPreloadCall[];
 	/** Include load_skill with default tools; explicit per-task tool lists remain authoritative. */
 	includeDefaultSkillTool?: boolean;
 	signal?: AbortSignal;
-	onMessage: (message: Message) => void;
+	onMessage: (message: Message, source?: JobMessageSource) => void;
 }
 
 export interface JobRunOutcome {
@@ -393,12 +394,23 @@ export interface JobRunOutcome {
 
 export type JobRunner = (request: JobRunRequest) => Promise<JobRunOutcome>;
 
+export interface JobMessageSource {
+	/** Caller-supplied tool calls are context, not model turns. */
+	preload?: boolean;
+}
+
+export interface JobPreloadCall {
+	tool: string;
+	args: Record<string, unknown>;
+}
+
 interface JobTaskSpec {
 	task: string;
 	model?: string;
 	responseFormat?: string;
 	tools?: string[];
 	skills?: string[];
+	preload?: JobPreloadCall[];
 	cwd?: string;
 	toolOperations?: ToolOperations;
 }
@@ -478,9 +490,9 @@ async function runSingleJob(
 			details: makeDetails([currentResult]),
 		});
 	};
-	const onMessage = (message: Message): void => {
+	const onMessage = (message: Message, source?: JobMessageSource): void => {
 		retainJobMessage(currentResult, retainedMessageState, message);
-		if (message.role === "assistant") recordJobAssistantMessage(currentResult, message);
+		if (message.role === "assistant" && !source?.preload) recordJobAssistantMessage(currentResult, message);
 		emitUpdate();
 	};
 
@@ -493,6 +505,7 @@ async function runSingleJob(
 		model,
 		tools: spec.tools,
 		skills: spec.skills,
+		preload: spec.preload,
 		includeDefaultSkillTool: spec.tools === undefined,
 		signal,
 		onMessage,
@@ -500,6 +513,11 @@ async function runSingleJob(
 	return finalizeJobRun(currentResult, outcome, signal?.aborted === true);
 }
 
+export const MAX_JOB_PRELOAD_CALLS = 16;
+const PreloadCall = Type.Object({
+	tool: Type.String({ minLength: 1, description: "An enabled child tool to execute before the first model turn" }),
+	args: Type.Record(Type.String(), Type.Unknown(), { description: "Arguments validated by the selected tool" }),
+});
 const TaskItem = Type.Object({
 	task: Type.String({ description: "A bounded job with a concrete deliverable" }),
 	model: Type.Optional(
@@ -515,6 +533,13 @@ const TaskItem = Type.Object({
 		Type.Array(Type.String(), {
 			description:
 				"Skills to force-preload from the parent catalog before the first job turn; unknown names fail the job",
+		}),
+	),
+	preload: Type.Optional(
+		Type.Array(PreloadCall, {
+			maxItems: MAX_JOB_PRELOAD_CALLS,
+			description:
+				"Tool calls to pre-hydrate child context before inference, e.g. bash source reads. Runs in order using child cwd, permissions and enabled tools, with a 60-second timeout per call; errors fail the job. Does not enable additional tools.",
 		}),
 	),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the job session" })),
@@ -800,6 +825,7 @@ async function executeSingleJob(
 			model: params.model,
 			tools: params.tools,
 			skills: params.skills,
+			preload: params.preload,
 			cwd: params.cwd,
 			toolOperations: environment.workspaceOperations,
 		},
@@ -1163,7 +1189,7 @@ export function createJobToolDefinition(
 	return {
 		name: "job",
 		label: "Job",
-		description: `Delegate a bounded job to an isolated session. Specify the outcome; intermediate steps needn't enter the parent conversation, but its result does. Select model only from the registered catalog when its guidance fits the task; omit model to keep the default.\n\n${modelGuidance}`,
+		description: `Delegate a bounded job to an isolated session. Specify the outcome; intermediate steps needn't enter the parent conversation, but its result does. When useful initial reads are already known, pass preload tool calls to supply their results before the child's first model turn. Select model only from the registered catalog when its guidance fits the task; omit model to keep the default.\n\n${modelGuidance}`,
 		promptSnippet: "Delegate a bounded job to an isolated session",
 		parameters: jobParamsSchema,
 

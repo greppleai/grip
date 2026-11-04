@@ -244,7 +244,7 @@ describe("per-job model selection", () => {
 		expect(jobDetails(session.messages).results[0].execution?.model).toBe("faux/default");
 	});
 
-	it("fails unavailable registered selections before child inference", async () => {
+	it("fails unavailable registered selections before preloading or child inference", async () => {
 		const { harness, session } = await fixture({
 			jobModels: [{ model: "faux/missing", description: "No longer available" }],
 		});
@@ -254,6 +254,7 @@ describe("per-job model selection", () => {
 					task: "inspect",
 					model: "missing",
 					tools: ["read"],
+					preload: [{ tool: "read", args: { path: "missing.txt" } }],
 				}),
 				{ stopReason: "toolUse" },
 			),

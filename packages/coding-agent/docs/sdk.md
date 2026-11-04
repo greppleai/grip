@@ -264,6 +264,43 @@ session.refreshJobModelCatalog();
 
 Use an ID currently available in your setup. Execution reads current settings, but SDK callers should refresh after `setJobModels` so the agent sees updated descriptions. Interactive catalog commands refresh the session live; normal `/reload` and profile runtime rebuilds refresh it too. Runtime catalog overrides profile, then global; project settings are ignored and arrays replace rather than merge. See [settings](settings.md#tool-configuration) and [job model routing](usage.md#job-model-routing).
 
+For example, after registering the model and enabling `bash` for the child, a job can combine explicit routing with a focused preload for a mechanical task:
+
+```json
+{
+  "task": "List the Markdown headings and report inconsistent capitalization",
+  "model": "anthropic/claude-haiku-4-5",
+  "tools": ["bash"],
+  "preload": [{ "tool": "bash", "args": { "command": "grepple --outline README.md", "output_mode": "always" } }]
+}
+```
+
+### Job context preload
+
+When the parent already knows useful initial reads, pass `preload` tool calls to `job` rather than making the child discover them:
+
+```json
+{
+  "task": "Explain the job execution path",
+  "tools": ["bash"],
+  "preload": [
+    {
+      "tool": "bash",
+      "args": {
+        "command": "grepple --outline packages/coding-agent/src/core/tools/job.ts",
+        "output_mode": "always"
+      }
+    }
+  ]
+}
+```
+
+`preload` is available on a single job, each item in `tasks`, and each step in `chain`. Up to 16 calls run sequentially before the child's first model request. Each uses the child's cwd, workspace backend, argument validation, hooks, permissions, and normal tool output limits. Calls must name tools already enabled for the child; preload does not expand the child or parent allowlist. Cancellation propagates to the running tool, with a cooperative 60-second timeout per call. An unavailable tool, invalid arguments, tool error, or termination request fails the job before inference; earlier calls are not rolled back.
+
+The child receives explicitly labeled parent-supplied calls and their tool results in its transcript. They also appear in job details but do not count as model turns. Existing `skills` preloading remains available and runs before tool preloads. Prefer focused reads over speculative context dumps: preload saves model roundtrips, not context tokens.
+
+Custom `JobRunner` implementations receive `request.preload` and are responsible for executing it. When reporting synthetic preload messages, use `request.onMessage(message, { preload: true })` to exclude them from inference usage accounting.
+
 ### Settings
 
 ```typescript
