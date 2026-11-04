@@ -15,7 +15,7 @@ grip update official:planner
 grip remove official:planner
 ```
 
-The independently versioned initial package is `1.0.0`; its declared Grip range is `>=0.2.1 <0.3.0` (minimum 0.2.1). The range is validated against this checkout, not every released executable; source, license and compatibility approval before merging and maintainer executable smoke tests remain required. Official extensions run with full user access: review and trust the code before installation.
+The independently versioned initial package is `1.0.0`; its declared Grip range is in `package.json` (minimum 0.2.1). Core release synchronization automatically extends the upper bound for new Grip releases. The range is validated against this checkout, not every released executable; source, license and compatibility approval before merging and maintainer executable smoke tests remain required. Official extensions run with full user access: review and trust the code before installation.
 
 Official installations are global and include their runtime dependencies. At startup Grip updates selected installations to newer compatible stable releases unless updates are disabled or offline; verified installed versions can be reused offline. Removing the official package removes selection and activation but retains immutable code versions and does not remove plans. Running sessions need to reload or restart after CLI changes; `/extensions` applies changes after work settles. See Grip's official extensions guide for policy and recovery.
 

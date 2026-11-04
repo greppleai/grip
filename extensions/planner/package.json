@@ -4,7 +4,7 @@
   "description": "File-backed Markdown plans and iterative build loops for Grip",
   "type": "module",
   "license": "MIT",
-  "engines": { "grip": ">=0.2.1 <0.3.0" },
+  "engines": { "grip": ">=0.2.1 <0.4.0" },
   "files": ["README.md", "LICENSE"],
   "grip": {
     "official": { "id": "planner", "displayName": "Planner" },
