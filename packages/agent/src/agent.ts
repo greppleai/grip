@@ -1,4 +1,5 @@
 import {
+	type AssistantMessage,
 	type ImageContent,
 	type Message,
 	type Model,
@@ -8,7 +9,7 @@ import {
 	type ThinkingBudgets,
 	type Transport,
 } from "@greppleai/grip-ai";
-import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
+import { type ExecutedToolCallBatch, executeToolCalls, runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
 import type {
 	AfterToolCallContext,
 	AfterToolCallResult,
@@ -379,6 +380,30 @@ export class Agent {
 		}
 
 		await this.runContinuation();
+	}
+
+	/** Execute caller-supplied tool calls with normal validation, hooks, events and cancellation, without inference. */
+	async executeToolCalls(message: AssistantMessage, prompts: AgentMessage[] = []): Promise<ExecutedToolCallBatch> {
+		let batch: ExecutedToolCallBatch = { messages: [], terminate: false };
+		await this.runWithLifecycle(async (signal) => {
+			const context = this.createContextSnapshot();
+			context.messages.push(...prompts, message);
+			await this.processEvents({ type: "agent_start" });
+			await this.processEvents({ type: "turn_start" });
+			for (const prompt of prompts) {
+				await this.processEvents({ type: "message_start", message: prompt });
+				await this.processEvents({ type: "message_end", message: prompt });
+			}
+			await this.processEvents({ type: "message_start", message });
+			await this.processEvents({ type: "message_end", message });
+			batch = await executeToolCalls(context, message, this.createLoopConfig(), signal, (event) =>
+				this.processEvents(event),
+			);
+			await this.processEvents({ type: "turn_end", message, toolResults: batch.messages });
+			await this.processEvents({ type: "agent_end", messages: [...prompts, message, ...batch.messages] });
+		});
+		if (this._state.errorMessage) throw new Error(this._state.errorMessage);
+		return batch;
 	}
 
 	private normalizePromptInput(

@@ -496,7 +496,7 @@ async function streamAssistantResponse(
 /**
  * Execute tool calls from an assistant message.
  */
-async function executeToolCalls(
+export async function executeToolCalls(
 	currentContext: AgentContext,
 	assistantMessage: AssistantMessage,
 	config: AgentLoopConfig,
@@ -517,7 +517,7 @@ async function executeToolCalls(
 	return executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit);
 }
 
-type ExecutedToolCallBatch = {
+export type ExecutedToolCallBatch = {
 	messages: ToolResultMessage[];
 	terminate: boolean;
 };
