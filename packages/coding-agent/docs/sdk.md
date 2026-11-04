@@ -249,6 +249,21 @@ await pi.createAgentSession();
 
 Built-in tool names include `read`, `bash`, `edit`, `write`, `websearch`, `session_search`, `session_entry_get`, `compress_context`, `grep`, `find`, `ls`, and `job`. Job delegation is enabled by default for bounded tasks; set `enableJobs: false` in settings to disable it. A job inherits the parent model unless `jobModel` or `GRIP_DEFAULT_JOB_MODEL=provider/model-id` is set (in that order); the child cannot widen a parent tool allowlist. An explicit `tools` option selects any subset regardless of these defaults; `noTools: "all"` and `noTools: "builtin"` remain authoritative.
 
+### Job model catalog
+
+The trusted `jobModels` catalog supplies the agent with model IDs and routing descriptions directly in the job tool description. An explicit `model` is supported on a single job, each `tasks` item, and each `chain` step; a batch's top-level `model` supplies a default that individual items can override. Explicit choices must be registered and currently available; unknown, ambiguous, unregistered, or unavailable choices fail before child inference rather than falling back. Prefer exact `provider/model-id` references; unambiguous bare exact IDs also work, but fuzzy aliases do not. Omitting `model` retains the existing `jobModel` → `GRIP_DEFAULT_JOB_MODEL` → parent model default. Registration does not change that default, and setting the default does not register it.
+
+For a live SDK session, update trusted settings and refresh the visible tool description:
+
+```typescript
+settingsManager.setJobModels([
+  { model: "anthropic/claude-haiku-4-5", description: "Mechanical edits and straightforward checks" },
+]);
+session.refreshJobModelCatalog();
+```
+
+Use an ID currently available in your setup. Execution reads current settings, but SDK callers should refresh after `setJobModels` so the agent sees updated descriptions. Interactive catalog commands refresh the session live; normal `/reload` and profile runtime rebuilds refresh it too. Runtime catalog overrides profile, then global; project settings are ignored and arrays replace rather than merge. See [settings](settings.md#tool-configuration) and [job model routing](usage.md#job-model-routing).
+
 ### Settings
 
 ```typescript
@@ -262,7 +277,7 @@ const pi = await GripAgent.create({ settingsManager });
 await pi.createAgentSession();
 ```
 
-For a live session, `session.setJobsEnabled(enabled)` persists the setting and immediately refreshes active tools and job guidance. `session.reload()` applies settings-file changes.
+For a live session, `session.setJobsEnabled(enabled)` persists the setting and immediately refreshes active tools and job guidance. `session.reload()` applies settings-file changes. After `settingsManager.setJobModels(...)`, call `session.refreshJobModelCatalog()` to update the agent-visible catalog.
 
 ## Run Modes
 

@@ -608,18 +608,21 @@ export class GripAgent {
 			diagnostics,
 		};
 	}
-	private resolveEmbeddedJobRequest(
+	private resolveEmbeddedJobModel(
 		request: JobRunRequest,
 		services: GripAgentServices,
-	): EmbeddedJobRequestResolution {
-		const configuredModel =
-			services.settingsManager.getJobModel()?.trim() || process.env.GRIP_DEFAULT_JOB_MODEL?.trim();
-		const configurationSource = services.settingsManager.getJobModel()?.trim()
-			? "jobModel"
-			: "GRIP_DEFAULT_JOB_MODEL";
+	): ResolveCliModelResult | undefined {
+		const settingModel = services.settingsManager.getJobModel()?.trim();
+		const defaultModel = settingModel || process.env.GRIP_DEFAULT_JOB_MODEL?.trim();
+		const configuredModel = request.model?.trim() || defaultModel;
+		const configurationSource =
+			request.model?.trim() && request.model.trim() !== defaultModel
+				? "Requested job model"
+				: settingModel
+					? "jobModel"
+					: "GRIP_DEFAULT_JOB_MODEL";
 		const parentModel = this.session?.model;
-		const modelName =
-			configuredModel || (parentModel ? `${parentModel.provider}/${parentModel.id}` : undefined) || request.model;
+		const modelName = configuredModel || (parentModel ? `${parentModel.provider}/${parentModel.id}` : undefined);
 		if (
 			configuredModel &&
 			!services.modelRegistry
@@ -627,10 +630,9 @@ export class GripAgent {
 				.some((model) => `${model.provider}/${model.id}`.toLowerCase() === configuredModel.toLowerCase())
 		) {
 			return {
-				failure: {
-					exitCode: 1,
-					stderr: `${configurationSource} "${configuredModel}" is not an available provider/model-id.`,
-				},
+				model: undefined,
+				warning: undefined,
+				error: `${configurationSource} "${configuredModel}" is not an available provider/model-id.`,
 			};
 		}
 		const resolvedModel = modelName
@@ -638,12 +640,19 @@ export class GripAgent {
 			: undefined;
 		if (resolvedModel?.error) {
 			return {
-				failure: {
-					exitCode: 1,
-					stderr: configuredModel ? `${configurationSource}: ${resolvedModel.error}` : resolvedModel.error,
-				},
+				...resolvedModel,
+				error: configuredModel ? `${configurationSource}: ${resolvedModel.error}` : resolvedModel.error,
 			};
 		}
+		return resolvedModel;
+	}
+
+	private resolveEmbeddedJobRequest(
+		request: JobRunRequest,
+		services: GripAgentServices,
+	): EmbeddedJobRequestResolution {
+		const resolvedModel = this.resolveEmbeddedJobModel(request, services);
+		if (resolvedModel?.error) return { failure: { exitCode: 1, stderr: resolvedModel.error } };
 		const toolOperations = request.toolOperations;
 		if (!toolOperations) {
 			return { failure: { exitCode: 1, stderr: "Jobs require explicit workspace tool operations" } };

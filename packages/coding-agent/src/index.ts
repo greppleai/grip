@@ -306,6 +306,7 @@ export {
 	type CompactionSettings,
 	type FullscreenExitOutput,
 	type ImageSettings,
+	type JobModelOption,
 	type MarkdownSettings,
 	type MermaidRenderingMode,
 	type PackageSource,

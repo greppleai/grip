@@ -171,7 +171,8 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/websearch login` | Choose a web search engine and configure its API key |
 | `/model` | Switch models |
 | `/image [show\|clear\|model-id]` | Show, reset, or set the Codex image-generation model for the active profile (global without a profile) |
-| `/job model show`, `/job model set --model <provider/model-id>`, `/job model clear` | Inspect, set, or clear the active profile's job model (global without a profile) |
+| `/job model show`, `/job model set --model <provider/model-id>`, `/job model clear` | Inspect or change the trusted job default for the active profile (global without a profile) |
+| `/job model add <model> <description...>`, `/job model remove <model>` | Manage the trusted catalog of models available for explicit job routing |
 | `/profile list`, `/profile create <name>`, `/profile use <name>` | List, snapshot, or switch named settings profiles (switching is session-only) |
 | `/profile directory <name> <absolute-path>`, `/profile directory clear <absolute-path>` | Assign or remove a directory-prefix profile rule |
 | `/profile sandbox <name> --name <vm> [--autoconnect on\|off]` | Choose an existing VM with name completion and set startup auto-connection in one command; options also work separately |
@@ -526,7 +527,7 @@ Grip is aggressively extensible so it does not have to dictate your workflow. Fe
 
 **No MCP.** Build CLI tools with READMEs (see [Skills](#skills)), or build an extension that adds MCP support. [Why?](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)
 
-**Focused jobs.** The built-in `job` tool is enabled by default and offloads bounded tasks to fresh in-memory sessions with isolated conversations and shared authentication. Each child uses the main agent's normal prompt builder, including current project instructions and available skills, with a bounded-job overlay; the parent verifies results and owns the final answer. Pass `task` for one job, `tasks` for independent parallel jobs, or `chain` for sequential jobs with `{previous}` handoff. Each task can specify `tools`, `skills`, `cwd`, and `responseFormat`. Run `/job model set --model provider/model-id` to set a job model for the active profile (or globally when no profile is active); `/job model clear` restores `GRIP_DEFAULT_JOB_MODEL`, then the parent model. Extensions and packages can provide other orchestration models.
+**Focused jobs.** The built-in `job` tool is enabled by default and offloads bounded tasks to fresh in-memory sessions with isolated conversations and shared authentication. Each child uses the main agent's normal prompt builder, including current project instructions and available skills, with a bounded-job overlay; the parent verifies results and owns the final answer. Pass `task` for one job, `tasks` for independent parallel jobs, or `chain` for sequential jobs with `{previous}` handoff. Each task can specify `tools`, `skills`, `cwd`, and `responseFormat`. Configure a trusted catalog with `/job model add <model> <description...>`; the agent sees its routing descriptions in the job tool description and can select a registered, available model explicitly. Adding a model does not change the default. Run `/job model set --model provider/model-id` to set the default for the active profile (or globally when no profile is active); `/job model clear` restores `GRIP_DEFAULT_JOB_MODEL`, then the parent model. See [job model routing](docs/usage.md#job-model-routing). Extensions and packages can provide other orchestration models.
 
 **No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
 

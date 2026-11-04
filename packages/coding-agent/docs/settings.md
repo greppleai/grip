@@ -170,12 +170,25 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `enableJobs` | boolean | `true` | Enable the built-in `job` tool for bounded delegated tasks. Changes made in `/settings` apply immediately; `/reload` applies file edits. An explicit CLI/SDK tool allowlist can still select `job`, while no-tools modes remain authoritative. |
-| `jobModel` | string or null | - | Trusted global or active-profile exact available `provider/model-id` for jobs; project settings cannot select it. Set via `/job model set --model <provider/model-id>` and clear via `/job model clear`. `null` in a profile disables an inherited global job model. Takes precedence over `GRIP_DEFAULT_JOB_MODEL`, then the parent model; applies to the next job. |
+| `jobModel` | string or null | - | Trusted global or active-profile exact available `provider/model-id` default for jobs; project settings cannot select it. Set via `/job model set --model <provider/model-id>` and clear via `/job model clear`. `null` in a profile disables an inherited global job model. Takes precedence over `GRIP_DEFAULT_JOB_MODEL`, then the parent model; applies to the next job. |
+| `jobModels` | array of `{model, description}` | `[]` | Trusted catalog for explicit job model selection. Runtime overrides active profile, which overrides global; project settings are ignored. Arrays replace rather than merge, so a profile's `[]` suppresses the inherited catalog. |
 | `imageModel` | string or null | `gpt-image-2` | Codex image-generation model ID. Set with `/image <model-id>`; `/image clear` restores the default, including in a profile. Project settings are ignored. Model availability is determined by Codex at request time. |
 | `tools` | object | `{}` | Per-tool configuration keyed by tool name |
 | `tools.websearch.provider` | string | `"tavily"` | Web search provider: `"tavily"`, `"duckduckgo"`, `"brave"`, or `"firecrawl"`. If unset, existing Brave or Firecrawl environment credentials select that provider; otherwise Tavily is used. An explicit provider always takes precedence. |
 | `tools.websearch.apiKey` | string | - | Provider API key. Tavily env fallback: `GRIP_WEBSEARCH_TAVILY_API_KEY` or `TAVILY_API_KEY`; Brave: `GRIP_WEBSEARCH_BRAVE_API_KEY` or `BRAVE_SEARCH_API_KEY`; Firecrawl: `GRIP_WEBSEARCH_FIRECRAWL_API_KEY` or `FIRECRAWL_API_KEY` |
 | `tools.websearch.baseUrl` | string | Provider default API URL | Override the Tavily `/search` endpoint directly, or the Brave or Firecrawl endpoint for compatible/proxy APIs. Tavily env fallback: `GRIP_WEBSEARCH_TAVILY_BASE_URL` |
+
+A global or profile catalog can be configured directly, using IDs available in your setup:
+
+```json
+{
+  "jobModels": [
+    { "model": "anthropic/claude-haiku-4-5", "description": "Mechanical edits and straightforward checks" }
+  ]
+}
+```
+
+Alternatively, `/job model add <model> <description...>` adds or updates an entry and `/job model remove <model>` removes one in the active profile, or globally without a profile. Adding does not set `jobModel`, and setting the default does not register it. `/job model show` reports the effective default and source alongside catalog descriptions and unavailable entries. See [job model routing](usage.md#job-model-routing) for selection and validation.
 
 ```json
 {
@@ -238,7 +251,7 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `enabledModels` | string[] | - | Model patterns for Ctrl+P cycling (same format as `--models` CLI flag) |
-| `profiles` | object | `{}` | Named overrides for any ordinary setting, including `defaultProvider`, `defaultModel`, `enabledModels`, and `jobModel` |
+| `profiles` | object | `{}` | Named overrides for ordinary settings, including `defaultProvider`, `defaultModel`, `enabledModels`, `jobModel`, and `jobModels` |
 | `profileDirectories` | object | `{}` | Absolute directory prefixes mapped to profile names; longest matching ancestor wins |
 | `modelProfiles` | object | `{}` | Older model-only snapshots; still selectable and converted to full profiles on use |
 | `profiles.<name>.defaultSandbox` | string | - | Existing named Lima VM to connect when this profile is selected on startup; trusted global settings only |
@@ -272,7 +285,7 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 }
 ```
 
-Profile settings live in the global settings file. Effective precedence for ordinary settings is global settings → selected profile → project `.grip/settings.json` → runtime overrides (including CLI model selection). For the trusted job and compression detector models, project settings are ignored: runtime → profile → global. Arrays replace earlier arrays; nested settings such as `terminal`, `retry`, and `tools` merge under the normal settings rules. Profile management (`profiles`, `profileDirectories`), directory sandbox assignments, and changelog bookkeeping remain global. A profile's `defaultSandbox` and `autoConnectSandbox` are read only from trusted global profiles, never from project settings. `jobModel: null` in a profile suppresses an inherited global job model so the environment or parent model can be used. Profile names use letters, digits, dots, underscores, and hyphens, beginning with a letter or digit.
+Profile settings live in the global settings file. Effective precedence for ordinary settings is global settings → selected profile → project `.grip/settings.json` → runtime overrides (including CLI model selection). For the trusted job default, job catalog, and compression detector model, project settings are ignored: runtime → profile → global. Arrays replace earlier arrays; nested settings such as `terminal`, `retry`, and `tools` merge under the normal settings rules. Profile management (`profiles`, `profileDirectories`), directory sandbox assignments, and changelog bookkeeping remain global. A profile's `defaultSandbox` and `autoConnectSandbox` are read only from trusted global profiles, never from project settings. `jobModel: null` in a profile suppresses an inherited global job model so the environment or parent model can be used; `jobModels: []` suppresses the inherited catalog. Profile names use letters, digits, dots, underscores, and hyphens, beginning with a letter or digit.
 
 A directory rule applies to its exact directory and all descendants, not similarly named siblings. The longest matching absolute prefix wins; outside matching directories, no profile is active on startup. An old `activeProfile` value in settings is ignored and removed the next time `/profile use` runs. Starting Grip under a matching prefix selects that profile's model and job model for new and resumed sessions; an explicit `--model` still wins. A profile's `defaultSandbox` takes priority over an exact-directory `defaultSandboxes` assignment and connects on startup unless `autoConnectSandbox` is `false`; if the profile has no VM assignment, the directory assignment still applies. The VM must already exist and be compatible with the selected workspace. `/profile directory work /home/user/work` adds a rule, `/profile directory clear /home/user/work` removes it. `/profile use work` switches only the current Grip process; it never persists the active selection. Creating, resuming, or forking a session retains that manual selection. A fresh launch selects a directory rule or the default settings again. Manual profile switches do not automatically change an already connected sandbox. `/profile sandbox work --name work-vm --autoconnect off` assigns an existing named VM and disables startup auto-connection in one command; the options work in either order, and VM names autocomplete. `/profile sandbox work --autoconnect on` re-enables connection; the older `auto-connect on|off` form still works. `/profile sandbox work clear` removes the VM assignment, and `/profile sandbox work` shows its configuration. These sandbox commands take effect on next startup, not during the current session. `/profile list` shows profiles and the active choice. `/profile create work` replaces that profile with a snapshot of the current effective settings, current model, explicitly scoped models (if any), and any active profile sandbox preference. It omits `enabledModels` when there is no explicit model scope instead of writing every available model. Switching reloads resources and updates the selected model and job model; settings that only take effect during process startup may need a restart. User package/resource paths in a profile replace their global lists; project resources are loaded separately with project precedence. The footer always displays the active profile or `default`.
 
