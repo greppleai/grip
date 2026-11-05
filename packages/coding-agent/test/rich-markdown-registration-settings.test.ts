@@ -99,6 +99,7 @@ describe("Mermaid settings", () => {
 		const onMermaidRenderingModeChange = vi.fn();
 		const onFullscreenExitOutputChange = vi.fn();
 		const onFullscreenScrollbarChange = vi.fn();
+		const onPerformanceDiagnosticsChange = vi.fn();
 		const config: SettingsConfig = {
 			autoCompact: true,
 			showImages: false,
@@ -116,6 +117,7 @@ describe("Mermaid settings", () => {
 			currentTheme: "dark",
 			availableThemes: ["dark"],
 			hideThinkingBlock: false,
+			performanceDiagnostics: false,
 			mermaidRenderingMode: "streaming",
 			collapseChangelog: false,
 			enableInstallTelemetry: true,
@@ -149,6 +151,7 @@ describe("Mermaid settings", () => {
 			onThinkingLevelChange: noop,
 			onThemeChange: noop,
 			onHideThinkingBlockChange: noop,
+			onPerformanceDiagnosticsChange,
 			onMermaidRenderingModeChange,
 			onCollapseChangelogChange: noop,
 			onEnableInstallTelemetryChange: noop,
@@ -184,6 +187,14 @@ describe("Mermaid settings", () => {
 		list.handleInput("\r");
 		list.handleInput("\r");
 		expect(onMermaidRenderingModeChange.mock.calls.map(([mode]) => mode)).toEqual(["off", "final", "streaming"]);
+
+		const performanceSelector = new SettingsSelectorComponent(config, callbacks);
+		const performanceList = performanceSelector.getSettingsList();
+		for (const character of "Performance diagnostics") performanceList.handleInput(character);
+		expect(performanceSelector.render(80).join("\n")).toContain("Performance diagnostics");
+		performanceList.handleInput("\r");
+		performanceList.handleInput("\r");
+		expect(onPerformanceDiagnosticsChange.mock.calls.map(([enabled]) => enabled)).toEqual([true, false]);
 
 		const exitOutputSelector = new SettingsSelectorComponent(config, callbacks);
 		const exitOutputList = exitOutputSelector.getSettingsList();

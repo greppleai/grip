@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { FullscreenExitOutput } from "../../../src/core/settings-manager.ts";
 import type { ExtensionManagerReloadCoordinator } from "../../../src/modes/interactive/extension-manager-reload.ts";
 import { InteractiveMode, type ShutdownOptions } from "../../../src/modes/interactive/interactive-mode.ts";
+import type { PerformanceDiagnostics } from "../../../src/modes/interactive/performance-diagnostics.ts";
 
 // Regression for upstream Pi issue #5080.
 //
@@ -29,6 +30,7 @@ interface ShutdownUI {
 }
 
 interface ShutdownThis {
+	performanceDiagnostics: Pick<PerformanceDiagnostics, "configure">;
 	extensionManagerReload: Pick<ExtensionManagerReloadCoordinator, "dispose">;
 	disposeExtensionManager: () => Promise<void>;
 	isShuttingDown: boolean;
@@ -47,6 +49,7 @@ interface UncaughtCrashContext {
 }
 
 interface FatalRuntimeErrorContext {
+	performanceDiagnostics: Pick<PerformanceDiagnostics, "configure">;
 	showError: (message: string) => void;
 	stop: (output?: FullscreenExitOutput) => void;
 }
@@ -64,6 +67,11 @@ class ProcessExitError extends Error {}
 function createContext(order: string[], fullscreenExitOutput: FullscreenExitOutput = "resume-hint"): ShutdownThis {
 	return {
 		isShuttingDown: false,
+		performanceDiagnostics: {
+			configure: vi.fn(async () => {
+				order.push("diagnostics");
+			}),
+		},
 		extensionManagerReload: { dispose: vi.fn() },
 		disposeExtensionManager: vi.fn(async () => {}),
 		unregisterSignalHandlers: vi.fn(),
@@ -112,7 +120,8 @@ describe("InteractiveMode.shutdown ordering (#5080)", () => {
 
 		await callShutdown(context, { fromSignal: true });
 
-		expect(order).toEqual(["dispose", "drainInput", "stop:resume-hint"]);
+		expect(order).toEqual(["diagnostics", "dispose", "drainInput", "stop:resume-hint"]);
+		expect(context.performanceDiagnostics.configure).toHaveBeenCalledWith(null);
 		expect(context.isShuttingDown).toBe(true);
 		expect(context.unregisterSignalHandlers).toHaveBeenCalledTimes(1);
 	});
@@ -126,7 +135,8 @@ describe("InteractiveMode.shutdown ordering (#5080)", () => {
 
 		await callShutdown(context);
 
-		expect(order).toEqual(["drainInput", "stop:resume-hint", "dispose"]);
+		expect(order).toEqual(["diagnostics", "drainInput", "stop:resume-hint", "dispose"]);
+		expect(context.performanceDiagnostics.configure).toHaveBeenCalledWith(null);
 	});
 
 	test("fatal runtime errors force transcript output", async () => {
@@ -138,7 +148,7 @@ describe("InteractiveMode.shutdown ordering (#5080)", () => {
 
 		await expect(
 			(interactiveModePrototype as InteractiveModePrototypeWithShutdown).handleFatalRuntimeError.call(
-				{ showError, stop },
+				{ showError, stop, performanceDiagnostics: { configure: vi.fn(async () => {}) } },
 				"Fatal operation",
 				new Error("failed"),
 			),

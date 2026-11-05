@@ -8,6 +8,7 @@ type RebindContext = {
 	transcriptRendered: boolean;
 	resetHookExecutionActivity: () => void;
 	applyRuntimeSettings: () => void;
+	updatePerformanceDiagnostics: () => Promise<void>;
 	bindCurrentSessionExtensions: () => Promise<void>;
 	retireAndRenderCurrentTranscript: () => void;
 	subscribeToAgent: () => void;
@@ -44,6 +45,9 @@ describe("InteractiveMode Markdown transformer rebind", () => {
 		const renderer = { mode: "fullscreen" };
 		const context: RebindContext = {
 			ui: renderer,
+			updatePerformanceDiagnostics: async () => {
+				calls.push("diagnostics");
+			},
 			unsubscribe: () => calls.push("unsubscribe"),
 			transcriptRendered: true,
 			resetHookExecutionActivity: () => calls.push("reset-hooks"),
@@ -71,6 +75,7 @@ describe("InteractiveMode Markdown transformer rebind", () => {
 		expect(replacementTransformer).toHaveBeenCalledTimes(1);
 		expect(context.ui).toBe(renderer);
 		expect(calls).toEqual([
+			"diagnostics",
 			"unsubscribe",
 			"reset-hooks",
 			"settings",
@@ -87,6 +92,7 @@ describe("InteractiveMode Markdown transformer rebind", () => {
 		const render = vi.fn();
 		const context: RebindContext = {
 			ui: { mode: "fullscreen" },
+			updatePerformanceDiagnostics: vi.fn(async () => {}),
 			transcriptRendered: false,
 			resetHookExecutionActivity: vi.fn(),
 			applyRuntimeSettings: vi.fn(),

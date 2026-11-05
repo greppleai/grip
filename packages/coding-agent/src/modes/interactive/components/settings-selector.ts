@@ -56,6 +56,7 @@ export interface SettingsConfig {
 	currentTheme: string;
 	availableThemes: string[];
 	hideThinkingBlock: boolean;
+	performanceDiagnostics: boolean;
 	mermaidRenderingMode: MermaidRenderingMode;
 	collapseChangelog: boolean;
 	enableInstallTelemetry: boolean;
@@ -90,6 +91,7 @@ export interface SettingsCallbacks {
 	onThemeChange: (theme: string) => void;
 	onThemePreview?: (theme: string) => void;
 	onHideThinkingBlockChange: (hidden: boolean) => void;
+	onPerformanceDiagnosticsChange: (enabled: boolean) => void;
 	onMermaidRenderingModeChange: (mode: MermaidRenderingMode) => void;
 	onCollapseChangelogChange: (collapsed: boolean) => void;
 	onEnableInstallTelemetryChange: (enabled: boolean) => void;
@@ -274,6 +276,13 @@ export class SettingsSelectorComponent extends Container {
 				label: "Hide thinking",
 				description: "Hide thinking blocks in assistant responses",
 				currentValue: config.hideThinkingBlock ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
+				id: "performance-diagnostics",
+				label: "Performance diagnostics",
+				description: "Automatically record local diagnostics in .grip/performance/<session-id>/",
+				currentValue: String(config.performanceDiagnostics),
 				values: ["true", "false"],
 			},
 			{
@@ -576,6 +585,9 @@ export class SettingsSelectorComponent extends Container {
 					}
 					case "hide-thinking":
 						callbacks.onHideThinkingBlockChange(newValue === "true");
+						break;
+					case "performance-diagnostics":
+						callbacks.onPerformanceDiagnosticsChange(newValue === "true");
 						break;
 					case "mermaid-rendering":
 						callbacks.onMermaidRenderingModeChange(newValue as MermaidRenderingMode);

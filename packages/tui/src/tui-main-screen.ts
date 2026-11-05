@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { tuiPerformance } from "./performance.ts";
 import { deleteKittyImage, isImageLine } from "./terminal-image.ts";
 import { type RenderedCursorPosition, type TUI, TuiBase, type TuiStopOptions } from "./tui.ts";
 import { visibleWidth } from "./utils.ts";
@@ -210,13 +211,25 @@ export class TuiMainScreen extends TuiBase implements TUI {
 		const previousBufferLength = this.previousHeight > 0 ? this.previousViewportTop + this.previousHeight : height;
 		const previousViewportTop = heightChanged ? Math.max(0, previousBufferLength - height) : this.previousViewportTop;
 
-		let newLines = this.render(width);
-		if (this.hasOverlayEntries) newLines = this.compositeOverlays(newLines, width, height);
-		const cursorPosition = this.extractCursorPosition(newLines, height);
-		// Preserve component zone markers for alt-screen navigation, but do not emit
-		// them here: terminals draw their own gutter indicators for OSC 133.
-		newLines = this.applyLineResets(newLines.map((line) => line.replace(OSC133_ZONE_PREFIX, "")));
-		return { width, height, widthChanged, heightChanged, newLines, cursorPosition, previousViewportTop };
+		const started = tuiPerformance.begin();
+		let lineCount = 0;
+		try {
+			let newLines = this.render(width);
+			if (this.hasOverlayEntries) newLines = this.compositeOverlays(newLines, width, height);
+			const cursorPosition = this.extractCursorPosition(newLines, height);
+			// Preserve component zone markers for alt-screen navigation, but do not emit
+			// them here: terminals draw their own gutter indicators for OSC 133.
+			const normalizeStarted = tuiPerformance.begin();
+			try {
+				newLines = this.applyLineResets(newLines.map((line) => line.replace(OSC133_ZONE_PREFIX, "")));
+			} finally {
+				if (normalizeStarted) tuiPerformance.end("render.normalize", normalizeStarted, { lines: newLines.length });
+			}
+			lineCount = newLines.length;
+			return { width, height, widthChanged, heightChanged, newLines, cursorPosition, previousViewportTop };
+		} finally {
+			if (started) tuiPerformance.end("render.prepare", started, { lines: lineCount });
+		}
 	}
 
 	private getLineDiff(
@@ -258,7 +271,7 @@ export class TuiMainScreen extends TuiBase implements TUI {
 			buffer += line;
 		}
 		buffer += "\x1b[?2026l";
-		this.terminal.write(buffer);
+		this.writeToTerminal(buffer);
 		this.cursorRow = Math.max(0, frame.newLines.length - 1);
 		this.hardwareCursorRow = this.cursorRow;
 		this.maxLinesRendered = clear ? frame.newLines.length : Math.max(this.maxLinesRendered, frame.newLines.length);
@@ -374,7 +387,7 @@ export class TuiMainScreen extends TuiBase implements TUI {
 		const moveBack = Math.max(0, extraLines - 1 + clearStartOffset);
 		if (moveBack > 0) buffer += `\x1b[${moveBack}A`;
 		buffer += "\x1b[?2026l";
-		this.terminal.write(buffer);
+		this.writeToTerminal(buffer);
 		this.cursorRow = targetRow;
 		this.hardwareCursorRow = targetRow;
 		this.positionHardwareCursor(frame.cursorPosition, frame.newLines.length);
@@ -541,7 +554,7 @@ export class TuiMainScreen extends TuiBase implements TUI {
 			finalCursorRow,
 			buffer,
 		);
-		this.terminal.write(buffer);
+		this.writeToTerminal(buffer);
 		this.cursorRow = Math.max(0, frame.newLines.length - 1);
 		this.hardwareCursorRow = finalCursorRow;
 		this.maxLinesRendered = Math.max(this.maxLinesRendered, frame.newLines.length);
@@ -553,17 +566,22 @@ export class TuiMainScreen extends TuiBase implements TUI {
 	protected doRender(): void {
 		if (this.stopped) return;
 		const frame = this.prepareRenderFrame();
-		if (this.renderRequiredFullFrame(frame)) return;
-		const changedContent = this.findChangedContent(frame);
-		if (!changedContent) {
-			this.handleUnchangedFrame(frame);
-			return;
+		const started = tuiPerformance.begin();
+		try {
+			if (this.renderRequiredFullFrame(frame)) return;
+			const changedContent = this.findChangedContent(frame);
+			if (!changedContent) {
+				this.handleUnchangedFrame(frame);
+				return;
+			}
+			if (changedContent.firstChanged >= frame.newLines.length) {
+				this.renderDeletedContent(frame, changedContent);
+				return;
+			}
+			this.renderDifferentialContent(frame, changedContent);
+		} finally {
+			if (started) tuiPerformance.end("render.diff", started, { lines: frame.newLines.length });
 		}
-		if (changedContent.firstChanged >= frame.newLines.length) {
-			this.renderDeletedContent(frame, changedContent);
-			return;
-		}
-		this.renderDifferentialContent(frame, changedContent);
 	}
 
 	/**
@@ -593,7 +611,7 @@ export class TuiMainScreen extends TuiBase implements TUI {
 		buffer += `\x1b[${targetCol + 1}G`;
 
 		if (buffer) {
-			this.terminal.write(buffer);
+			this.writeToTerminal(buffer);
 		}
 
 		this.hardwareCursorRow = targetRow;

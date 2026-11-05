@@ -11,6 +11,7 @@ import {
 	renderLayoutFrame,
 	type ScrollbarGeometry,
 } from "./layout.ts";
+import { tuiPerformance } from "./performance.ts";
 import type { Terminal } from "./terminal.ts";
 import {
 	deleteAllKittyImages,
@@ -1073,19 +1074,30 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 	}
 
 	private prepareRenderFrame(width: number, height: number): PreparedAltScreenFrame {
-		const root = this.layoutRoot ?? this.implicitScrollView;
-		const layout = renderLayoutFrame(root, width, height, () => this.requestRender());
-		let screen = layout.lines.map((line) => line.replace(OSC133_ZONE_PREFIX, ""));
-		screen = this.compositeOverlays(screen, width, height);
-		if (screen.length > height) screen = screen.slice(screen.length - height);
-		screen = this.applySelection(screen, layout);
-		screen = this.compositeFlashes(screen, width, height);
-		const cursorPosition = this.extractCursorPosition(screen, height);
-		screen = this.applyLineResets(screen).map((line) => {
-			if (isImageLine(line) || visibleWidth(line) <= width) return line;
-			return sliceByColumn(line, 0, width, true);
-		});
-		return { layout, screen, cursorPosition };
+		const start = tuiPerformance.begin();
+		try {
+			const root = this.layoutRoot ?? this.implicitScrollView;
+			const layoutStart = tuiPerformance.begin();
+			let layout: LayoutFrame;
+			try {
+				layout = renderLayoutFrame(root, width, height, () => this.requestRender());
+			} finally {
+				if (layoutStart) tuiPerformance.end("render.layout", layoutStart, { columns: width, rows: height });
+			}
+			let screen = layout.lines.map((line) => line.replace(OSC133_ZONE_PREFIX, ""));
+			screen = this.compositeOverlays(screen, width, height);
+			if (screen.length > height) screen = screen.slice(screen.length - height);
+			screen = this.applySelection(screen, layout);
+			screen = this.compositeFlashes(screen, width, height);
+			const cursorPosition = this.extractCursorPosition(screen, height);
+			screen = this.applyLineResets(screen).map((line) => {
+				if (isImageLine(line) || visibleWidth(line) <= width) return line;
+				return sliceByColumn(line, 0, width, true);
+			});
+			return { layout, screen, cursorPosition };
+		} finally {
+			if (start) tuiPerformance.end("render.prepare", start, { columns: width, rows: height });
+		}
 	}
 
 	private prepareRedrawPlan(screen: string[], width: number, height: number): AltScreenRedrawPlan {
@@ -1162,11 +1174,17 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		const width = Math.max(1, this.terminal.columns);
 		const height = Math.max(1, this.terminal.rows);
 		const frame = this.prepareRenderFrame(width, height);
-		const redrawPlan = this.prepareRedrawPlan(frame.screen, width, height);
-		this.terminal.write(this.createScreenUpdateBuffer(frame, redrawPlan, width, height));
-		this.previousScreen = frame.screen;
-		this.previousScreenWidth = width;
-		this.previousScreenHeight = height;
-		this.currentLayout = frame.layout;
+		const start = tuiPerformance.begin();
+		try {
+			const redrawPlan = this.prepareRedrawPlan(frame.screen, width, height);
+			const buffer = this.createScreenUpdateBuffer(frame, redrawPlan, width, height);
+			this.writeToTerminal(buffer);
+			this.previousScreen = frame.screen;
+			this.previousScreenWidth = width;
+			this.previousScreenHeight = height;
+			this.currentLayout = frame.layout;
+		} finally {
+			if (start) tuiPerformance.end("render.diff", start, { columns: width, rows: height });
+		}
 	}
 }

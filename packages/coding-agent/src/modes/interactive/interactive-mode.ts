@@ -213,6 +213,7 @@ import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
 import { ExtensionManagerReloadCoordinator } from "./extension-manager-reload.ts";
+import { PerformanceDiagnostics } from "./performance-diagnostics.ts";
 import {
 	getAvailableThemes,
 	getAvailableThemesWithPaths,
@@ -674,7 +675,9 @@ export class InteractiveMode {
 	private activeToolHookExecutionGroups = new Map<ToolHookEvent, HookExecutionNotice[]>();
 	private hookExecutionTurnActive = false;
 	private signalCleanupHandlers: Array<() => void> = [];
-
+	private readonly performanceDiagnostics = new PerformanceDiagnostics(() => {
+		this.showWarning("Performance diagnostics stopped: could not write local diagnostics files.");
+	});
 	// Track if editor is in bash mode (text starts with !)
 	private isBashMode = false;
 
@@ -757,6 +760,7 @@ export class InteractiveMode {
 			},
 		});
 		this.runtimeHost.setBeforeSessionInvalidate(async () => {
+			await this.performanceDiagnostics.configure(null);
 			this.extensionManagerReload.invalidate();
 			this.extensionManagerInvalidating = true;
 			try {
@@ -1348,7 +1352,7 @@ export class InteractiveMode {
 		if (this.isInitialized) return;
 
 		this.registerSignalHandlers();
-
+		await this.updatePerformanceDiagnostics();
 		// Load changelog (only show new entries, skip for resumed sessions)
 		this.changelogMarkdown = this.getChangelogForDisplay();
 
@@ -2256,6 +2260,7 @@ export class InteractiveMode {
 	}
 
 	private async rebindCurrentSession(): Promise<void> {
+		await this.updatePerformanceDiagnostics();
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
 		this.hookExecutionUnsubscribe?.();
@@ -2285,6 +2290,7 @@ export class InteractiveMode {
 		const message = error instanceof Error ? error.message : String(error);
 		this.showError(`${prefix}: ${message}`);
 		stopThemeWatcher();
+		await this.performanceDiagnostics.configure(null);
 		this.stop("transcript");
 		process.exit(1);
 	}
@@ -3299,6 +3305,18 @@ export class InteractiveMode {
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));
 		}
+	}
+	private updatePerformanceDiagnostics(): Promise<void> {
+		return this.performanceDiagnostics.configure(
+			this.settingsManager.getPerformanceDiagnostics()
+				? {
+						cwd: this.activeSession.getCwd(),
+						sessionId: this.activeSession.getSessionId(),
+						version: VERSION,
+						mode: () => this.renderer.mode,
+					}
+				: null,
+		);
 	}
 
 	private resolveParameterizedEditorCommand(text: string): EditorCommandAction | undefined {
@@ -4600,6 +4618,7 @@ export class InteractiveMode {
 		this.isShuttingDown = true;
 		this.extensionManagerReload.dispose();
 		this.unregisterSignalHandlers();
+		await this.performanceDiagnostics.configure(null);
 		await this.disposeExtensionManager();
 
 		if (options?.fromSignal) {
@@ -5287,6 +5306,7 @@ export class InteractiveMode {
 					hideThinkingBlock: this.hideThinkingBlock,
 					mermaidRenderingMode: this.settingsManager.getMermaidRenderingMode(),
 					collapseChangelog: this.settingsManager.getCollapseChangelog(),
+					performanceDiagnostics: this.settingsManager.getPerformanceDiagnostics(),
 					enableInstallTelemetry: this.settingsManager.getEnableInstallTelemetry(),
 					doubleEscapeAction: this.settingsManager.getDoubleEscapeAction(),
 					treeFilterMode: this.settingsManager.getTreeFilterMode(),
@@ -5385,6 +5405,10 @@ export class InteractiveMode {
 					},
 					onCollapseChangelogChange: (collapsed) => {
 						this.settingsManager.setCollapseChangelog(collapsed);
+					},
+					onPerformanceDiagnosticsChange: (enabled) => {
+						this.settingsManager.setPerformanceDiagnostics(enabled);
+						void this.updatePerformanceDiagnostics();
 					},
 					onEnableInstallTelemetryChange: (enabled) => {
 						this.settingsManager.setEnableInstallTelemetry(enabled);
@@ -7980,6 +8004,7 @@ export class InteractiveMode {
 	}
 
 	stop(fullscreenExitOutput = this.settingsManager.getFullscreenExitOutput()): void {
+		void this.performanceDiagnostics.configure(null);
 		this.extensionManagerReload.dispose();
 		void this.disposeExtensionManager();
 		this.unregisterSignalHandlers();
