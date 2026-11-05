@@ -2,6 +2,28 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.3.2](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.1...@greppleai/grip-v0.3.2) (2026-11-05)
+
+
+### Features
+
+* **grepple:** refresh the CLI and matching Grip skills ([c737987](https://github.com/greppleai/grip/commit/c7379878f045907e50a03b0eaa9de8748c60dbbf))
+* **tui:** add opt-in session performance diagnostics ([1455ad1](https://github.com/greppleai/grip/commit/1455ad1449d5ea2500b47e0cef7f7bb7bc03bc1e))
+
+
+### Bug Fixes
+
+* **jobs:** distinguish preloaded tool calls in job output ([96649b0](https://github.com/greppleai/grip/commit/96649b06f77a98a316e23c1677c4509ee84356d9))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.3.1 to ^0.3.2
+    * @greppleai/grip-ai bumped from ^0.3.1 to ^0.3.2
+    * @greppleai/grip-tui bumped from ^0.3.1 to ^0.3.2
+
 ## [0.3.1](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.0...@greppleai/grip-v0.3.1) (2026-11-04)
 
 
