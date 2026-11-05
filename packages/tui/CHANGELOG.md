@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.3.1...@greppleai/grip-tui-v0.3.2) (2026-11-05)
+
+
+### Features
+
+* **tui:** add opt-in session performance diagnostics ([1455ad1](https://github.com/greppleai/grip/commit/1455ad1449d5ea2500b47e0cef7f7bb7bc03bc1e))
+
 ## [0.3.1](https://github.com/greppleai/grip/compare/@greppleai/grip-tui-v0.3.0...@greppleai/grip-tui-v0.3.1) (2026-11-04)
 
 
