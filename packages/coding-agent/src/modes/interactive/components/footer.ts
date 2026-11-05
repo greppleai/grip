@@ -1,5 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { type Component, truncateToWidth, visibleWidth } from "@greppleai/grip-tui";
+import { type Component, truncateToWidth, tuiPerformance, visibleWidth } from "@greppleai/grip-tui";
 import type { AgentSession } from "../../../core/agent-session.ts";
 import {
 	estimateCompressionCatchUp,
@@ -234,9 +234,26 @@ export class FooterComponent implements Component {
 	}
 
 	render(width: number): string[] {
+		const started = tuiPerformance.begin();
+		try {
+			return this.renderFooter(width);
+		} finally {
+			if (started) tuiPerformance.end("footer.render", started);
+		}
+	}
+
+	private renderFooter(width: number): string[] {
 		const state = this.session.state;
-		const totals = readUsageLedger(this.session.session.getEntries());
+		const usageStarted = tuiPerformance.begin();
+		const entries = this.session.session.getEntries();
+		const totals = readUsageLedger(entries);
+		if (usageStarted) {
+			tuiPerformance.end("footer.usage", usageStarted);
+			tuiPerformance.count("session.size", { entries: entries.length, messages: state.messages.length });
+		}
+		const contextStarted = tuiPerformance.begin();
 		const contextUsage = this.session.getContextUsage();
+		if (contextStarted) tuiPerformance.end("footer.context", contextStarted);
 		const contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
 		const contextPercentValue = contextUsage?.percent ?? 0;
 		const contextPercent = contextUsage?.percent != null ? contextPercentValue.toFixed(1) : "?";
@@ -260,7 +277,9 @@ export class FooterComponent implements Component {
 		const lines = [location, dimmedStats + dimmedRemainder];
 		const jobs = this.formatJobs(totals, width);
 		if (jobs) lines.push(jobs);
+		const compressionStarted = tuiPerformance.begin();
 		const savings = this.formatCompressionSavings().join(" ");
+		if (compressionStarted) tuiPerformance.end("footer.compression", compressionStarted);
 		if (savings) lines.push(theme.fg("dim", truncateToWidth(savings, width, "...")));
 		const extensionStatuses = this.formatExtensionStatuses(width);
 		if (extensionStatuses !== undefined) lines.push(extensionStatuses);

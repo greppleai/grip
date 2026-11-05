@@ -45,6 +45,7 @@ Hooks use a Claude Code-compatible schema and are captured as an immutable per-s
 |---------|------|---------|-------------|
 | `theme` | string | `"dark"` | Theme name (`"dark"`, `"light"`, or custom) |
 | `quietStartup` | boolean | `false` | Hide startup header |
+| `performanceDiagnostics` | boolean | `false` | Automatically record local TUI timing/memory JSONL under `.grip/performance/<session-id>/`. Toggle live in `/settings`; see [performance diagnostics](performance.md) for format, retention and privacy |
 | `collapseChangelog` | boolean | `false` | Show condensed changelog after updates |
 | `enableInstallTelemetry` | boolean | `true` | Send an anonymous install/update version ping after first install or changelog-detected updates. This does not control update checks |
 | `doubleEscapeAction` | string | `"tree"` | Action for double-escape: `"tree"`, `"fork"`, or `"none"` |

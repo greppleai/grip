@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { performance } from "node:perf_hooks";
 import { isKeyRelease, matchesKey } from "./keys.ts";
+import { type TuiPerformanceSpan, tuiPerformance } from "./performance.ts";
 import type { Terminal } from "./terminal.ts";
 import { getCapabilities, isImageLine, setCellDimensions } from "./terminal-image.ts";
 import { extractSegments, normalizeTerminalOutput, sliceByColumn, sliceWithWidth, visibleWidth } from "./utils.ts";
@@ -259,14 +260,18 @@ export class Container implements Component {
 	}
 
 	render(width: number): string[] {
+		const started = tuiPerformance.begin();
 		const lines: string[] = [];
-		for (const child of this.children) {
-			const childLines = child.render(width);
-			for (const line of childLines) {
-				lines.push(line);
+		try {
+			for (const child of this.children) {
+				const childLines = child.render(width);
+				for (const line of childLines) lines.push(line);
 			}
+			return lines;
+		} finally {
+			if (started)
+				tuiPerformance.end("component.render", started, { children: this.children.length, lines: lines.length }, 1);
 		}
-		return lines;
 	}
 }
 
@@ -359,6 +364,8 @@ export abstract class TuiBase extends Container implements TUI {
 	public terminal: Terminal;
 	private focusedComponent: Component | null = null;
 	private inputListeners = new Set<TuiInputListener>();
+	private pendingPerformanceInput: TuiPerformanceSpan | undefined;
+	private pendingPerformanceInputCount = 0;
 
 	/** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
 	public onDebug?: () => void;
@@ -877,6 +884,8 @@ export abstract class TuiBase extends Container implements TUI {
 
 	stop(options?: TuiStopOptions): void {
 		this.stopped = true;
+		this.pendingPerformanceInput = undefined;
+		this.pendingPerformanceInputCount = 0;
 		this.renderRequested = false;
 		this.cancelRenderTimer();
 		let failure: unknown;
@@ -896,12 +905,49 @@ export abstract class TuiBase extends Container implements TUI {
 		if (failure !== undefined) throw failure;
 	}
 
+	/** Measures application frame completion, not terminal painting or network delivery. */
+	private renderFrame(): void {
+		if (this.stopped) return;
+		const started = tuiPerformance.begin();
+		const input = this.pendingPerformanceInput;
+		const inputs = this.pendingPerformanceInputCount;
+		this.pendingPerformanceInput = undefined;
+		this.pendingPerformanceInputCount = 0;
+		const redraws = this.fullRedrawCount;
+		let failed = 1;
+		try {
+			this.doRender();
+			failed = 0;
+		} finally {
+			if (started) {
+				tuiPerformance.end("render.frame", started, {
+					columns: this.terminal.columns,
+					rows: this.terminal.rows,
+					fullscreen: Number(this.mode === "fullscreen"),
+					redraws: this.fullRedrawCount - redraws,
+					failed,
+				});
+				if (!failed) tuiPerformance.end("input.to_render", input, { inputs });
+			}
+		}
+	}
+
+	/** Time synchronous write submission only; never retain the output. */
+	protected writeToTerminal(data: string): void {
+		const started = tuiPerformance.begin();
+		try {
+			this.terminal.write(data);
+		} finally {
+			if (started) tuiPerformance.end("terminal.write", started, { bytes: Buffer.byteLength(data) });
+		}
+	}
+
 	renderNow(force = false): void {
 		if (force) this.resetRenderState();
 		this.renderRequested = false;
 		this.cancelRenderTimer();
 		this.lastRenderAt = performance.now();
-		this.doRender();
+		this.renderFrame();
 	}
 
 	requestRender(force = false): void {
@@ -926,7 +972,7 @@ export abstract class TuiBase extends Container implements TUI {
 			this.cancelRenderTimer();
 			this.renderRequested = false;
 			this.lastRenderAt = performance.now();
-			this.doRender();
+			this.renderFrame();
 		});
 	}
 
@@ -945,7 +991,7 @@ export abstract class TuiBase extends Container implements TUI {
 			if (this.stopped || !this.renderRequested) return;
 			this.renderRequested = false;
 			this.lastRenderAt = performance.now();
-			this.doRender();
+			this.renderFrame();
 			if (this.renderRequested) this.scheduleRender();
 		}, delay);
 	}
@@ -962,6 +1008,26 @@ export abstract class TuiBase extends Container implements TUI {
 	}
 
 	private handleTerminalInput(data: string): void {
+		const started = tuiPerformance.begin();
+		if (started) {
+			if (this.pendingPerformanceInput?.generation !== started.generation) {
+				this.pendingPerformanceInput = started;
+				this.pendingPerformanceInputCount = 0;
+			}
+			this.pendingPerformanceInputCount++;
+		}
+		try {
+			this.dispatchTerminalInput(data);
+		} finally {
+			if (started) tuiPerformance.end("input.dispatch", started);
+			if (!this.renderRequested && !this.immediateRenderScheduled) {
+				this.pendingPerformanceInput = undefined;
+				this.pendingPerformanceInputCount = 0;
+			}
+		}
+	}
+
+	private dispatchTerminalInput(data: string): void {
 		this.reconcileOverlayFocus();
 		const filteredData = this.applyInputListeners(data);
 		if (filteredData === undefined) return;

@@ -178,6 +178,7 @@ export interface Settings {
 	tuiMode?: TuiMode; // default: "regular"
 	fullscreenExitOutput?: FullscreenExitOutput; // default: "transcript"; no effect in regular TUI mode
 	fullscreenScrollbar?: ScrollViewScrollbar; // default: "auto"; no effect in regular TUI mode
+	performanceDiagnostics?: boolean; // default: false
 }
 
 /** Every ordinary setting may be overridden by a profile. Profile management stays global. */
@@ -1356,6 +1357,24 @@ export class SettingsManager {
 	setHideThinkingBlock(hide: boolean): void {
 		this.globalSettings.hideThinkingBlock = hide;
 		this.markModified("hideThinkingBlock");
+		this.save();
+	}
+
+	getPerformanceDiagnostics(): boolean {
+		return this.settings.performanceDiagnostics === true;
+	}
+
+	setPerformanceDiagnostics(enabled: boolean): void {
+		// Keep the live toggle effective when this project explicitly overrides the preference.
+		if (this.projectSettings.performanceDiagnostics !== undefined) {
+			const projectSettings = structuredClone(this.projectSettings);
+			projectSettings.performanceDiagnostics = enabled;
+			this.markProjectModified("performanceDiagnostics");
+			this.saveProjectSettings(projectSettings);
+			return;
+		}
+		this.globalSettings.performanceDiagnostics = enabled;
+		this.markModified("performanceDiagnostics");
 		this.save();
 	}
 

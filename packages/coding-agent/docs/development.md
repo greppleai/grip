@@ -53,6 +53,10 @@ Never use `__dirname` directly for package assets.
 - Rendered TUI lines with ANSI codes
 - Last messages sent to the LLM
 
+## TUI performance
+
+Enable **Performance diagnostics** in `/settings` to automatically save buffered JSONL metrics under `.grip/performance/<session-id>/` in the active working directory. See [TUI performance diagnostics](performance.md) for file format, retention, remote-host handling, and interpretation limits.
+
 ## Testing
 
 ```bash

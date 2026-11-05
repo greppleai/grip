@@ -16,6 +16,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added opt-in bounded TUI performance recording with input-to-render latency, render phases, terminal-write metrics, event-loop delay, memory counters, and consumable trace batches for automatic diagnostics.
+
 ### Fixed
 
 - Copy mouse-selected text through tmux's clipboard command instead of emitting OSC 52 that tmux ignores by default, and report command failures rather than showing "Copied!".

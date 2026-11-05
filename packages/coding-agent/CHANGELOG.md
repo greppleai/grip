@@ -136,6 +136,7 @@ All notable changes to Grip are documented in this file.
 
 - Added Planner as an official extension source.
 - Added third-party Git URL installation in `/extensions`, with explicit extension-file manifests, data-only preparation, default-safe trust review, scoped commit-pinned selection and idle reload.
+- Added an opt-in Performance diagnostics setting that automatically saves bounded, content-free TUI timing and memory JSONL under `.grip/performance/<session-id>/` in the active working directory.
 
 ### Fixed
 
