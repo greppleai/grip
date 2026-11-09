@@ -306,6 +306,55 @@ test("host policy file rejects symlinks, oversized files, non-files and unsafe U
 	}
 });
 
+test.each([false, true])("host CLI availability follows sandbox attachment (initially %s)", async (initialSandbox) => {
+	const directory = await temporaryDirectory();
+	await writeFile(join(directory, "host-cli.yaml"), source, { mode: 0o600 });
+	const jiti = createJiti(import.meta.url, {
+		moduleCache: false,
+		tryNative: false,
+		virtualModules: { "@greppleai/grip": { getAgentDir: () => directory, truncateHead }, typebox },
+	});
+	const factory = await jiti.import<ExtensionFactory>(join(extensionRoot, "index.ts"), { default: true });
+	const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
+	const tools: ToolDefinition[] = [];
+	let active = ["bash", "kubectl", "read"];
+	const setActiveTools = vi.fn((names: string[]) => {
+		active = names;
+	});
+	await factory({
+		registerTool: (tool: ToolDefinition) => tools.push(tool),
+		on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => handlers.set(event, handler),
+		getActiveTools: () => active,
+		setActiveTools,
+	} as unknown as ExtensionAPI);
+	let sandbox = initialSandbox;
+	const ctx = { isSandbox: () => sandbox } as unknown as ExtensionContext;
+	await handlers.get("session_start")!({}, ctx);
+	expect(active).toEqual(initialSandbox ? ["bash", "kubectl", "read"] : ["bash", "read"]);
+
+	for (const event of ["before_agent_start", "turn_start"]) {
+		sandbox = false;
+		await handlers.get(event)!({}, ctx);
+		expect(active).toEqual(["bash", "read"]);
+		const updateCount = setActiveTools.mock.calls.length;
+		await handlers.get(event)!({}, ctx);
+		expect(setActiveTools).toHaveBeenCalledTimes(updateCount);
+		await expect(tools[0].execute("detached", { args: [] }, undefined, undefined, ctx)).rejects.toThrow(/sandbox/);
+
+		active.push("other-extension");
+		sandbox = true;
+		await handlers.get(event)!({}, ctx);
+		expect(active).toEqual(["bash", "read", "other-extension", "kubectl"]);
+		await handlers.get(event)!({}, ctx);
+		expect(active).toEqual(["bash", "read", "other-extension", "kubectl"]);
+		active = ["bash", "read", "kubectl"];
+	}
+
+	sandbox = false;
+	await handlers.get("session_start")!({}, ctx);
+	expect(active).toEqual(["bash", "read"]);
+});
+
 test.skipIf(process.platform === "win32")(
 	"packaged tools execute allowed argv without any approval UI or approved-host API",
 	async () => {
@@ -329,7 +378,7 @@ test.skipIf(process.platform === "win32")(
 		});
 		const factory = await jiti.import<ExtensionFactory>(join(directory, "installed", "index.js"), { default: true });
 		const tools: ToolDefinition[] = [];
-		const api = { registerTool: (tool: ToolDefinition) => tools.push(tool) } as unknown as ExtensionAPI;
+		const api = { registerTool: (tool: ToolDefinition) => tools.push(tool), on: vi.fn() } as unknown as ExtensionAPI;
 		await factory(api);
 		expect(tools).toHaveLength(0);
 		const policyPath = join(directory, "host-cli.yaml");

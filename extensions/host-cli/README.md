@@ -1,6 +1,6 @@
 # Host CLI
 
-Official extension source for narrowly scoped host commands while workspace tools run in a mapped sandbox. Registers one model-visible tool per configured CLI (for example, `kubectl`), not a general-purpose host shell. Nothing is allowed by default.
+Official extension source for narrowly scoped host commands while workspace tools run in a mapped sandbox. Registers one tool per configured CLI (for example, `kubectl`), not a general-purpose host shell. Its tools are active only while a sandbox is connected: availability is reconciled at session start, before each prompt and before each agent turn. Detached/local sessions have these tools removed from the active tool list; attaching a sandbox enables them at the next reconciliation. Other active tools are preserved. Execution also checks the sandbox connection before mapping and immediately before spawning the host command. Nothing is allowed by default.
 
 ## Setup
 
