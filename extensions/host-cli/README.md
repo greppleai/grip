@@ -27,9 +27,38 @@ Restart or `/reload` after adding tools. In a managed, mapped sandbox, the agent
 {"args":["get","pods","--namespace","staging","-o","json"]}
 ```
 
-Only a **complete argv template** matches. A string is an exact literal; a nested list is a finite set of choices for exactly one argument. `{text: true}` accepts one arbitrary literal text argument (including multiline/empty strings, at most 65536 characters, without NUL). It never splits that text into additional arguments. Length and order must match. There are no optional slots, regexes, globs, environment substitutions, shell parsing, implicit aliases or flag normalization. Add separate templates for optional flags or alternate orders. Quote YAML booleans/numbers when intended as CLI strings. An empty template `[]` explicitly permits no arguments. `commands: []` disables everything.
+Array rules match a **complete argv template**. A string is an exact literal; a nested list is a finite set of choices for exactly one argument. `{text: true}` accepts one arbitrary literal text argument (including multiline/empty strings, at most 65536 characters, without NUL). It never splits that text into additional arguments. Length and order must match. Quote YAML booleans/numbers when intended as CLI strings. An empty template `[]` explicitly permits no arguments. `commands: []` disables everything.
 
-With this example, `delete`, `exec`, plugins, `--raw`, `--kubeconfig`, `--server`, `--context`, `-f`, extra/duplicate flags, `--namespace=staging`, shell pipelines and unknown resource names are denied before execution. These are denied because they do not match, not because the extension maintains a Kubernetes-specific denylist.
+For independent boolean flags, use a mapping with `args` and `flags` instead of enumerating combinations:
+
+```yaml
+version: 1
+commands:
+  - name: git
+    allow:
+      - args: [status, --short]
+        flags: [--branch]
+      - args: [diff]
+        flags: [--cached, --check]
+```
+
+`args` is the required, ordered prefix and supports the same literal, choice and text slots as an array template. Every remaining argument must match an entry in `flags`. Flags are optional and may occur in any order, including duplicates; all combinations are authorized. The CLI decides whether a combination succeeds and what repeated flags mean. Literal entries must be standalone names such as `-v` or `--check`; values, combined short flags and `--flag=value` are not inferred. Use exact array templates to force literal arguments, required flags, value-taking flags or a specific order. Both mapping keys are required; `flags: []` allows only the prefix. Invocations are limited to 64 arguments.
+
+When every flag is trusted, explicitly opt into a wildcard:
+
+```yaml
+allow:
+  - args: [diff]
+    flags: ["--*"] # Any long flag, including --flag=value
+  - args: [status]
+    flags: ["*"] # Any short or long flag, including combined short flags
+```
+
+Quote wildcards in YAML. These are the only wildcard forms; arbitrary patterns such as `--safe-*` are rejected. Wildcards can be mixed with literal entries, e.g. `["--*", -v]`. A wildcard matches one argument starting with one or two hyphens followed by an ASCII letter/digit, at most 4096 characters and without control characters. It does not permit bare `-`/`--`, positional arguments or separate flag values. Inline values such as `--format=json` are accepted. Every matching flag, including future CLI flags and flags that change configuration or execute programs, is authorized: use wildcards only when that entire capability is intended. Exact array templates remain literal, including any `*` strings.
+
+There are no general globs, regexes, environment substitutions, shell parsing, implicit aliases or flag normalization. Flags are accepted only after the complete prefix. Review the CLI semantics before granting every combination: this matcher cannot verify that an allowed flag is actually boolean or harmless.
+
+With the kubectl example above, `delete`, `exec`, plugins, `--raw`, `--kubeconfig`, `--server`, `--context`, `-f`, extra/duplicate flags, `--namespace=staging`, shell pipelines and unknown resource names are denied before execution. These are denied because they do not match, not because the extension maintains a Kubernetes-specific denylist.
 
 **The host-owned YAML policy is the authorization. Matching commands run on the host without per-call approval**, including in print/JSON/RPC modes without an approval UI. Installing this extension and granting argv templates therefore grants unattended host execution for those exact combinations. Unmatched commands, local sessions and sandboxes without a verified host mount mapping fail closed. The reviewed extension deliberately uses Node's host-side `execFile` with `shell: false`; it does not call or change Grip's separately approved host APIs. This is an agent tool proxy; it does not install a `kubectl` executable inside the guest or provide a guest-accessible network endpoint.
 

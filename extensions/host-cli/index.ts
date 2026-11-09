@@ -26,7 +26,7 @@ export default async function hostCli(pi: ExtensionAPI) {
 		pi.registerTool({
 			name: command.name,
 			label: `Host ${command.name}`,
-			description: `Run ${command.name} on the host through a host-owned deny-by-default argv policy. Policy-matched commands run without approval. Pass arguments as separate strings, not shell text. Output limited to 2000 lines or 50 KiB. Allowed templates (arrays list exact choices; {text:true} accepts one literal text argument, including multiline, at most 65536 characters, without NUL): ${JSON.stringify(command.allow)}`,
+			description: `Run ${command.name} on the host through a host-owned deny-by-default argv policy. Policy-matched commands run without approval. Pass arguments as separate strings, not shell text. Output limited to 2000 lines or 50 KiB. Allowed rules: args is a required ordered prefix (arrays list exact choices; {text:true} accepts one literal text argument, including multiline, at most 65536 characters, without NUL); flags allows zero or more listed flags after args, in any order, including duplicates. In flags, "*" allows any short/long flag and "--*" allows long flags only, including inline values; wildcard arguments must start with one or two hyphens and an ASCII letter/digit, contain no control characters, and be at most 4096 characters. Separate values, positional arguments, bare -/--, and flag normalization are not implicit. Maximum 64 arguments. Rules: ${JSON.stringify(command.allow)}`,
 			promptSnippet: `Policy-restricted host ${command.name} (policy-authorized, no approval prompt; requires mapped sandbox)`,
 			parameters: Type.Object(
 				{ args: Type.Array(Type.String({ maxLength: MAX_TEXT_ARGUMENT_LENGTH }), { maxItems: 64 }) },

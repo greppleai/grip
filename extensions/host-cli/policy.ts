@@ -10,10 +10,15 @@ interface HostCliTextSlot {
 
 type HostCliArgumentSlot = string[] | HostCliTextSlot;
 
+interface HostCliRule {
+	args: HostCliArgumentSlot[];
+	flags: string[];
+}
+
 export interface HostCliCommand {
 	name: string;
 	timeoutMs: number;
-	allow: HostCliArgumentSlot[][];
+	allow: HostCliRule[];
 }
 
 const reservedNames = new Set([
@@ -87,12 +92,18 @@ export function parsePolicy(source: string): HostCliCommand[] {
 			throw new Error("timeoutMs must be an integer from 1 to 120000");
 		}
 		if (!Array.isArray(command.allow) || !command.allow.length || command.allow.length > 256) {
-			throw new Error("allow must contain 1–256 complete argv templates");
+			throw new Error("allow must contain 1–256 argv rules");
 		}
-		const allow = command.allow.map((rule: unknown) => {
-			if (!Array.isArray(rule) || rule.length > 64)
-				throw new Error("Each argv template must be an array of at most 64 slots");
-			return rule.map(parseArgumentSlot);
+		const allow = command.allow.map((rule: unknown): HostCliRule => {
+			const value = Array.isArray(rule) ? { args: rule, flags: [] } : record(rule, ["args", "flags"]);
+			if (!Array.isArray(value.args) || value.args.length > 64)
+				throw new Error("Rule args must be an array of at most 64 slots");
+			if (!Array.isArray(value.flags) || value.flags.length > 256)
+				throw new Error("Rule flags must be an array of at most 256 flags");
+			const flags = value.flags.map(token);
+			if (flags.some((flag) => flag !== "*" && flag !== "--*" && !/^--?[a-zA-Z0-9][a-zA-Z0-9-]*$/.test(flag)))
+				throw new Error('Rule flags must be standalone flag names or "*" / "--*"');
+			return { args: value.args.map(parseArgumentSlot), flags };
 		});
 		return { name, timeoutMs, allow };
 	});
@@ -129,16 +140,22 @@ export function authorize(command: HostCliCommand, input: unknown): string[] {
 	}
 	const args = [...input];
 	if (
+		args.length > 64 ||
 		!command.allow.some(
 			(rule) =>
-				rule.length === args.length &&
-				rule.every((slot, i) => {
+				args.length >= rule.args.length &&
+				rule.args.every((slot, i) => {
 					if (Array.isArray(slot)) return slot.includes(args[i]);
 					return args[i].length <= MAX_TEXT_ARGUMENT_LENGTH && !args[i].includes("\0");
+				}) &&
+				args.slice(rule.args.length).every((arg) => {
+					if (arg !== "*" && arg !== "--*" && rule.flags.includes(arg)) return true;
+					if (arg.length > 4096 || /[\x00-\x1f\x7f]/.test(arg) || !/^--?[a-zA-Z0-9]/.test(arg)) return false;
+					return rule.flags.includes("*") || (arg.startsWith("--") && rule.flags.includes("--*"));
 				}),
 		)
 	) {
-		throw new Error(`Denied by host CLI policy for ${command.name}: argv must match a complete allowed template`);
+		throw new Error(`Denied by host CLI policy for ${command.name}: argv must match an allowed rule`);
 	}
 	return args;
 }
