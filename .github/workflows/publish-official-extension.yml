@@ -35,7 +35,7 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - working-directory: packages/coding-agent
-        run: node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts test/official-automatic-publication.test.ts test/official-planner-artifact.test.ts test/official-planner-lifecycle.test.ts test/official-grepple-artifact.test.ts
+        run: node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts test/official-automatic-publication.test.ts test/official-planner-artifact.test.ts test/official-planner-lifecycle.test.ts test/official-grepple-artifact.test.ts test/official-host-cli-artifact.test.ts
       - name: Test Planner behavior
         run: node node_modules/vitest/dist/cli.js --run --config extensions/planner/vitest.config.mjs
       - name: Test Grepple behavior
