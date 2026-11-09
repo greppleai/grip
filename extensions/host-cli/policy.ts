@@ -2,10 +2,18 @@ import { constants } from "node:fs";
 import { type FileHandle, open } from "node:fs/promises";
 import { parseDocument } from "yaml";
 
+export const MAX_TEXT_ARGUMENT_LENGTH = 65536;
+
+interface HostCliTextSlot {
+	text: true;
+}
+
+type HostCliArgumentSlot = string[] | HostCliTextSlot;
+
 export interface HostCliCommand {
 	name: string;
 	timeoutMs: number;
-	allow: string[][][];
+	allow: HostCliArgumentSlot[][];
 }
 
 const reservedNames = new Set([
@@ -17,7 +25,6 @@ const reservedNames = new Set([
 	"grep",
 	"find",
 	"job",
-	"git",
 	"websearch",
 	"session_search",
 	"session_entry_get",
@@ -47,6 +54,19 @@ function token(value: unknown): string {
 	return value;
 }
 
+function parseArgumentSlot(slot: unknown): HostCliArgumentSlot {
+	if (Array.isArray(slot)) {
+		if (!slot.length || slot.length > 256) throw new Error("Argument choices must contain 1–256 strings");
+		return slot.map(token);
+	}
+	if (slot && typeof slot === "object") {
+		const value = record(slot, ["text"]);
+		if (value.text !== true) throw new Error("A text argument slot must be exactly {text: true}");
+		return { text: true };
+	}
+	return [token(slot)];
+}
+
 export function parsePolicy(source: string): HostCliCommand[] {
 	const document = parseDocument(source, { version: "1.2", uniqueKeys: true });
 	if (document.errors.length || document.warnings.length) throw new Error("Invalid host CLI YAML");
@@ -72,11 +92,7 @@ export function parsePolicy(source: string): HostCliCommand[] {
 		const allow = command.allow.map((rule: unknown) => {
 			if (!Array.isArray(rule) || rule.length > 64)
 				throw new Error("Each argv template must be an array of at most 64 slots");
-			return rule.map((slot: unknown) => {
-				if (!Array.isArray(slot)) return [token(slot)];
-				if (!slot.length || slot.length > 256) throw new Error("Argument choices must contain 1–256 strings");
-				return slot.map(token);
-			});
+			return rule.map(parseArgumentSlot);
 		});
 		return { name, timeoutMs, allow };
 	});
@@ -114,7 +130,12 @@ export function authorize(command: HostCliCommand, input: unknown): string[] {
 	const args = [...input];
 	if (
 		!command.allow.some(
-			(rule) => rule.length === args.length && rule.every((choices, i) => choices.includes(args[i])),
+			(rule) =>
+				rule.length === args.length &&
+				rule.every((slot, i) => {
+					if (Array.isArray(slot)) return slot.includes(args[i]);
+					return args[i].length <= MAX_TEXT_ARGUMENT_LENGTH && !args[i].includes("\0");
+				}),
 		)
 	) {
 		throw new Error(`Denied by host CLI policy for ${command.name}: argv must match a complete allowed template`);

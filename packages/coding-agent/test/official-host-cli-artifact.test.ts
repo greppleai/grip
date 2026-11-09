@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 import { createJiti } from "jiti/static";
 import * as typebox from "typebox";
 import { afterEach, expect, test, vi } from "vitest";
+import { executeHostCli } from "../../../extensions/host-cli/execute.ts";
 import { authorize, parsePolicy, readPolicy } from "../../../extensions/host-cli/policy.ts";
 import { packageOfficialExtension } from "../../../scripts/official-extensions.ts";
-import type { ExecResult } from "../src/core/exec.ts";
 import type { ExtensionAPI, ExtensionContext, ExtensionFactory, ToolDefinition } from "../src/core/extensions/types.ts";
 import { decodeOfficialArtifact } from "../src/core/official-artifact.ts";
 import { truncateHead } from "../src/core/tools/truncate.ts";
@@ -24,6 +24,7 @@ commands:
 `;
 
 afterEach(async () => {
+	vi.unstubAllEnvs();
 	for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true });
 });
 
@@ -42,6 +43,61 @@ test("matches only complete exact argv templates and copies authorized input", (
 	expect(authorize(command, [...input, "-o", "json"])).toHaveLength(6);
 	const noArgs = parsePolicy("version: 1\ncommands: [{name: status, allow: [[]]}]")[0];
 	expect(authorize(noArgs, [])).toEqual([]);
+});
+
+test("Git example permits arbitrary commit messages and non-force pushes but denies force variants and config overrides", () => {
+	const command = parsePolicy(`version: 1
+commands:
+  - name: git
+    timeoutMs: 120000
+    allow:
+      - [commit, -m, {text: true}]
+      - [push, origin, HEAD:refs/heads/main]
+`)[0];
+	expect(authorize(command, ["commit", "-m", "Update files"])).toEqual(["commit", "-m", "Update files"]);
+	expect(authorize(command, ["commit", "-m", "Fix issue"])).toHaveLength(3);
+	for (const message of [
+		"",
+		"Any commit message",
+		"subject\n\nbody\twith unicode: café",
+		"--force-with-lease",
+		"$(touch unexpected); git push --force",
+		"x".repeat(65536),
+	]) {
+		expect(authorize(command, ["commit", "-m", message])).toEqual(["commit", "-m", message]);
+	}
+	for (const args of [
+		["commit", "-m"],
+		["commit", "-m", "message", "--amend"],
+		["commit", "-m", "nul\0message"],
+		["commit", "-m", "x".repeat(65537)],
+	]) {
+		expect(() => authorize(command, args)).toThrow(/Denied/);
+	}
+	const push = ["push", "origin", "HEAD:refs/heads/main"];
+	expect(authorize(command, push)).toEqual(push);
+	for (const args of [
+		["status"],
+		["commit", "--amend", "-m", "Update files"],
+		["push"],
+		["push", "origin"],
+		["push", "origin", "+HEAD:refs/heads/main"],
+		["push", "origin", "HEAD:refs/heads/other"],
+		["-c", "alias.publish=push --force", "publish"],
+		["-C", "/tmp/other", ...push],
+	])
+		expect(() => authorize(command, args)).toThrow(/Denied/);
+	for (const flag of [
+		"-f",
+		"--force",
+		"--force-with-lease",
+		"--force-with-lease=refs/heads/main",
+		"--mirror",
+		"--delete",
+	]) {
+		expect(() => authorize(command, ["push", flag, ...push.slice(1)])).toThrow(/Denied/);
+		expect(() => authorize(command, [...push, flag])).toThrow(/Denied/);
+	}
 });
 
 test.each([
@@ -85,6 +141,11 @@ test.each([
 	source.replace("[json, wide]", "[]"),
 	source.replace("[json, wide]", "[true]"),
 	source.replace("[json, wide]", "{pattern: .*}"),
+	source.replace("[json, wide]", "{text: false}"),
+	source.replace("[json, wide]", '{text: "true"}'),
+	source.replace("[json, wide]", "{text: null}"),
+	source.replace("[json, wide]", "{text: true, pattern: .*}"),
+	source.replace("[json, wide]", "[json, {text: true}]"),
 ])("rejects malformed or ambiguous policy %#", (yaml) => {
 	expect(() => parsePolicy(yaml)).toThrow();
 });
@@ -119,88 +180,159 @@ test("host policy file rejects symlinks, oversized files, non-files and unsafe U
 	}
 });
 
-test("deterministic official artifact loads outside checkout and proxies only authorized host argv", async () => {
-	const first = await packageOfficialExtension(extensionRoot, "a".repeat(40));
-	const second = await packageOfficialExtension(extensionRoot, "a".repeat(40));
-	expect(first.bytes.equals(second.bytes)).toBe(true);
-	const artifact = decodeOfficialArtifact(first.bytes, first.release);
-	expect(first.release.manifest.grip.official.id).toBe("host-cli");
-	const notices = artifact.files.find((file) => file.path === "THIRD-PARTY-NOTICES.txt")!;
-	expect(Buffer.from(notices.base64, "base64").toString()).toContain("yaml");
-	const directory = await temporaryDirectory();
-	for (const file of artifact.files) {
-		const path = join(directory, "installed", file.path);
-		await mkdir(dirname(path), { recursive: true });
-		await writeFile(path, Buffer.from(file.base64, "base64"));
-	}
-	const jiti = createJiti(import.meta.url, {
-		moduleCache: false,
-		tryNative: false,
-		virtualModules: { "@greppleai/grip": { getAgentDir: () => directory, truncateHead }, typebox },
+test.skipIf(process.platform === "win32")(
+	"packaged tools execute allowed argv without any approval UI or approved-host API",
+	async () => {
+		const first = await packageOfficialExtension(extensionRoot, "a".repeat(40));
+		const second = await packageOfficialExtension(extensionRoot, "a".repeat(40));
+		expect(first.bytes.equals(second.bytes)).toBe(true);
+		const artifact = decodeOfficialArtifact(first.bytes, first.release);
+		expect(first.release.manifest.grip.official.id).toBe("host-cli");
+		const notices = artifact.files.find((file) => file.path === "THIRD-PARTY-NOTICES.txt")!;
+		expect(Buffer.from(notices.base64, "base64").toString()).toContain("yaml");
+		const directory = await temporaryDirectory();
+		for (const file of artifact.files) {
+			const path = join(directory, "installed", file.path);
+			await mkdir(dirname(path), { recursive: true });
+			await writeFile(path, Buffer.from(file.base64, "base64"));
+		}
+		const jiti = createJiti(import.meta.url, {
+			moduleCache: false,
+			tryNative: false,
+			virtualModules: { "@greppleai/grip": { getAgentDir: () => directory, truncateHead }, typebox },
+		});
+		const factory = await jiti.import<ExtensionFactory>(join(directory, "installed", "index.js"), { default: true });
+		const tools: ToolDefinition[] = [];
+		const api = { registerTool: (tool: ToolDefinition) => tools.push(tool) } as unknown as ExtensionAPI;
+		await factory(api);
+		expect(tools).toHaveLength(0);
+		const policyPath = join(directory, "host-cli.yaml");
+		await writeFile(policyPath, source, { mode: 0o600 });
+		await factory(api);
+		expect(tools.map((tool) => tool.name)).toEqual(["kubectl"]);
+		const tool = tools[0];
+		expect(tool.description).toContain("without approval");
+		const bin = join(directory, "bin");
+		await mkdir(bin);
+		const fixturePath = join(bin, "kubectl");
+		const fixture = `#!${process.execPath}
+const fs = require("node:fs");
+fs.appendFileSync("calls", JSON.stringify(process.argv.slice(2)) + "\\n");
+const mode = fs.existsSync("mode") ? fs.readFileSync("mode", "utf8") : "";
+if (mode === "failure") { console.error("forbidden"); process.exit(7); }
+if (mode === "large") { process.stdout.write("row\\n".repeat(3000)); }
+else { console.log("\\x1b[31mpods\\x1b[0m"); console.error("warning"); }
+`;
+		await writeFile(fixturePath, fixture, { mode: 0o755 });
+		vi.stubEnv("PATH", `${bin}:${process.env.PATH ?? ""}`);
+		const approval = vi.fn(() => {
+			throw new Error("Approval must not be requested");
+		});
+		const mapping = vi.fn(async () => directory);
+		const operations = {
+			cwd: "/workspace",
+			mapWorkspaceDirectoryToHost: mapping,
+		} as unknown as ExtensionContext["toolOperations"];
+		const ctx = {
+			isSandbox: () => true,
+			hasUI: false,
+			toolOperations: operations,
+			execHostProcess: approval,
+			execHostCommand: approval,
+			ui: { select: approval, confirm: approval },
+		} as unknown as ExtensionContext;
+		const args = ["get", "pods", "--namespace", "staging"];
+		const controller = new AbortController();
+		const run = () => tool.execute("1", { args }, controller.signal, undefined, ctx);
+		const result = await run();
+		expect(result.content).toEqual([{ type: "text", text: "pods\n\nwarning" }]);
+		expect(mapping).toHaveBeenCalledWith("/workspace");
+		const callsPath = join(directory, "calls");
+		const firstCalls = await readFile(callsPath, "utf8");
+		expect(firstCalls).toBe(`${JSON.stringify(args)}\n`);
+		await expect(tool.execute("2", { args: [...args, "--raw=/api"] }, undefined, undefined, ctx)).rejects.toThrow(
+			/Denied/,
+		);
+		await expect(
+			tool.execute("3", { args }, undefined, undefined, { ...ctx, isSandbox: () => false }),
+		).rejects.toThrow(/sandbox/);
+		await expect(
+			tool.execute("4", { args }, undefined, undefined, {
+				...ctx,
+				toolOperations: {} as ExtensionContext["toolOperations"],
+			}),
+		).rejects.toThrow(/mapping/);
+		mapping.mockRejectedValueOnce(new Error("No verified host mapping"));
+		await expect(run()).rejects.toThrow(/mapping/);
+		expect(await readFile(callsPath, "utf8")).toBe(firstCalls);
+		await writeFile(join(directory, "mode"), "failure");
+		await expect(run()).rejects.toThrow(/exit 7/);
+		await writeFile(join(directory, "mode"), "large");
+		const large = await run();
+		expect(large.details).toEqual({ exitCode: 0, truncated: true });
+		expect(JSON.stringify(large)).toContain("not saved");
+		expect(JSON.stringify(large).length).toBeLessThan(51000);
+		await writeFile(join(directory, "mode"), "");
+		await writeFile(policyPath, `${source}      - [commit, -m, {text: true}]\n`);
+		const message = "subject\n\n$(touch unexpected); --force-with-lease";
+		const textArgs = ["commit", "-m", message];
+		await tool.execute("5", { args: textArgs }, undefined, undefined, ctx);
+		expect((await readFile(callsPath, "utf8")).endsWith(`${JSON.stringify(textArgs)}\n`)).toBe(true);
+		await expect(readFile(join(directory, "unexpected"))).rejects.toThrow();
+		const beforeRevoke = await readFile(callsPath, "utf8");
+		await writeFile(policyPath, "version: 1\ncommands: []");
+		await expect(run()).rejects.toThrow(/no longer allowed/);
+		await writeFile(policyPath, "invalid: yaml");
+		await expect(run()).rejects.toThrow();
+		await rm(policyPath);
+		await expect(run()).rejects.toThrow(/no longer allowed/);
+		await writeFile(policyPath, source);
+		controller.abort();
+		await expect(run()).rejects.toThrow(/cancelled/);
+		expect(await readFile(callsPath, "utf8")).toBe(beforeRevoke);
+		expect(approval).not.toHaveBeenCalled();
+		expect(await readFile(join(directory, "installed", "README.md"), "utf8")).toContain("RBAC");
+	},
+);
+
+test("host runner preserves argv without a shell and reports missing executables", async () => {
+	const cwd = await temporaryDirectory();
+	const literal = "$(touch unexpected); | > unexpected";
+	const result = await executeHostCli(process.execPath, ["-e", "process.stdout.write(process.argv[1])", literal], {
+		cwd,
+		signal: undefined,
+		timeoutMs: 5000,
 	});
-	const factory = await jiti.import<ExtensionFactory>(join(directory, "installed", "index.js"), { default: true });
-	const tools: ToolDefinition[] = [];
-	const api = { registerTool: (tool: ToolDefinition) => tools.push(tool) } as unknown as ExtensionAPI;
-	await factory(api);
-	expect(tools).toHaveLength(0);
-	const policyPath = join(directory, "host-cli.yaml");
-	await writeFile(policyPath, source, { mode: 0o600 });
-	await factory(api);
-	expect(tools.map((tool) => tool.name)).toEqual(["kubectl"]);
-	const tool = tools[0];
-	const exec = vi
-		.fn<ExtensionContext["execHostProcess"]>()
-		.mockResolvedValue({ stdout: "\x1b[31mpods\x1b[0m", stderr: "warning", code: 0, killed: false });
-	const ctx = { isSandbox: () => true, execHostProcess: exec } as unknown as ExtensionContext;
-	const args = ["get", "pods", "--namespace", "staging"];
+	expect(result).toEqual({ stdout: literal, stderr: "", code: 0, killed: false });
+	await expect(readFile(join(cwd, "unexpected"))).rejects.toThrow();
+	const missing = await executeHostCli(join(cwd, "missing"), [], { cwd, signal: undefined, timeoutMs: 5000 });
+	expect(missing.code).toBeNull();
+	expect(missing.stderr).toContain("ENOENT");
+});
+
+test("host runner enforces timeout, cancellation, and output capture bounds", async () => {
+	const cwd = await temporaryDirectory();
+	const timed = await executeHostCli(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+		cwd,
+		signal: undefined,
+		timeoutMs: 50,
+	});
+	expect(timed.code).toBeNull();
+	expect(timed.killed).toBe(true);
 	const controller = new AbortController();
-	const run = () => tool.execute("1", { args }, controller.signal, undefined, ctx);
-	const result = await run();
-	expect(result.content).toEqual([{ type: "text", text: "pods\nwarning" }]);
-	expect(exec).toHaveBeenCalledExactlyOnceWith("kubectl", args, {
-		question: expect.stringContaining("Output will be returned to the agent"),
+	const running = executeHostCli(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+		cwd,
 		signal: controller.signal,
-		timeout: 5000,
+		timeoutMs: 5000,
 	});
-	await expect(tool.execute("2", { args: [...args, "--raw=/api"] }, undefined, undefined, ctx)).rejects.toThrow(
-		/Denied/,
-	);
-	expect(exec).toHaveBeenCalledTimes(1);
-	await expect(tool.execute("3", { args }, undefined, undefined, { ...ctx, isSandbox: () => false })).rejects.toThrow(
-		/sandbox/,
-	);
-	expect(exec).toHaveBeenCalledTimes(1);
-	for (const failure of [
-		new Error("Approval denied"),
-		new Error("No verified host mapping"),
-		new Error("Approval expired"),
-	]) {
-		exec.mockRejectedValueOnce(failure);
-		await expect(run()).rejects.toThrow(failure.message);
-	}
-	for (const failure of [
-		{ stdout: "", stderr: "forbidden", code: 1, killed: false },
-		{ stdout: "", stderr: "spawn failed", code: null, killed: false },
-		{ stdout: "", stderr: "timeout", code: null, killed: true },
-	] satisfies ExecResult[]) {
-		exec.mockResolvedValueOnce(failure);
-		await expect(run()).rejects.toThrow(/failed/);
-	}
-	exec.mockResolvedValueOnce({ stdout: "row\n".repeat(3000), stderr: "", code: 0, killed: false });
-	const large = await run();
-	expect(large.details).toEqual({ exitCode: 0, truncated: true });
-	expect(JSON.stringify(large)).toContain("not saved");
-	expect(JSON.stringify(large).length).toBeLessThan(51000);
-	const beforeRevoke = exec.mock.calls.length;
-	await writeFile(policyPath, "version: 1\ncommands: []");
-	await expect(run()).rejects.toThrow(/no longer allowed/);
-	await writeFile(policyPath, "invalid: yaml");
-	await expect(run()).rejects.toThrow();
-	await rm(policyPath);
-	await expect(run()).rejects.toThrow(/no longer allowed/);
-	await writeFile(policyPath, source);
 	controller.abort();
-	await expect(run()).rejects.toThrow(/cancelled/);
-	expect(exec).toHaveBeenCalledTimes(beforeRevoke);
-	expect(await readFile(join(directory, "installed", "README.md"), "utf8")).toContain("RBAC");
+	expect((await running).killed).toBe(true);
+	const overflow = await executeHostCli(
+		process.execPath,
+		["-e", "process.stdout.write('x'.repeat(2 * 1024 * 1024))"],
+		{ cwd, signal: undefined, timeoutMs: 5000 },
+	);
+	expect(overflow.code).toBeNull();
+	expect(overflow.stdout.length).toBeLessThanOrEqual(1024 * 1024);
+	expect(overflow.stderr).toContain("ERR_CHILD_PROCESS_STDIO_MAXBUFFER");
 });

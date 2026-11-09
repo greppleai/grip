@@ -1,7 +1,7 @@
 {
   "name": "@grip-extensions/host-cli",
   "version": "1.0.0",
-  "description": "Deny-by-default host CLI tools with global YAML argv policies and per-call approval",
+  "description": "Deny-by-default host CLI tools with host-owned YAML argv policies and unattended execution",
   "type": "module",
   "license": "MIT",
   "engines": { "grip": ">=0.3.2 <0.4.0" },
