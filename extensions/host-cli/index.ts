@@ -1,6 +1,13 @@
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { type AgentToolResult, type ExecResult, type ExtensionAPI, getAgentDir, truncateHead } from "@greppleai/grip";
+import {
+	type AgentToolResult,
+	type ExecResult,
+	type ExtensionAPI,
+	type ExtensionContext,
+	getAgentDir,
+	truncateHead,
+} from "@greppleai/grip";
 import { Type } from "typebox";
 import { executeHostCli } from "./execute.ts";
 import { authorize, MAX_TEXT_ARGUMENT_LENGTH, readPolicy } from "./policy.ts";
@@ -22,6 +29,22 @@ function hostResult(name: string, result: ExecResult): AgentToolResult<unknown> 
 export default async function hostCli(pi: ExtensionAPI) {
 	const policyPath = join(getAgentDir(), "host-cli.yaml");
 	const commands = await readPolicy(policyPath);
+	const toolNames = new Set(commands.map((command) => command.name));
+
+	function syncActiveTools(ctx: ExtensionContext) {
+		const active = pi.getActiveTools();
+		const next = new Set(active);
+		const sandbox = ctx.isSandbox();
+		for (const name of toolNames) {
+			if (sandbox) next.add(name);
+			else next.delete(name);
+		}
+		if (next.size !== active.length) pi.setActiveTools([...next]);
+	}
+
+	pi.on("session_start", (_event, ctx) => syncActiveTools(ctx));
+	pi.on("before_agent_start", (_event, ctx) => syncActiveTools(ctx));
+	pi.on("turn_start", (_event, ctx) => syncActiveTools(ctx));
 	for (const command of commands) {
 		pi.registerTool({
 			name: command.name,
