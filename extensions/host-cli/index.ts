@@ -2,7 +2,8 @@ import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { type AgentToolResult, type ExecResult, type ExtensionAPI, getAgentDir, truncateHead } from "@greppleai/grip";
 import { Type } from "typebox";
-import { authorize, readPolicy } from "./policy.ts";
+import { executeHostCli } from "./execute.ts";
+import { authorize, MAX_TEXT_ARGUMENT_LENGTH, readPolicy } from "./policy.ts";
 
 function hostResult(name: string, result: ExecResult): AgentToolResult<unknown> {
 	const output = stripVTControlCharacters(`${result.stdout}\n${result.stderr}`);
@@ -25,10 +26,10 @@ export default async function hostCli(pi: ExtensionAPI) {
 		pi.registerTool({
 			name: command.name,
 			label: `Host ${command.name}`,
-			description: `Run ${command.name} on the host through a deny-by-default argv policy and fresh user approval. Pass arguments as separate strings, not shell text. Output limited to 2000 lines or 50 KiB. Allowed templates (each nested array is one argument's choices): ${JSON.stringify(command.allow)}`,
-			promptSnippet: `Policy-restricted host ${command.name} (requires sandbox and approval)`,
+			description: `Run ${command.name} on the host through a host-owned deny-by-default argv policy. Policy-matched commands run without approval. Pass arguments as separate strings, not shell text. Output limited to 2000 lines or 50 KiB. Allowed templates (arrays list exact choices; {text:true} accepts one literal text argument, including multiline, at most 65536 characters, without NUL): ${JSON.stringify(command.allow)}`,
+			promptSnippet: `Policy-restricted host ${command.name} (policy-authorized, no approval prompt; requires mapped sandbox)`,
 			parameters: Type.Object(
-				{ args: Type.Array(Type.String(), { maxItems: 64 }) },
+				{ args: Type.Array(Type.String({ maxLength: MAX_TEXT_ARGUMENT_LENGTH }), { maxItems: 64 }) },
 				{ additionalProperties: false },
 			),
 			async execute(_id, params, signal, _onUpdate, ctx) {
@@ -38,11 +39,11 @@ export default async function hostCli(pi: ExtensionAPI) {
 				const current = (await readPolicy(policyPath)).find((entry) => entry.name === command.name);
 				if (!current) throw new Error(`Host CLI tool ${command.name} is no longer allowed`);
 				const args = authorize(current, params.args);
-				const result = await ctx.execHostProcess(current.name, args, {
-					question: `Allow policy-matched host ${command.name}? Output will be returned to the agent.`,
-					signal,
-					timeout: current.timeoutMs,
-				});
+				const operations = ctx.toolOperations;
+				if (!operations.mapWorkspaceDirectoryToHost) throw new Error("No verified host mount mapping is available");
+				const cwd = await operations.mapWorkspaceDirectoryToHost(operations.cwd);
+				if (!ctx.isSandbox()) throw new Error("Sandbox disconnected before host execution");
+				const result = await executeHostCli(current.name, args, { cwd, signal, timeoutMs: current.timeoutMs });
 				return hostResult(command.name, result);
 			},
 		});
