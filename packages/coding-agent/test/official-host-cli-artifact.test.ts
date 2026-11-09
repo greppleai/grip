@@ -34,6 +34,132 @@ async function temporaryDirectory() {
 	return path;
 }
 
+test("allows combinations, reordering and repetition of flags after an exact prefix", () => {
+	const command = parsePolicy(`version: 1
+commands:
+  - name: git
+    allow:
+      - args: [status, --short]
+        flags: [--branch]
+      - args: [diff]
+        flags: [--cached, --check]
+      - args: [show, [HEAD, main]]
+        flags: [-v]
+      - args: [version]
+        flags: []
+`)[0];
+	for (const args of [
+		["status", "--short"],
+		["status", "--short", "--branch"],
+		["diff"],
+		["diff", "--cached"],
+		["diff", "--check"],
+		["diff", "--cached", "--check"],
+		["diff", "--check", "--cached", "--check"],
+		["show", "HEAD", "-v", "-v"],
+		["show", "main"],
+		["version"],
+		["diff", ...Array<string>(63).fill("--check")],
+	]) {
+		expect(authorize(command, args)).toEqual(args);
+		expect(authorize(command, args)).not.toBe(args);
+	}
+	for (const args of [
+		[],
+		["status"],
+		["status", "--branch", "--short"],
+		["--cached", "diff"],
+		["diff", "--raw"],
+		["diff", "--cached=true"],
+		["diff", "--cached --check"],
+		["diff", "--", "--cached"],
+		["diff", "HEAD"],
+		["diff", "--check", "true"],
+		["diff", "--check\0"],
+		["diff", ...Array<string>(64).fill("--check")],
+		["show", "other"],
+		["show", "HEAD", "-vv"],
+		["version", "--check"],
+	]) {
+		expect(() => authorize(command, args)).toThrow(/Denied/);
+	}
+});
+
+test.each([
+	{ args: ["diff"] },
+	{ flags: ["--check"] },
+	{ args: "diff", flags: [] },
+	{ args: ["diff"], flags: "--check" },
+	{ args: ["diff"], flags: [true] },
+	{ args: ["diff"], flags: ["--check=true"] },
+	{ args: ["diff"], flags: ["--"] },
+	{ args: ["diff"], flags: ["HEAD"] },
+	{ args: ["diff"], flags: ["--check\n"] },
+	{ args: ["diff"], flags: [{ text: true }] },
+	{ args: Array(65).fill("diff"), flags: [] },
+	{ args: ["diff"], flags: Array(257).fill("--check") },
+	{ args: ["diff"], flags: [], unknown: true },
+])("rejects malformed flag rules: %j", (rule) => {
+	expect(() => parsePolicy(JSON.stringify({ version: 1, commands: [{ name: "git", allow: [rule] }] }))).toThrow();
+});
+
+test.each(["*", "--*"])("matches explicitly granted flag wildcard %s", (wildcard) => {
+	const command = parsePolicy(`version: 1
+commands:
+  - name: git
+    allow:
+      - args: [diff]
+        flags: ["${wildcard}", -v]
+`)[0];
+	for (const args of [
+		["diff"],
+		["diff", "--cached", "--check", "--cached"],
+		["diff", "--format=json"],
+		["diff", "--output=path with spaces"],
+		["diff", "-v", "--check"],
+		["diff", `--${"x".repeat(4094)}`],
+	]) {
+		expect(authorize(command, args)).toEqual(args);
+	}
+	for (const arg of ["-q", "-vv", "-ojson"]) {
+		if (wildcard === "*") expect(authorize(command, ["diff", arg])).toEqual(["diff", arg]);
+		else expect(() => authorize(command, ["diff", arg])).toThrow(/Denied/);
+	}
+	for (const args of [
+		[],
+		["status", "--cached"],
+		["--cached", "diff"],
+		["diff", "HEAD"],
+		["diff", "*"],
+		["diff", "--*"],
+		["diff", "--format", "json"],
+		["diff", "-"],
+		["diff", "--"],
+		["diff", "---check"],
+		["diff", "--check\0"],
+		["diff", "--check\n"],
+		["diff", "--check\t"],
+		["diff", `--${"x".repeat(4095)}`],
+		["diff", ...Array<string>(64).fill("--check")],
+	]) {
+		expect(() => authorize(command, args)).toThrow(/Denied/);
+	}
+});
+
+test.each(["--safe-*", "-*"])("rejects unsupported wildcard %s", (wildcard) => {
+	expect(() =>
+		parsePolicy(`version: 1\ncommands: [{name: git, allow: [{args: [diff], flags: ["${wildcard}"]}]}]`),
+	).toThrow();
+});
+
+test("wildcards in exact templates remain literal", () => {
+	const command = parsePolicy('version: 1\ncommands: [{name: git, allow: [[diff, "*"], [status, "--*"]]}]')[0];
+	expect(authorize(command, ["diff", "*"])).toEqual(["diff", "*"]);
+	expect(authorize(command, ["status", "--*"])).toEqual(["status", "--*"]);
+	expect(() => authorize(command, ["diff", "--check"])).toThrow(/Denied/);
+	expect(() => authorize(command, ["status", "--short"])).toThrow(/Denied/);
+});
+
 test("matches only complete exact argv templates and copies authorized input", () => {
 	const command = parsePolicy(source)[0];
 	const input = ["get", "pods", "--namespace", "staging"];
@@ -279,7 +405,15 @@ else { console.log("\\x1b[31mpods\\x1b[0m"); console.error("warning"); }
 		await tool.execute("5", { args: textArgs }, undefined, undefined, ctx);
 		expect((await readFile(callsPath, "utf8")).endsWith(`${JSON.stringify(textArgs)}\n`)).toBe(true);
 		await expect(readFile(join(directory, "unexpected"))).rejects.toThrow();
+		await writeFile(policyPath, `${source}      - args: [version]\n        flags: [--client, --short]\n`);
+		const flagArgs = ["version", "--short", "--client", "--short"];
+		await tool.execute("6", { args: flagArgs }, undefined, undefined, ctx);
+		expect((await readFile(callsPath, "utf8")).endsWith(`${JSON.stringify(flagArgs)}\n`)).toBe(true);
 		const beforeRevoke = await readFile(callsPath, "utf8");
+		await expect(tool.execute("7", { args: [...flagArgs, "--unknown"] }, undefined, undefined, ctx)).rejects.toThrow(
+			/Denied/,
+		);
+		expect(await readFile(callsPath, "utf8")).toBe(beforeRevoke);
 		await writeFile(policyPath, "version: 1\ncommands: []");
 		await expect(run()).rejects.toThrow(/no longer allowed/);
 		await writeFile(policyPath, "invalid: yaml");
