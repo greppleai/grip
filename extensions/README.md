@@ -1,6 +1,6 @@
 # Official extensions
 
-[Planner](planner/README.md) and [Grepple](grepple/README.md) are selected official extension sources. Pushes to main can automatically publish selected extensions after tests; local packaging never publishes or updates the production catalog. Tests also generate isolated fixture extensions. For installation, automatic updates, trust, offline use, retained data and SDK contract changes, see the [user guide](../packages/coding-agent/docs/official-extensions.md). For factory APIs and UI, see the [extension API](../packages/coding-agent/docs/extensions.md) and [TUI guide](../packages/coding-agent/docs/tui.md).
+[Planner](planner/README.md), [Grepple](grepple/README.md) and [Host CLI](host-cli/README.md) are selected official extension sources. Host CLI exposes policy-restricted host argv tools (for example, read-only kubectl templates) from global YAML, retaining fresh per-call host approval. Pushes to main can automatically publish selected extensions after tests; local packaging never publishes or updates the production catalog. Tests also generate isolated fixture extensions. For installation, automatic updates, trust, offline use, retained data and SDK contract changes, see the [user guide](../packages/coding-agent/docs/official-extensions.md). For factory APIs and UI, see the [extension API](../packages/coding-agent/docs/extensions.md) and [TUI guide](../packages/coding-agent/docs/tui.md).
 
 ## Authoring contract
 
@@ -39,7 +39,7 @@ npm run extensions:pack -- --out /tmp/grip-official-artifacts
 # Check against a saved trusted publication catalog:
 npm run extensions:pack -- --out /tmp/grip-official-artifacts --previous /tmp/catalog.json
 cd packages/coding-agent
-node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts test/official-automatic-publication.test.ts test/official-planner-artifact.test.ts test/official-planner-lifecycle.test.ts test/official-grepple-artifact.test.ts
+node ../../node_modules/vitest/dist/cli.js --run test/official-contracts.test.ts test/official-packaging.test.ts test/official-automatic-publication.test.ts test/official-planner-artifact.test.ts test/official-planner-lifecycle.test.ts test/official-grepple-artifact.test.ts test/official-host-cli-artifact.test.ts
 cd ../..
 node node_modules/vitest/dist/cli.js --run --config extensions/planner/vitest.config.mjs
 node --import tsx --test extensions/grepple/test/*.test.mjs
