@@ -10,7 +10,7 @@ Inside a connected sandbox, `/cd <directory>` changes the guest working director
 
 Lima-managed sandboxes allow workspace tools (`read`, `write`, `edit`, `ls`, `find`, and `grep`) to access paths anywhere in the guest filesystem, including outside the mounted workspace. This does not mount additional host directories; guest OS permissions still apply. `/cd` remains within the mounted workspace. An attached daemon stays workspace-confined by default: only enable `--daemon-allow-full-filesystem` when the daemon runs inside an intentionally isolated guest, never on an untrusted host. Existing guest daemons need an update or restart to enable this access.
 
-Pasting a clipboard image saves it through the active remote backend under `.grip/clipboard/` in the current guest working directory, then inserts its guest path. No host `/tmp` mount is needed. These files remain until manually deleted; add `.grip/clipboard/` to your project's Git ignore rules if needed. Local sessions continue saving clipboard images in the host system temporary directory. Failed image writes report an error without inserting an unreadable host path.
+Pasting a clipboard image writes its bytes through the active backend to that backend's temporary directory (normally `/tmp` inside Lima), then inserts the guest path. Nothing is saved in the repository, and no host `/tmp` mount is needed. Local sessions use the host system temporary directory. Files follow the backend OS's temporary-file cleanup policy; Grip does not delete them at session exit. Confined attached daemons must configure `GRIP_DAEMON_TEMP_ROOT` to a disposable directory inside their sandbox. Existing guest daemons need an update/restart to support temporary-directory discovery. Failed discovery or writes report an error without inserting an unreadable host path.
 
 ## Commands
 
@@ -88,7 +88,7 @@ Start precedence: command `--template`, then `GRIP_SANDBOX_*` environment variab
 
 The default Lima template name contains `docker-rootful`; it is a Lima VM template choice, not a Docker-container sandbox runtime. Change `sandbox.limaTemplate` or use `--template` to select a different Lima template.
 
-New VMs preserve the selected template's mounts, including inherited mounts such as host home or temporary directories. Grip replaces mounts targeting `sandbox.workspaceMountPath` with the selected writable workspace mount. Review all template mounts before starting a VM: guest tools can access those host paths with the configured permissions. To share clipboard images saved on the host, add a writable `/tmp` → `/tmp` mount to your template. Existing VMs retain their saved mount configuration; restarting or updating the guest executable does not apply template mount changes.
+New VMs preserve the selected template's mounts, including inherited mounts such as host home or temporary directories. Grip replaces mounts targeting `sandbox.workspaceMountPath` with the selected writable workspace mount. Review all template mounts before starting a VM: guest tools can access those host paths with the configured permissions. Clipboard images are written directly to guest temporary storage; do not mount host `/tmp` for clipboard paste. Existing VMs retain their saved mount configuration; restarting or updating the guest executable does not apply template mount changes.
 
 ### Guest Grip during development
 

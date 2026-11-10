@@ -3248,13 +3248,12 @@ export class InteractiveMode {
 			const image = await readClipboardImage();
 			if (image) {
 				const operations = this.session.getToolOperations();
-				const remote = operations.getBackendInfo?.()?.type === "remote";
-				const directory = remote ? joinPortablePath(operations.cwd, ".grip", "clipboard") : os.tmpdir();
-				const ext = extensionForImageMimeType(image.mimeType) ?? "png";
-				const fileName = `grip-clipboard-${crypto.randomUUID()}.${ext}`;
-				const filePath = joinPortablePath(directory, fileName);
+				let filePath: string;
 				try {
-					if (remote) await operations.mkdir(directory, { recursive: true });
+					if (!operations.getTemporaryDirectory) throw new Error("Backend does not support temporary storage");
+					const directory = await operations.getTemporaryDirectory();
+					const ext = extensionForImageMimeType(image.mimeType) ?? "png";
+					filePath = joinPortablePath(directory, `grip-clipboard-${crypto.randomUUID()}.${ext}`);
 					await operations.writeFile(filePath, Buffer.from(image.bytes));
 				} catch (error) {
 					this.showError(

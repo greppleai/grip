@@ -1,4 +1,6 @@
 import { readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { LocalToolOperations, type ToolOperations } from "../src/core/tools/operations.ts";
 import type { ClipboardImage } from "../src/utils/clipboard-image.ts";
@@ -126,6 +128,7 @@ describe("InteractiveMode clipboard paste", () => {
 		expect(insertTextAtCursor).toHaveBeenCalledOnce();
 		const imagePath = insertTextAtCursor.mock.calls[0]?.[0];
 		expect(imagePath).toMatch(/grip-clipboard-[0-9a-f-]+\.jpg$/);
+		expect(imagePath && dirname(imagePath)).toBe(tmpdir());
 		if (!imagePath) {
 			throw new Error("Expected an inserted clipboard image path");
 		}
@@ -155,9 +158,9 @@ describe("InteractiveMode clipboard paste", () => {
 		expect(requestRender).not.toHaveBeenCalled();
 	});
 	test.each([
-		["/workspace/project", "/workspace/project/.grip/clipboard/", "posix"],
-		["C:\\workspace\\project", "C:\\workspace\\project\\.grip\\clipboard\\", "windows"],
-	] as const)("saves image bytes in the remote workspace at %s", async (cwd, prefix, pathFlavor) => {
+		["/workspace/project", "/tmp/", "posix"],
+		["C:\\workspace\\project", "C:\\Temp\\", "windows"],
+	] as const)("saves image bytes in backend temporary storage at %s", async (cwd, prefix, pathFlavor) => {
 		mocks.readClipboardImage.mockResolvedValue({ bytes: Uint8Array.from([1, 2, 3]), mimeType: "image/png" });
 		const operations = new LocalToolOperations(cwd);
 		vi.spyOn(operations, "getBackendInfo").mockReturnValue({
@@ -168,6 +171,7 @@ describe("InteractiveMode clipboard paste", () => {
 			protocol: "ws",
 			workspace: { id: "test", root: cwd, pathFlavor },
 		});
+		const temporaryDirectory = vi.spyOn(operations, "getTemporaryDirectory").mockResolvedValue(prefix.slice(0, -1));
 		const mkdir = vi.spyOn(operations, "mkdir").mockResolvedValue();
 		const writeFile = vi.spyOn(operations, "writeFile").mockResolvedValue();
 		mocks.getToolOperations.mockReturnValue(operations);
@@ -185,7 +189,8 @@ describe("InteractiveMode clipboard paste", () => {
 		const imagePath = insertTextAtCursor.mock.calls[0]?.[0];
 		expect(imagePath?.startsWith(prefix)).toBe(true);
 		expect(imagePath).toMatch(/grip-clipboard-[0-9a-f-]+\.png$/);
-		expect(mkdir).toHaveBeenCalledWith(prefix.slice(0, -1), { recursive: true });
+		expect(temporaryDirectory).toHaveBeenCalledOnce();
+		expect(mkdir).not.toHaveBeenCalled();
 		expect(writeFile).toHaveBeenCalledWith(imagePath, Buffer.from([1, 2, 3]));
 		expect(writeFile.mock.invocationCallOrder[0]).toBeLessThan(insertTextAtCursor.mock.invocationCallOrder[0] ?? 0);
 		expect(requestRender).toHaveBeenCalledOnce();
@@ -193,7 +198,7 @@ describe("InteractiveMode clipboard paste", () => {
 		expect(mocks.showError).not.toHaveBeenCalled();
 	});
 
-	test.each(["mkdir", "writeFile"] as const)(
+	test.each(["getTemporaryDirectory", "writeFile"] as const)(
 		"reports remote %s failure without inserting a host path",
 		async (operation) => {
 			mocks.readClipboardImage.mockResolvedValue({ bytes: Uint8Array.from([1, 2, 3]), mimeType: "image/png" });
@@ -203,9 +208,10 @@ describe("InteractiveMode clipboard paste", () => {
 				cwd: "/workspace",
 				configured: false,
 			});
-			const mkdir = vi.spyOn(operations, "mkdir").mockResolvedValue();
+			const temporaryDirectory = vi.spyOn(operations, "getTemporaryDirectory").mockResolvedValue("/tmp");
 			const writeFile = vi.spyOn(operations, "writeFile").mockResolvedValue();
-			if (operation === "mkdir") mkdir.mockRejectedValue(new Error("backend unavailable"));
+			if (operation === "getTemporaryDirectory")
+				temporaryDirectory.mockRejectedValue(new Error("backend unavailable"));
 			else writeFile.mockRejectedValue(new Error("backend unavailable"));
 			mocks.getToolOperations.mockReturnValue(operations);
 			const insertTextAtCursor = vi.fn<(text: string) => void>();
@@ -223,7 +229,7 @@ describe("InteractiveMode clipboard paste", () => {
 			expect(requestRender).not.toHaveBeenCalled();
 			expect(mocks.readClipboardText).not.toHaveBeenCalled();
 			expect(mocks.showError).toHaveBeenCalledWith("Failed to save clipboard image: backend unavailable");
-			if (operation === "mkdir") expect(writeFile).not.toHaveBeenCalled();
+			if (operation === "getTemporaryDirectory") expect(writeFile).not.toHaveBeenCalled();
 		},
 	);
 });

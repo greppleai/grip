@@ -6,7 +6,7 @@ All notable changes to Grip are documented in this file.
 
 ### Fixed
 
-- Save pasted clipboard images through the active workspace backend so sandbox tools can read them.
+- Save pasted clipboard images in the active backend's temporary directory so sandbox tools can read them without repository artifacts or host `/tmp` mounts.
 
 ## [0.3.3](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.2...@greppleai/grip-v0.3.3) (2026-11-10)
 
