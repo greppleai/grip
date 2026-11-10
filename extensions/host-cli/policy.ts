@@ -10,9 +10,17 @@ interface HostCliTextSlot {
 
 type HostCliArgumentSlot = string[] | HostCliTextSlot;
 
+interface HostCliOption {
+	names: string[];
+	value: HostCliArgumentSlot | null;
+	required: boolean;
+}
+
 interface HostCliRule {
 	args: HostCliArgumentSlot[];
 	flags: string[];
+	options: HostCliOption[];
+	positionals: HostCliArgumentSlot[];
 }
 
 export interface HostCliCommand {
@@ -72,10 +80,50 @@ function parseArgumentSlot(slot: unknown): HostCliArgumentSlot {
 	return [token(slot)];
 }
 
+function parseSlots(value: unknown): HostCliArgumentSlot[] {
+	if (!Array.isArray(value) || value.length > 64) throw new Error("Expected an array of at most 64 argument slots");
+	return value.map(parseArgumentSlot);
+}
+
+function parseRule(rule: unknown): HostCliRule {
+	const value = Array.isArray(rule) ? { args: rule } : record(rule, ["args", "flags", "options", "positionals"]);
+	const args = parseSlots(value.args);
+	const positionals = parseSlots(value.positionals === undefined ? [] : value.positionals);
+	const rawFlags = value.flags === undefined ? [] : value.flags;
+	if (!Array.isArray(rawFlags) || rawFlags.length > 256) throw new Error("Expected at most 256 flags");
+	const flags = rawFlags.map(token);
+	const flagName = /^--?[a-zA-Z0-9][a-zA-Z0-9-]*$/;
+	if (flags.some((flag) => flag !== "*" && flag !== "--*" && !flagName.test(flag)))
+		throw new Error('Flags must be standalone names or "*" / "--*"');
+	const rawOptions = value.options === undefined ? [] : value.options;
+	if (!Array.isArray(rawOptions) || rawOptions.length > 64) throw new Error("Expected at most 64 options");
+	if ((rawOptions.length || positionals.length) && flags.some((flag) => flag === "*" || flag === "--*"))
+		throw new Error("Wildcard flags cannot be combined with options or positionals");
+	const names = new Set(flags);
+	const options = rawOptions.map((entry: unknown): HostCliOption => {
+		const option = record(entry, ["names", "value", "required"]);
+		if (!Array.isArray(option.names) || !option.names.length || option.names.length > 16)
+			throw new Error("Option names must contain 1–16 names");
+		const optionNames = option.names.map(token);
+		for (const name of optionNames) {
+			if (!flagName.test(name) || names.has(name)) throw new Error("Invalid or duplicate option name");
+			names.add(name);
+		}
+		const required = option.required === undefined ? false : option.required;
+		if (typeof required !== "boolean") throw new Error("Option required must be boolean");
+		return {
+			names: optionNames,
+			value: option.value === undefined ? null : parseArgumentSlot(option.value),
+			required,
+		};
+	});
+	return { args, flags, options, positionals };
+}
+
 export function parsePolicy(source: string): HostCliCommand[] {
 	const document = parseDocument(source, { version: "1.2", uniqueKeys: true });
 	if (document.errors.length || document.warnings.length) throw new Error("Invalid host CLI YAML");
-	const root = record(document.toJS({ maxAliasCount: 0 }) as unknown, ["version", "commands"]);
+	const root = record(document.toJS({ maxAliasCount: 100 }) as unknown, ["version", "commands"]);
 	if (root.version !== 1 || !Array.isArray(root.commands) || root.commands.length > 32) {
 		throw new Error("Expected version: 1 and commands array (maximum 32)");
 	}
@@ -94,17 +142,7 @@ export function parsePolicy(source: string): HostCliCommand[] {
 		if (!Array.isArray(command.allow) || !command.allow.length || command.allow.length > 256) {
 			throw new Error("allow must contain 1–256 argv rules");
 		}
-		const allow = command.allow.map((rule: unknown): HostCliRule => {
-			const value = Array.isArray(rule) ? { args: rule, flags: [] } : record(rule, ["args", "flags"]);
-			if (!Array.isArray(value.args) || value.args.length > 64)
-				throw new Error("Rule args must be an array of at most 64 slots");
-			if (!Array.isArray(value.flags) || value.flags.length > 256)
-				throw new Error("Rule flags must be an array of at most 256 flags");
-			const flags = value.flags.map(token);
-			if (flags.some((flag) => flag !== "*" && flag !== "--*" && !/^--?[a-zA-Z0-9][a-zA-Z0-9-]*$/.test(flag)))
-				throw new Error('Rule flags must be standalone flag names or "*" / "--*"');
-			return { args: value.args.map(parseArgumentSlot), flags };
-		});
+		const allow = command.allow.map(parseRule);
 		return { name, timeoutMs, allow };
 	});
 }
@@ -113,7 +151,8 @@ export function parsePolicy(source: string): HostCliCommand[] {
 export async function readPolicy(path: string): Promise<HostCliCommand[]> {
 	let file: FileHandle;
 	try {
-		file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+		// Follow host-managed symlinks; validate the opened target below.
+		file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
 	} catch (error) {
 		if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return [];
 		throw error;
@@ -134,27 +173,67 @@ export async function readPolicy(path: string): Promise<HostCliCommand[]> {
 	}
 }
 
+function matchesSlot(slot: HostCliArgumentSlot, arg: string): boolean {
+	return Array.isArray(slot) ? slot.includes(arg) : arg.length <= MAX_TEXT_ARGUMENT_LENGTH && !arg.includes("\0");
+}
+
+function matchesFlag(flags: string[], arg: string): boolean {
+	if (arg !== "*" && arg !== "--*" && flags.includes(arg)) return true;
+	if (arg.length > 4096 || /[\x00-\x1f\x7f]/.test(arg) || !/^--?[a-zA-Z0-9]/.test(arg)) return false;
+	return flags.includes("*") || (arg.startsWith("--") && flags.includes("--*"));
+}
+
+function consumeOption(option: HostCliOption, args: string[], index: number, seen: Set<HostCliOption>): number {
+	if (seen.has(option)) return -1;
+	if (option.value !== null) {
+		// An empty required head must not re-enable implicit gh pushes/forks.
+		if (index >= args.length || !args[index].length || !matchesSlot(option.value, args[index])) return -1;
+		index++;
+	}
+	seen.add(option);
+	return index;
+}
+
+function consumeOptions(rule: HostCliRule, args: string[], seen: Set<HostCliOption>): number {
+	const optionsByName = new Map<string, HostCliOption>();
+	for (const option of rule.options) {
+		for (const name of option.names) optionsByName.set(name, option);
+	}
+	let index = rule.args.length;
+	while (index < args.length) {
+		if (args[index] === "--") return index;
+		const arg = args[index++];
+		const option = optionsByName.get(arg);
+		if (option) {
+			index = consumeOption(option, args, index, seen);
+			if (index < 0) return -1;
+		} else if (!matchesFlag(rule.flags, arg)) {
+			return -1;
+		}
+	}
+	return index;
+}
+
+function matchesRule(rule: HostCliRule, args: string[]): boolean {
+	if (args.length < rule.args.length || !rule.args.every((slot, i) => matchesSlot(slot, args[i]))) return false;
+	const seen = new Set<HostCliOption>();
+	const index = consumeOptions(rule, args, seen);
+	if (index < 0 || !rule.options.every((option) => !option.required || seen.has(option))) return false;
+	if (!rule.positionals.length) return index === args.length;
+	const positionals = args.slice(index + 1);
+	return (
+		args[index] === "--" &&
+		positionals.length === rule.positionals.length &&
+		rule.positionals.every((slot, i) => matchesSlot(slot, positionals[i]))
+	);
+}
+
 export function authorize(command: HostCliCommand, input: unknown): string[] {
 	if (!Array.isArray(input) || !input.every((arg): arg is string => typeof arg === "string")) {
 		throw new Error("Expected an argv array of strings");
 	}
 	const args = [...input];
-	if (
-		args.length > 64 ||
-		!command.allow.some(
-			(rule) =>
-				args.length >= rule.args.length &&
-				rule.args.every((slot, i) => {
-					if (Array.isArray(slot)) return slot.includes(args[i]);
-					return args[i].length <= MAX_TEXT_ARGUMENT_LENGTH && !args[i].includes("\0");
-				}) &&
-				args.slice(rule.args.length).every((arg) => {
-					if (arg !== "*" && arg !== "--*" && rule.flags.includes(arg)) return true;
-					if (arg.length > 4096 || /[\x00-\x1f\x7f]/.test(arg) || !/^--?[a-zA-Z0-9]/.test(arg)) return false;
-					return rule.flags.includes("*") || (arg.startsWith("--") && rule.flags.includes("--*"));
-				}),
-		)
-	) {
+	if (args.length > 64 || !command.allow.some((rule) => matchesRule(rule, args))) {
 		throw new Error(`Denied by host CLI policy for ${command.name}: argv must match an allowed rule`);
 	}
 	return args;
