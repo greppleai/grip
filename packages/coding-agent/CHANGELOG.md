@@ -2,6 +2,23 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.3.4](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.3...@greppleai/grip-v0.3.4) (2026-11-10)
+
+
+### Bug Fixes
+
+* **sandbox:** sandbox-clipboard-paste - save images in backend ([b0055c1](https://github.com/greppleai/grip/commit/b0055c1b2e39a2b737d905d5ad2c9ca115c1450d))
+* **sandbox:** sandbox-clipboard-paste - use guest temp storage ([376435c](https://github.com/greppleai/grip/commit/376435c032c064d7050b0d71bdff98ed94711db8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.3.3 to ^0.3.4
+    * @greppleai/grip-ai bumped from ^0.3.3 to ^0.3.4
+    * @greppleai/grip-tui bumped from ^0.3.3 to ^0.3.4
+
 ## [Unreleased]
 
 ### Fixed
