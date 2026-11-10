@@ -2,6 +2,13 @@
 
 All notable changes to `@greppleai/grip-ai` are documented in this file.
 
+## [0.3.5](https://github.com/greppleai/grip/compare/@greppleai/grip-ai-v0.3.4...@greppleai/grip-ai-v0.3.5) (2026-11-10)
+
+
+### Miscellaneous Chores
+
+* **@greppleai/grip-ai:** Synchronize grip versions
+
 ## [0.3.4](https://github.com/greppleai/grip/compare/@greppleai/grip-ai-v0.3.3...@greppleai/grip-ai-v0.3.4) (2026-11-10)
 
 

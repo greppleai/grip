@@ -2,6 +2,22 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.3.5](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.4...@greppleai/grip-v0.3.5) (2026-11-10)
+
+
+### Features
+
+* **host-cli:** host-cli-unrestricted-argv - allow fully trusted CLI arguments ([3967454](https://github.com/greppleai/grip/commit/3967454010fca646ae64f82837c9f85063ea4a43))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.3.4 to ^0.3.5
+    * @greppleai/grip-ai bumped from ^0.3.4 to ^0.3.5
+    * @greppleai/grip-tui bumped from ^0.3.4 to ^0.3.5
+
 ## [0.3.4](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.3...@greppleai/grip-v0.3.4) (2026-11-10)
 
 
