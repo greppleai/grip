@@ -34,6 +34,15 @@ gh pr create --repo owner/repo --head feature --base main --title 'Fix behavior'
 
 Options may appear in any order after the command prefix, but query identifiers and search strings must follow the literal `--` terminator. PR creation has no positionals. List limits are restricted to 30, 100, 200 or 1000. This policy does not guarantee zero incidental local cache/config activity by the CLI. Free-text descriptions, comments, README files, release notes and diffs may contain pasted credentials; denying Secret/credential commands cannot redact these. Use a least-privilege GitHub token: read-only for queries, with pull-request write permission only when creation is needed, and trusted host CLI configuration. Adding the new `gh` tool requires `/reload`; policy edits to an already registered tool are read on its next call.
 
+To authorize every argument for a fully trusted CLI, add an entry to the host-owned policy's `commands` array (replace `trustedcli` with the executable name):
+
+```yaml
+  - name: trustedcli
+    allow: "*"
+```
+
+This grants unattended host execution for all arguments, including write operations, credential/configuration overrides and future subcommands. It is not read-only. Arguments are passed literally without a shell. Reload after adding the tool.
+
 Example policy: `name` is both the tool name and the CLI command, resolved through the host Grip process's `PATH`. No executable path is configured:
 
 ```yaml
@@ -52,6 +61,8 @@ Restart or `/reload` after adding tools. In a managed, mapped sandbox, the agent
 ```json
 {"args":["get","pods","--namespace","staging","-o","json"]}
 ```
+
+For a fully trusted CLI, command-level `allow: "*"` permits all argument combinations without template matching, including no arguments. Quote the wildcard in YAML. This is distinct from wildcard **flags**, which do not allow arbitrary positional arguments. The 64-argument limit and per-argument limit of 65536 characters without NUL still apply. All existing sandbox, timeout and output restrictions remain enforced. Do not use this grant unless every CLI capability is intended.
 
 Array rules match a **complete argv template**. A string is an exact literal; a nested list is a finite set of choices for exactly one argument. `{text: true}` accepts one arbitrary literal text argument (including multiline/empty strings, at most 65536 characters, without NUL). It never splits that text into additional arguments. Length and order must match. Quote YAML booleans/numbers when intended as CLI strings. An empty template `[]` explicitly permits no arguments. `commands: []` disables everything.
 
