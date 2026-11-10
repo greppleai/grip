@@ -323,6 +323,7 @@ describe("remote workspace protocol contract", () => {
 				executionOptions: {},
 			},
 			"workspace.access": { path: "a", mode: "read" },
+			"workspace.tmpdir": {},
 			"workspace.read": { path: "a" },
 			"workspace.write": { path: "a", contentBase64: "YQ==" },
 			"workspace.mkdir": { path: "a", recursive: true },
@@ -354,6 +355,9 @@ describe("remote workspace protocol contract", () => {
 			}),
 		).not.toThrow();
 		expect(() => parseRemoteWorkspaceResult("tool.invoke", { content: [{ type: "bogus" }] })).toThrow();
+		expect(() => parseRemoteWorkspaceResult("workspace.tmpdir", { path: "/tmp" })).not.toThrow();
+		expect(() => parseRemoteWorkspaceResult("workspace.tmpdir", { path: "" })).toThrow();
+		expect(() => parseRemoteWorkspaceResult("workspace.tmpdir", {})).toThrow();
 	});
 
 	it("negotiates the highest common version, capabilities, and receive limits", () => {

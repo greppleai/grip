@@ -10,6 +10,7 @@ import {
 	stat as fsStat,
 	writeFile as fsWriteFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@greppleai/grip-agent-core";
@@ -179,6 +180,8 @@ export interface ToolOperations {
 	access(path: string, mode?: ToolAccessMode): Promise<void>;
 	readFile(path: string): Promise<Buffer>;
 	writeFile(path: string, content: string | Buffer): Promise<void>;
+	/** Backend-owned disposable storage, when supported and allowed by backend policy. */
+	getTemporaryDirectory?(): Promise<string>;
 	readResource?(path: string): Promise<Buffer>;
 	uploadFile?(sourcePath: string, destinationPath: string): Promise<void>;
 	downloadFile?(sourcePath: string, destinationPath: string): Promise<void>;
@@ -378,6 +381,10 @@ export class LocalToolOperations implements ToolOperations {
 		await fsWriteFile(path, content, typeof content === "string" ? "utf-8" : undefined);
 	}
 
+	async getTemporaryDirectory(): Promise<string> {
+		return tmpdir();
+	}
+
 	async uploadFile(sourcePath: string, destinationPath: string): Promise<void> {
 		await copyFileStream(sourcePath, destinationPath);
 	}
@@ -499,6 +506,10 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 
 	async writeFile(path: string, content: string | Buffer): Promise<void> {
 		await this.requireOperations().writeFile(path, content);
+	}
+
+	async getTemporaryDirectory(): Promise<string> {
+		return this.requireOperations().getTemporaryDirectory();
 	}
 
 	async uploadFile(sourcePath: string, destinationPath: string): Promise<void> {
@@ -962,6 +973,11 @@ export class RemoteToolOperations implements ToolOperations {
 	async readFile(path: string): Promise<Buffer> {
 		const result = requireRecord(await this.request("workspace.read", { path }), "read result");
 		return decodeCanonicalBase64(requireString(result.contentBase64, "read content"), Number.MAX_SAFE_INTEGER);
+	}
+
+	async getTemporaryDirectory(): Promise<string> {
+		const result = requireRecord(await this.request("workspace.tmpdir", {}), "temporary directory result");
+		return requireString(result.path, "temporary directory path");
 	}
 
 	async writeFile(path: string, content: string | Buffer): Promise<void> {

@@ -40,6 +40,7 @@ import type { DaemonConfiguration } from "./config.ts";
 
 const PRIMITIVE_OPERATIONS: RemoteWorkspaceMethod[] = [
 	"workspace.access",
+	"workspace.tmpdir",
 	"workspace.read",
 	"workspace.write",
 	"workspace.mkdir",
@@ -181,6 +182,7 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 	readonly cwd: string;
 	private readonly local: LocalToolOperations;
 	private readonly allowedRoots: readonly string[];
+	private readonly temporaryRoot: string | undefined;
 	private readonly allowFullFilesystem: boolean;
 	private readonly allowProcessExec: boolean;
 	private readonly environment: NodeJS.ProcessEnv;
@@ -189,6 +191,7 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 	constructor(configuration: DaemonConfiguration) {
 		this.cwd = configuration.workspaceRoot;
 		this.local = new LocalToolOperations(this.cwd);
+		this.temporaryRoot = configuration.temporaryRoot;
 		this.allowedRoots = Object.freeze([
 			this.cwd,
 			...(configuration.temporaryRoot ? [configuration.temporaryRoot] : []),
@@ -354,6 +357,19 @@ export class ConfinedDaemonToolOperations implements ToolOperations {
 
 	async writeFile(path: string, content: string | Buffer): Promise<void> {
 		await this.atomicWriteFile(path, content);
+	}
+
+	async getTemporaryDirectory(): Promise<string> {
+		const directory = this.temporaryRoot ?? (await this.local.getTemporaryDirectory());
+		if (!this.temporaryRoot && !this.allowFullFilesystem) {
+			throw new RemoteWorkspaceRequestError({
+				code: "not_available",
+				message: "Temporary storage requires GRIP_DAEMON_TEMP_ROOT pointing to disposable sandbox storage",
+				executionState: "not_started",
+				retryable: false,
+			});
+		}
+		return this.existingPath(directory);
 	}
 
 	async mkdir(path: string, options?: ToolMkdirOptions): Promise<void> {
@@ -618,6 +634,8 @@ async function dispatchDaemonWorkspaceRequest(
 	switch (request.method) {
 		case "tool.invoke":
 			return invokeDaemonTool(request, params, context, runtime);
+		case "workspace.tmpdir":
+			return { path: await runtime.operations.getTemporaryDirectory() };
 		case "workspace.access":
 			await runtime.operations.access(params.path as string, params.mode as ToolAccessMode | undefined);
 			return {};
