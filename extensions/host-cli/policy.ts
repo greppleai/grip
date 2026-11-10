@@ -26,7 +26,7 @@ interface HostCliRule {
 export interface HostCliCommand {
 	name: string;
 	timeoutMs: number;
-	allow: HostCliRule[];
+	allow: "*" | HostCliRule[];
 }
 
 const reservedNames = new Set([
@@ -139,10 +139,13 @@ export function parsePolicy(source: string): HostCliCommand[] {
 		if (typeof timeoutMs !== "number" || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) {
 			throw new Error("timeoutMs must be an integer from 1 to 120000");
 		}
-		if (!Array.isArray(command.allow) || !command.allow.length || command.allow.length > 256) {
-			throw new Error("allow must contain 1–256 argv rules");
+		if (
+			command.allow !== "*" &&
+			(!Array.isArray(command.allow) || !command.allow.length || command.allow.length > 256)
+		) {
+			throw new Error('allow must be "*" or contain 1–256 argv rules');
 		}
-		const allow = command.allow.map(parseRule);
+		const allow = command.allow === "*" ? "*" : command.allow.map(parseRule);
 		return { name, timeoutMs, allow };
 	});
 }
@@ -233,7 +236,11 @@ export function authorize(command: HostCliCommand, input: unknown): string[] {
 		throw new Error("Expected an argv array of strings");
 	}
 	const args = [...input];
-	if (args.length > 64 || !command.allow.some((rule) => matchesRule(rule, args))) {
+	if (
+		args.length > 64 ||
+		args.some((arg) => arg.length > MAX_TEXT_ARGUMENT_LENGTH || arg.includes("\0")) ||
+		(command.allow !== "*" && !command.allow.some((rule) => matchesRule(rule, args)))
+	) {
 		throw new Error(`Denied by host CLI policy for ${command.name}: argv must match an allowed rule`);
 	}
 	return args;
