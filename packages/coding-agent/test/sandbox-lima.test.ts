@@ -172,6 +172,49 @@ describe("Lima sandbox core", () => {
 		expect(runner.calls.map((call) => call.args[0])).toEqual(["list"]);
 	});
 
+	it.skipIf(spawnSync("limactl", ["--version"]).status !== 0).each(["/workspace", '/mnt/project "files"'])(
+		"preserves template mounts and replaces only the workspace destination at %s using Lima yq",
+		async (mountPoint) => {
+			const runner = new FakeLimaRunner([ok(), ok(), ok("GRIP_SANDBOX_TOKEN=vm-token\n")]);
+			const service = new LimaSandboxService({
+				runner,
+				env: { GRIP_SANDBOX_WORKSPACE_MOUNT: mountPoint },
+				portAllocator: async () => 8787,
+				readinessWaiter: async () => {},
+			});
+			await service.start({ workspaceRoot: hostProject });
+			const args = runner.calls[0]?.args ?? [];
+			expect(args).not.toContain("--mount-none");
+			const expression = args[args.indexOf("--set") + 1] ?? "";
+			const temporaryMount = { location: "/tmp", mountPoint: "/tmp", writable: true };
+			const dataMount = { location: "/host/data", mountPoint: "/data", writable: false, sshfs: { cache: false } };
+			for (const template of [
+				{},
+				{ mounts: null },
+				{ mounts: [] },
+				{
+					mounts: [
+						temporaryMount,
+						dataMount,
+						{ location: "/old", mountPoint, writable: false },
+						{ location: mountPoint },
+					],
+				},
+			]) {
+				const result = spawnSync("limactl", ["yq", "-o=json", expression], {
+					input: JSON.stringify(template),
+					encoding: "utf8",
+				});
+				expect(result.stderr).toBe("");
+				expect(result.status).toBe(0);
+				expect(JSON.parse(result.stdout).mounts).toEqual([
+					...(template.mounts?.length ? [temporaryMount, dataMount] : []),
+					{ location: hostProject, mountPoint, writable: true },
+				]);
+			}
+		},
+	);
+
 	it("creates a managed VM with a writable workspace mount and starts the daemon", async () => {
 		const runner = new FakeLimaRunner([ok(), ok("/usr/local/bin/grip\n"), ok("GRIP_SANDBOX_TOKEN=vm-token\n")]);
 		const service = new LimaSandboxService({
@@ -190,8 +233,10 @@ describe("Lima sandbox core", () => {
 		});
 		expect(result.containerName).toMatch(/^grip-sandbox-project-[a-f0-9]{12}-session-p8787-[a-f0-9]{8}$/);
 		expect(runner.calls[0]?.args).toEqual(
-			expect.arrayContaining(["start", "--name", result.containerName, "--mount-none", "template:docker-rootful"]),
+			expect.arrayContaining(["start", "--name", result.containerName, "template:docker-rootful"]),
 		);
+		expect(runner.calls[0]?.args).not.toContain("--mount-none");
+		expect(runner.calls[0]?.args[runner.calls[0].args.indexOf("--set") + 1]).toContain(".mounts // []");
 		expect(runner.calls[0]?.args.join(" ")).toContain('"mountPoint":"/workspace"');
 		expect(runner.calls[0]?.args.join(" ")).toContain(`"location":${JSON.stringify(hostProject)}`);
 		const daemonScript = runner.calls[2]?.args.at(-1) ?? "";
@@ -230,9 +275,7 @@ describe("Lima sandbox core", () => {
 
 			expect(result.containerName).toBe(name);
 			expect(runner.calls[0]?.args).toEqual(["list", "--json", name]);
-			expect(runner.calls[1]?.args).toEqual(
-				expect.arrayContaining(["start", "--name", name, "--mount-none", "template:ubuntu"]),
-			);
+			expect(runner.calls[1]?.args).toEqual(expect.arrayContaining(["start", "--name", name, "template:ubuntu"]));
 			expect(runner.calls[1]?.args.join(" ")).toContain(`"location":${JSON.stringify(hostProject)}`);
 			expect(runner.calls[1]?.args.join(" ")).toContain('"writable":true');
 			expect(runner.calls[3]?.args.at(-1)).toContain("GRIP_VERSION=");

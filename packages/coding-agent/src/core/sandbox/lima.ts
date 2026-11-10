@@ -533,14 +533,15 @@ export class LimaSandboxService {
 		name: string,
 		daemonPort: number,
 	): Promise<void> {
-		const mountExpression = `.mounts = [{"location":${JSON.stringify(workspaceRoot)},"mountPoint":${JSON.stringify(config.workspaceMountPath)},"writable":true}]`;
+		// Keep template mounts (including inherited ones), replacing only the workspace destination.
+		const mountPath = JSON.stringify(config.workspaceMountPath);
+		const mountExpression = `.mounts = ((.mounts // []) | map(select((.mountPoint // .location) != ${mountPath}))) + [{"location":${JSON.stringify(workspaceRoot)},"mountPoint":${mountPath},"writable":true}]`;
 		const forwardExpression = `.portForwards += [{"guestPort":${daemonPort},"hostPort":${daemonPort},"hostIP":${JSON.stringify(config.daemonHostBind)}}]`;
 		const args = [
 			"start",
 			"--tty=false",
 			"--name",
 			name,
-			"--mount-none",
 			"--set",
 			mountExpression,
 			"--set",

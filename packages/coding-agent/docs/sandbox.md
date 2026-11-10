@@ -86,6 +86,8 @@ Start precedence: command `--template`, then `GRIP_SANDBOX_*` environment variab
 
 The default Lima template name contains `docker-rootful`; it is a Lima VM template choice, not a Docker-container sandbox runtime. Change `sandbox.limaTemplate` or use `--template` to select a different Lima template.
 
+New VMs preserve the selected template's mounts, including inherited mounts such as host home or temporary directories. Grip replaces mounts targeting `sandbox.workspaceMountPath` with the selected writable workspace mount. Review all template mounts before starting a VM: guest tools can access those host paths with the configured permissions. To share clipboard images saved on the host, add a writable `/tmp` → `/tmp` mount to your template. Existing VMs retain their saved mount configuration; restarting or updating the guest executable does not apply template mount changes.
+
 ### Guest Grip during development
 
 A new managed VM installs an exact-version Linux Grip release using the checksummed repository installer, when those release assets are published. An existing named per-session VM without Grip installs the latest published release using the same installer; an existing installation is left alone. In development, `GRIP_SANDBOX_GUEST_BINARY` installs the local Linux build instead, including in existing VMs. To test local code, cross-compile a Linux binary matching the guest architecture and opt in:
