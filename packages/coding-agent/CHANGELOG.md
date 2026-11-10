@@ -2,6 +2,31 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.3.3](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.2...@greppleai/grip-v0.3.3) (2026-11-10)
+
+
+### Features
+
+* add policy-restricted host CLI official extension ([3b371c1](https://github.com/greppleai/grip/commit/3b371c1f28535a73283a748bf0d8b0580c982240))
+* host-cli-policy - run allowed commands without approval ([593b5f6](https://github.com/greppleai/grip/commit/593b5f6fa06b372ba92fa182d64039b3fc407a4d))
+* **host-cli:** feat/host-cli-policy - support optional flag rules and wildcards ([584c0f2](https://github.com/greppleai/grip/commit/584c0f25fbb1d18e494002a45b8fe005919f5622))
+* **host-cli:** feat/host-cli-policy - support structured argv policies ([ebc12e9](https://github.com/greppleai/grip/commit/ebc12e9c49bc5101a969e6b06b648365de0bfc10))
+
+
+### Bug Fixes
+
+* **host-cli:** feat/host-cli-policy - gate tools on sandbox attachment ([cc657f1](https://github.com/greppleai/grip/commit/cc657f17d47f851925d9083d1940174868fa9e6c))
+* **sandbox:** preserve-lima-template-mounts - retain extra mounts ([897bd65](https://github.com/greppleai/grip/commit/897bd6533799f786a84c1e7dafbabb00380f5a68))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.3.2 to ^0.3.3
+    * @greppleai/grip-ai bumped from ^0.3.2 to ^0.3.3
+    * @greppleai/grip-tui bumped from ^0.3.2 to ^0.3.3
+
 ## [0.3.2](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.1...@greppleai/grip-v0.3.2) (2026-11-05)
 
 
