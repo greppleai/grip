@@ -1,10 +1,13 @@
 import { readFileSync, rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { LocalToolOperations, type ToolOperations } from "../src/core/tools/operations.ts";
 import type { ClipboardImage } from "../src/utils/clipboard-image.ts";
 
 const mocks = vi.hoisted(() => ({
 	readClipboardImage: vi.fn<() => Promise<ClipboardImage | null>>(),
 	readClipboardText: vi.fn<() => Promise<string | null>>(),
+	getToolOperations: vi.fn<() => ToolOperations>(),
+	showError: vi.fn<(message: string) => void>(),
 }));
 
 vi.mock("../src/utils/clipboard.ts", () => ({
@@ -30,6 +33,8 @@ interface ClipboardPasteUI {
 interface ClipboardPasteContext {
 	editor: ClipboardPasteEditor;
 	ui: ClipboardPasteUI;
+	session: Pick<InteractiveMode["session"], "getToolOperations">;
+	showError: (message: string) => void;
 }
 
 interface KeyHandlerEditor {
@@ -61,6 +66,8 @@ describe("InteractiveMode clipboard paste", () => {
 	beforeEach(() => {
 		mocks.readClipboardImage.mockReset();
 		mocks.readClipboardText.mockReset();
+		mocks.getToolOperations.mockReset().mockReturnValue(new LocalToolOperations(process.cwd()));
+		mocks.showError.mockReset();
 	});
 
 	afterEach(() => {
@@ -86,7 +93,12 @@ describe("InteractiveMode clipboard paste", () => {
 		mocks.readClipboardText.mockResolvedValue("first line\nsecond line");
 		const insertTextAtCursor = vi.fn<(text: string) => void>();
 		const requestRender = vi.fn<() => void>();
-		const context: ClipboardPasteContext = { editor: { insertTextAtCursor }, ui: { requestRender } };
+		const context: ClipboardPasteContext = {
+			editor: { insertTextAtCursor },
+			ui: { requestRender },
+			session: { getToolOperations: mocks.getToolOperations },
+			showError: mocks.showError,
+		};
 
 		await interactiveModePrototype.handleClipboardPaste.call(context);
 
@@ -101,7 +113,12 @@ describe("InteractiveMode clipboard paste", () => {
 		mocks.readClipboardText.mockResolvedValue("clipboard text");
 		const insertTextAtCursor = vi.fn<(text: string) => void>();
 		const requestRender = vi.fn<() => void>();
-		const context: ClipboardPasteContext = { editor: { insertTextAtCursor }, ui: { requestRender } };
+		const context: ClipboardPasteContext = {
+			editor: { insertTextAtCursor },
+			ui: { requestRender },
+			session: { getToolOperations: mocks.getToolOperations },
+			showError: mocks.showError,
+		};
 
 		await interactiveModePrototype.handleClipboardPaste.call(context);
 
@@ -125,11 +142,88 @@ describe("InteractiveMode clipboard paste", () => {
 		mocks.readClipboardText.mockResolvedValue(null);
 		const insertTextAtCursor = vi.fn<(text: string) => void>();
 		const requestRender = vi.fn<() => void>();
-		const context: ClipboardPasteContext = { editor: { insertTextAtCursor }, ui: { requestRender } };
+		const context: ClipboardPasteContext = {
+			editor: { insertTextAtCursor },
+			ui: { requestRender },
+			session: { getToolOperations: mocks.getToolOperations },
+			showError: mocks.showError,
+		};
 
 		await interactiveModePrototype.handleClipboardPaste.call(context);
 
 		expect(insertTextAtCursor).not.toHaveBeenCalled();
 		expect(requestRender).not.toHaveBeenCalled();
 	});
+	test.each([
+		["/workspace/project", "/workspace/project/.grip/clipboard/", "posix"],
+		["C:\\workspace\\project", "C:\\workspace\\project\\.grip\\clipboard\\", "windows"],
+	] as const)("saves image bytes in the remote workspace at %s", async (cwd, prefix, pathFlavor) => {
+		mocks.readClipboardImage.mockResolvedValue({ bytes: Uint8Array.from([1, 2, 3]), mimeType: "image/png" });
+		const operations = new LocalToolOperations(cwd);
+		vi.spyOn(operations, "getBackendInfo").mockReturnValue({
+			type: "remote",
+			cwd,
+			configured: true,
+			url: "ws://localhost:8787/grip/workspace",
+			protocol: "ws",
+			workspace: { id: "test", root: cwd, pathFlavor },
+		});
+		const mkdir = vi.spyOn(operations, "mkdir").mockResolvedValue();
+		const writeFile = vi.spyOn(operations, "writeFile").mockResolvedValue();
+		mocks.getToolOperations.mockReturnValue(operations);
+		const insertTextAtCursor = vi.fn<(text: string) => void>();
+		const requestRender = vi.fn<() => void>();
+		const context: ClipboardPasteContext = {
+			editor: { insertTextAtCursor },
+			ui: { requestRender },
+			session: { getToolOperations: mocks.getToolOperations },
+			showError: mocks.showError,
+		};
+
+		await interactiveModePrototype.handleClipboardPaste.call(context);
+
+		const imagePath = insertTextAtCursor.mock.calls[0]?.[0];
+		expect(imagePath?.startsWith(prefix)).toBe(true);
+		expect(imagePath).toMatch(/grip-clipboard-[0-9a-f-]+\.png$/);
+		expect(mkdir).toHaveBeenCalledWith(prefix.slice(0, -1), { recursive: true });
+		expect(writeFile).toHaveBeenCalledWith(imagePath, Buffer.from([1, 2, 3]));
+		expect(writeFile.mock.invocationCallOrder[0]).toBeLessThan(insertTextAtCursor.mock.invocationCallOrder[0] ?? 0);
+		expect(requestRender).toHaveBeenCalledOnce();
+		expect(mocks.readClipboardText).not.toHaveBeenCalled();
+		expect(mocks.showError).not.toHaveBeenCalled();
+	});
+
+	test.each(["mkdir", "writeFile"] as const)(
+		"reports remote %s failure without inserting a host path",
+		async (operation) => {
+			mocks.readClipboardImage.mockResolvedValue({ bytes: Uint8Array.from([1, 2, 3]), mimeType: "image/png" });
+			const operations = new LocalToolOperations("/workspace");
+			vi.spyOn(operations, "getBackendInfo").mockReturnValue({
+				type: "remote",
+				cwd: "/workspace",
+				configured: false,
+			});
+			const mkdir = vi.spyOn(operations, "mkdir").mockResolvedValue();
+			const writeFile = vi.spyOn(operations, "writeFile").mockResolvedValue();
+			if (operation === "mkdir") mkdir.mockRejectedValue(new Error("backend unavailable"));
+			else writeFile.mockRejectedValue(new Error("backend unavailable"));
+			mocks.getToolOperations.mockReturnValue(operations);
+			const insertTextAtCursor = vi.fn<(text: string) => void>();
+			const requestRender = vi.fn<() => void>();
+			const context: ClipboardPasteContext = {
+				editor: { insertTextAtCursor },
+				ui: { requestRender },
+				session: { getToolOperations: mocks.getToolOperations },
+				showError: mocks.showError,
+			};
+
+			await interactiveModePrototype.handleClipboardPaste.call(context);
+
+			expect(insertTextAtCursor).not.toHaveBeenCalled();
+			expect(requestRender).not.toHaveBeenCalled();
+			expect(mocks.readClipboardText).not.toHaveBeenCalled();
+			expect(mocks.showError).toHaveBeenCalledWith("Failed to save clipboard image: backend unavailable");
+			if (operation === "mkdir") expect(writeFile).not.toHaveBeenCalled();
+		},
+	);
 });

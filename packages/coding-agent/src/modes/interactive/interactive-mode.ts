@@ -131,6 +131,7 @@ import {
 	type ScopedModel,
 } from "../../core/model-resolver.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
+import { joinPortablePath } from "../../core/portable-path.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.ts";
 import type {
 	LoadPromptTemplatesResult,
@@ -3246,11 +3247,21 @@ export class InteractiveMode {
 		try {
 			const image = await readClipboardImage();
 			if (image) {
-				const tmpDir = os.tmpdir();
+				const operations = this.session.getToolOperations();
+				const remote = operations.getBackendInfo?.()?.type === "remote";
+				const directory = remote ? joinPortablePath(operations.cwd, ".grip", "clipboard") : os.tmpdir();
 				const ext = extensionForImageMimeType(image.mimeType) ?? "png";
 				const fileName = `grip-clipboard-${crypto.randomUUID()}.${ext}`;
-				const filePath = path.join(tmpDir, fileName);
-				fs.writeFileSync(filePath, Buffer.from(image.bytes));
+				const filePath = joinPortablePath(directory, fileName);
+				try {
+					if (remote) await operations.mkdir(directory, { recursive: true });
+					await operations.writeFile(filePath, Buffer.from(image.bytes));
+				} catch (error) {
+					this.showError(
+						`Failed to save clipboard image: ${error instanceof Error ? error.message : String(error)}`,
+					);
+					return;
+				}
 
 				this.editor.insertTextAtCursor?.(filePath);
 				this.ui.requestRender();

@@ -10,6 +10,8 @@ Inside a connected sandbox, `/cd <directory>` changes the guest working director
 
 Lima-managed sandboxes allow workspace tools (`read`, `write`, `edit`, `ls`, `find`, and `grep`) to access paths anywhere in the guest filesystem, including outside the mounted workspace. This does not mount additional host directories; guest OS permissions still apply. `/cd` remains within the mounted workspace. An attached daemon stays workspace-confined by default: only enable `--daemon-allow-full-filesystem` when the daemon runs inside an intentionally isolated guest, never on an untrusted host. Existing guest daemons need an update or restart to enable this access.
 
+Pasting a clipboard image saves it through the active remote backend under `.grip/clipboard/` in the current guest working directory, then inserts its guest path. No host `/tmp` mount is needed. These files remain until manually deleted; add `.grip/clipboard/` to your project's Git ignore rules if needed. Local sessions continue saving clipboard images in the host system temporary directory. Failed image writes report an error without inserting an unreadable host path.
+
 ## Commands
 
 ```text
