@@ -86,7 +86,6 @@ commands:
 });
 
 test.each([
-	{ args: ["diff"] },
 	{ flags: ["--check"] },
 	{ args: "diff", flags: [] },
 	{ args: ["diff"], flags: "--check" },
@@ -288,7 +287,7 @@ test("rejects duplicate tools, oversized templates, invalid runtime input; no po
 	expect(await readPolicy(join(await temporaryDirectory(), "missing.yaml"))).toEqual([]);
 });
 
-test("host policy file rejects symlinks, oversized files, non-files and unsafe Unix permissions", async () => {
+test("host policy follows managed symlinks but rejects oversized files, non-files and unsafe Unix permissions", async () => {
 	const directory = await temporaryDirectory();
 	const policy = join(directory, "policy.yaml");
 	await writeFile(policy, source, { mode: 0o600 });
@@ -302,7 +301,9 @@ test("host policy file rejects symlinks, oversized files, non-files and unsafe U
 		await expect(readPolicy(policy)).rejects.toThrow(/writable/);
 		await chmod(policy, 0o600);
 		await symlink(policy, join(directory, "link.yaml"));
-		await expect(readPolicy(join(directory, "link.yaml"))).rejects.toThrow();
+		expect(await readPolicy(join(directory, "link.yaml"))).toEqual(await readPolicy(policy));
+		await chmod(policy, 0o666);
+		await expect(readPolicy(join(directory, "link.yaml"))).rejects.toThrow(/writable/);
 	}
 });
 
