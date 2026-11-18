@@ -1,6 +1,6 @@
 {
   "name": "@grip-extensions/planner",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "File-backed Markdown plans and iterative build loops for Grip",
   "type": "module",
   "license": "MIT",
