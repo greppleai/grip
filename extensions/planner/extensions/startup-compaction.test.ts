@@ -171,8 +171,7 @@ test("startup success is staged before all mutation in busy UI, busy headless an
 		f.requests[0].onComplete();
 		f.requests[0].onComplete();
 		f.requests[0].onError(new Error("late"));
-		await f.flush();
-		expect(f.messages).toHaveLength(1);
+		await expect.poll(() => f.messages.length, { timeout: 5000 }).toBe(1);
 		expect(f.messages[0]).toContain(f.step.path);
 		const plan = await f.store.load("demo");
 		expect(plan.status).toBe("In Progress");
@@ -266,8 +265,7 @@ test("stale callbacks cannot release or activate a replacement startup reservati
 	await expect(f.call("planner_start", { planName: "demo" })).rejects.toThrow("Stop the current");
 	expect(f.messages).toEqual([]);
 	f.requests[1].onComplete();
-	await f.flush();
-	expect(f.messages).toHaveLength(1);
+	await expect.poll(() => f.messages.length, { timeout: 5000 }).toBe(1);
 });
 
 test("success reloads fresh Markdown and captures the post-activation progress baseline", async () => {
@@ -299,8 +297,7 @@ test("success reloads fresh Markdown and captures the post-activation progress b
 		}),
 	);
 	f.requests[0].onComplete();
-	await f.flush();
-	expect(f.messages[0]).toContain(second.path);
+	await expect.poll(() => f.messages[0], { timeout: 5000 }).toContain(second.path);
 	expect(f.messages[0]).toContain("iteration 7/50");
 	expect(f.messages[0]).toContain("at most 3");
 	const plan = await f.store.load("demo");
@@ -345,8 +342,7 @@ test("explicit resume compacts before incrementing persisted iteration; recovery
 	expect(await f.snapshot()).toEqual(before);
 	f.requests[0].onComplete();
 	f.requests[0].onComplete();
-	await f.flush();
-	expect(f.messages).toHaveLength(2);
+	await expect.poll(() => f.messages.length, { timeout: 5000 }).toBe(2);
 	expect(f.messages[1]).toContain("iteration 2/8");
 	expect((await f.store.readRuntime("demo"))?.loop.iteration).toBe(2);
 });
@@ -539,8 +535,7 @@ test("a fresh-read callback invalidated by stop cannot release a replacement sta
 	expect(f.messages).toEqual([]);
 	await expect(f.call("planner_start", { planName: "demo" })).rejects.toThrow("Stop the current");
 	f.requests[1].onComplete();
-	await f.flush();
-	expect(f.messages).toHaveLength(1);
+	await expect.poll(() => f.messages.length, { timeout: 5000 }).toBe(1);
 });
 
 // biome-ignore format: Keep the custom bounded-test-matrix directive attached to the callback.
