@@ -372,8 +372,7 @@ test("preparation and delivery use the backend cwd rather than the host session 
 	expect(f.compactions[0].customInstructions).not.toContain(f.ctx.cwd);
 	f.compactions[0].onComplete();
 	f.compactions[0].onComplete();
-	await f.flush();
-	expect(f.messages).toHaveLength(1);
+	await expect.poll(() => f.messages.length, { timeout: 5000 }).toBe(1);
 	f.setPercent(10);
 	expect((await f.store.load("sandbox")).steps.map((step) => step.status)).toEqual(["In Progress", "Pending"]);
 	expect(f.messages[0]).toContain(`${remoteRoot}/STEP-0001/INDEX.md`);
@@ -418,8 +417,7 @@ test("preparation and delivery use the backend cwd rather than the host session 
 	expect(f.compactions[1].customInstructions).not.toContain(f.ctx.cwd);
 	f.compactions[1].onComplete();
 	f.compactions[1].onComplete();
-	await f.flush();
-	expect(f.messages).toHaveLength(3);
+	await expect.poll(() => f.messages.length, { timeout: 5000 }).toBe(3);
 	expect(f.messages[2]).toContain(`${remoteRoot}/STEP-0002/INDEX.md`);
 	expect(f.messages[2]).toContain(`${remoteRoot}/STEP-0001/HANDOFF-0001.md`);
 	expect((await f.store.readRuntime("sandbox"))?.loop.iteration).toBe(3);
@@ -846,12 +844,14 @@ async () => {
 		let activations = 0;
 		f.ctx.toolOperations.writeFile = async (path, content) => {
 			if (path.endsWith("STEP-0002-second.md")) activations++;
+			// Runtime persistence can outlast the former 150 ms callback flush on CI.
+			if (path.endsWith("LOOP-STATE.json")) await new Promise((resolve) => setTimeout(resolve, 250));
 			await originalWrite(path, content);
 		};
 		if (outcome === "success") f.compactions[0].onComplete();
 		else f.compactions[0].onError(new Error("failure"));
 		f.compactions[0].onComplete();
-		await f.flush();
+		await expect.poll(() => f.messages.length, { timeout: 5000 }).toBe(2);
 		expect((await f.store.load("demo")).steps.map((step) => step.status)).toEqual(["Completed", "In Progress"]);
 		expect(activations).toBe(1);
 		expect(f.messages).toHaveLength(2);
@@ -1131,8 +1131,7 @@ test("40% compaction continues once on success and ignores duplicate done/callba
 	await f.call("planner_done");
 	f.compactions[0].onComplete();
 	f.compactions[0].onComplete();
-	await f.flush();
-	expect(f.messages.length).toBe(2);
+	await expect.poll(() => f.messages.length, { timeout: 5000 }).toBe(2);
 	expect((await f.store.readRuntime("demo"))?.loop.iteration).toBe(2);
 });
 
@@ -1173,7 +1172,7 @@ async () => {
 			if (mode === "compact-success") f.compactions[0].onComplete();
 			else f.compactions[0].onError(new Error("compaction unavailable"));
 			f.compactions[0].onComplete();
-			await f.flush();
+			await expect.poll(() => f.messages.length, { timeout: 5000 }).toBe(2);
 		}
 		expect(f.messages).toHaveLength(2);
 		const next = f.messages[1];
@@ -1208,8 +1207,7 @@ test("compaction failure falls back to continuation", async () => {
 	f.setPercent(50);
 	await f.call("planner_done");
 	f.compactions[0].onError(new Error("failure"));
-	await f.flush();
-	expect(f.messages.length).toBe(2);
+	await expect.poll(() => f.messages.length, { timeout: 5000 }).toBe(2);
 	expect(f.notices.some((s) => s.includes("continuing without"))).toBe(true);
 });
 test("headless busy run skips compaction and keeps follow-up workflow", async () => {
@@ -1308,14 +1306,12 @@ test("mixed legacy and numbered plans compact, resume and complete without renam
 	await f.call("planner_start", { planName: "demo" });
 	expect(f.messages).toEqual([]);
 	f.compactions[0].onComplete();
-	await f.flush();
-	expect(f.messages[0]).toContain(legacyPath);
+	await expect.poll(() => f.messages[0], { timeout: 5000 }).toContain(legacyPath);
 	f.setIdle(true);
 	await f.command("stop");
 	await f.command("resume demo");
 	f.compactions[1].onComplete();
-	await f.flush();
-	expect(f.messages[1]).toContain(legacyPath);
+	await expect.poll(() => f.messages[1], { timeout: 5000 }).toContain(legacyPath);
 	await expect(f.call("planner_done")).rejects.toThrow("Save progress");
 	const legacy = await f.store.read(legacyPath);
 	await writeFile(
@@ -1548,7 +1544,7 @@ test("directory startup compaction failure never creates runtime state or change
 	expect(await f.store.readRuntime("staged")).toBeUndefined();
 	f.compactions[0].onError(new Error("denied"));
 	f.compactions[0].onComplete();
-	await f.flush();
+	await expect.poll(() => f.notices.join("\n"), { timeout: 5000 }).toContain("Startup compaction failed: denied");
 	expect(await f.store.readRuntime("staged")).toBeUndefined();
 	expect(await readFile(f.store.indexPath("staged"), "utf8")).toBe(planBefore);
 	expect(await readFile(step.path, "utf8")).toBe(stepBefore);
