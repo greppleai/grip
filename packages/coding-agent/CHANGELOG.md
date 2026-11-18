@@ -2,6 +2,22 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.3.6](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.5...@greppleai/grip-v0.3.6) (2026-11-18)
+
+
+### Bug Fixes
+
+* **coding-agent:** accept additional Codex catalog modalities ([fb13d12](https://github.com/greppleai/grip/commit/fb13d121a75328f198fdde32154dfff911c075db))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.3.5 to ^0.3.6
+    * @greppleai/grip-ai bumped from ^0.3.5 to ^0.3.6
+    * @greppleai/grip-tui bumped from ^0.3.5 to ^0.3.6
+
 ## [0.3.5](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.4...@greppleai/grip-v0.3.5) (2026-11-10)
 
 
