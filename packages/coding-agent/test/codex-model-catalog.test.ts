@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -165,4 +165,116 @@ describe("refreshCodexModelCatalog", () => {
 		expect(failed.error).toBeDefined();
 		expect(failed.models.map((model) => model.id)).toEqual(["gpt-new"]);
 	});
+
+	it.each([
+		["network", "Codex client version lookup failed (network or timeout)"],
+		["http", "Codex client version lookup failed (HTTP 500)"],
+		["json", "Codex client version metadata is not valid JSON"],
+		["version", "Invalid Codex client version; check CODEX_CLIENT_VERSION or npm metadata"],
+	])("identifies version lookup failures: %s", async (failure, message) => {
+		const result = await refreshCodexModelCatalog({
+			accessToken: "secret-token",
+			accountId: "acct",
+			cacheDir: await cacheDir(),
+			clientVersion: "",
+			fetch: async () => {
+				if (failure === "network") throw new Error("request contained secret-token");
+				if (failure === "http") return response({}, false);
+				if (failure === "json") return new Response("secret-token");
+				return response({ version: "secret-token" });
+			},
+		});
+		expect(result.error?.message).toBe(message);
+		expect(result.models).toEqual([]);
+		expect(result.fromCache).toBe(false);
+	});
+
+	it.each([
+		["network", "Codex model catalog request failed (network or timeout)"],
+		["http", "Codex model catalog request failed (HTTP 500)"],
+		["json", "Codex model catalog response is not valid JSON"],
+		["schema", "Codex model catalog validation failed"],
+	])("identifies catalog failures and preserves cached models: %s", async (failure, message) => {
+		const options = {
+			accessToken: "secret-token",
+			accountId: "acct",
+			cacheDir: await cacheDir(),
+			clientVersion: "1.2.3",
+		};
+		await refreshCodexModelCatalog({ ...options, fetch: async () => response(catalog) });
+		const result = await refreshCodexModelCatalog({
+			...options,
+			force: true,
+			fetch: async () => {
+				if (failure === "network") throw new Error("request contained secret-token");
+				if (failure === "http") return response({}, false);
+				if (failure === "json") return new Response("secret-token");
+				return response({ models: [{ slug: "secret-token", visibility: "list" }] });
+			},
+		});
+		expect(result.error?.message).toBe(message);
+		expect(result.models[0].id).toBe("gpt-new");
+		expect(result.fromCache).toBe(true);
+	});
+
+	it("keeps freshly fetched models when the cache cannot be written", async () => {
+		const path = join(await cacheDir(), "not-a-directory");
+		await writeFile(path, "occupied");
+		const result = await refreshCodexModelCatalog({
+			accessToken: "secret-token",
+			accountId: "acct",
+			cacheDir: path,
+			clientVersion: "1.2.3",
+			fetch: async () => response(catalog),
+		});
+		expect(result.models[0].id).toBe("gpt-new");
+		expect(result.fromCache).toBe(false);
+		expect(result.error?.message).toBe("Codex model catalog refreshed but could not be cached");
+	});
+
+	it("accepts additional catalog modalities without advertising unsupported input", async () => {
+		const dir = await cacheDir();
+		const result = await refreshCodexModelCatalog({
+			accessToken: "secret-token",
+			accountId: "acct",
+			cacheDir: dir,
+			clientVersion: "1.2.3",
+			fetch: async () =>
+				response({
+					models: [
+						{ ...catalog.models[0], input_modalities: ["text", "image", "audio", "video", "image"] },
+						{ ...catalog.models[0], slug: "text-audio", input_modalities: ["text", "audio"] },
+					],
+				}),
+		});
+		expect(result.error).toBeUndefined();
+		expect(result.fromCache).toBe(false);
+		expect(result.models.map((model) => model.input)).toEqual([["text", "image"], ["text"]]);
+		const cached = await refreshCodexModelCatalog({
+			accessToken: "secret-token",
+			accountId: "acct",
+			cacheDir: dir,
+			fetch: async () => {
+				throw new Error("fresh cache must not use network");
+			},
+		});
+		expect(cached.error).toBeUndefined();
+		expect(cached.fromCache).toBe(true);
+		expect(cached.models).toEqual(result.models);
+	});
+
+	it.each([{ modalities: ["text", 42] }, { modalities: ["audio"] }, { modalities: [] }])(
+		"still rejects invalid or unsupported-only modalities: $modalities",
+		async ({ modalities }) => {
+			const result = await refreshCodexModelCatalog({
+				accessToken: "secret-token",
+				accountId: "acct",
+				cacheDir: await cacheDir(),
+				clientVersion: "1.2.3",
+				fetch: async () => response({ models: [{ ...catalog.models[0], input_modalities: modalities }] }),
+			});
+			expect(result.error?.message).toBe("Codex model catalog validation failed");
+			expect(result.models).toEqual([]);
+		},
+	);
 });

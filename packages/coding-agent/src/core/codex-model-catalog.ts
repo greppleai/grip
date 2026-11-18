@@ -29,7 +29,7 @@ function cachePathFor(cacheDir: string, accountId: string): string {
 type ListedModelRow = Record<string, unknown> & {
 	slug: string;
 	display_name: string;
-	input_modalities: Array<"text" | "image">;
+	input_modalities: string[];
 	context_window: number;
 };
 
@@ -43,7 +43,7 @@ function isListedModelRow(row: Record<string, unknown>): row is ListedModelRow {
 		name.length <= 256 &&
 		Array.isArray(modalities) &&
 		modalities.includes("text") &&
-		modalities.every((modality) => modality === "text" || modality === "image") &&
+		modalities.every((modality) => typeof modality === "string") &&
 		Number.isSafeInteger(contextWindow) &&
 		(contextWindow as number) > 0
 	);
@@ -72,7 +72,8 @@ function parseListedModel(row: Record<string, unknown>): CodexModel {
 		baseUrl: "https://chatgpt.com/backend-api",
 		reasoning: levels.length > 0,
 		...(Object.keys(thinkingLevelMap).length ? { thinkingLevelMap } : {}),
-		input: [...new Set(row.input_modalities)],
+		// The catalog may advertise additional modalities that Grip cannot send yet.
+		input: [...new Set(row.input_modalities.filter((modality) => modality === "text" || modality === "image"))],
 		// ChatGPT subscription requests are not billed per token; the endpoint publishes no prices.
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: row.context_window,
@@ -176,14 +177,28 @@ interface CodexCatalogResult {
 async function resolveClientVersion(options: CodexCatalogOptions, fetcher: typeof fetch): Promise<string> {
 	let version = options.clientVersion ?? process.env.CODEX_CLIENT_VERSION;
 	if (!version) {
-		const response = await fetcher(NPM_VERSION_URL, { method: "GET", signal: AbortSignal.timeout(10_000) });
-		if (!response.ok) throw new Error("Unable to resolve Codex client version");
-		const metadata: unknown = await response.json();
+		let response: Response;
+		try {
+			response = await fetcher(NPM_VERSION_URL, { method: "GET", signal: AbortSignal.timeout(10_000) });
+		} catch {
+			throw new CodexCatalogError("Codex client version lookup failed (network or timeout)");
+		}
+		if (!response.ok) throw new CodexCatalogError(`Codex client version lookup failed (HTTP ${response.status})`);
+		let metadata: unknown;
+		try {
+			metadata = await response.json();
+		} catch {
+			throw new CodexCatalogError("Codex client version metadata is not valid JSON");
+		}
 		version = isRecord(metadata) ? (metadata.version as string) : undefined;
 	}
-	if (!validSemver(version)) throw new Error("Invalid Codex client version");
+	if (!validSemver(version))
+		throw new CodexCatalogError("Invalid Codex client version; check CODEX_CLIENT_VERSION or npm metadata");
 	return version.split(/[+-]/)[0] as string;
 }
+
+// Only errors created here contain messages safe to surface to the user.
+class CodexCatalogError extends Error {}
 
 /** Fetch the authenticated, account-specific Codex catalog; never cache credentials. */
 export async function refreshCodexModelCatalog(options: CodexCatalogOptions): Promise<CodexCatalogResult> {
@@ -194,23 +209,31 @@ export async function refreshCodexModelCatalog(options: CodexCatalogOptions): Pr
 	if (!options.force && cached && now() - cached.fetchedAt >= 0 && now() - cached.fetchedAt < CACHE_TTL_MS) {
 		return { models: cached.models, fromCache: true };
 	}
+	let failureMessage = "Unable to resolve Codex client version";
+	let models: CodexModel[];
 	try {
 		const version = await resolveClientVersion(options, fetcher);
+		failureMessage = "Codex model catalog request failed (network or timeout)";
 		const response = await fetcher(`${CATALOG_URL}?client_version=${encodeURIComponent(version)}`, {
 			method: "GET",
 			signal: AbortSignal.timeout(10_000),
 			headers: { Authorization: `Bearer ${options.accessToken}`, "ChatGPT-Account-ID": options.accountId },
 		});
-		if (!response.ok) throw new Error(`Codex model catalog request failed (HTTP ${response.status})`);
-		const models = parseModels(await response.json());
-		await writeCache(cachePath, { schemaVersion: 1, fetchedAt: now(), models });
-		return { models, fromCache: false };
+		if (!response.ok) throw new CodexCatalogError(`Codex model catalog request failed (HTTP ${response.status})`);
+		failureMessage = "Codex model catalog response is not valid JSON";
+		const payload: unknown = await response.json();
+		failureMessage = "Codex model catalog validation failed";
+		models = parseModels(payload);
 	} catch (error) {
-		// Never surface fetch errors: they may include the URL or request headers (including the token).
-		const message =
-			error instanceof Error && /^Codex model catalog request failed \(HTTP \d+\)$/.test(error.message)
-				? error.message
-				: "Unable to refresh Codex model catalog";
+		// Never surface raw errors: they can include request headers, tokens, or response bodies.
+		const message = error instanceof CodexCatalogError ? error.message : failureMessage;
 		return { models: cached?.models ?? [], fromCache: Boolean(cached), error: new Error(message) };
 	}
+	try {
+		await writeCache(cachePath, { schemaVersion: 1, fetchedAt: now(), models });
+	} catch {
+		// Persistence failure must not discard a successfully fetched catalog.
+		return { models, fromCache: false, error: new Error("Codex model catalog refreshed but could not be cached") };
+	}
+	return { models, fromCache: false };
 }
