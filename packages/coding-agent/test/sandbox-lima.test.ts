@@ -242,9 +242,42 @@ describe("Lima sandbox core", () => {
 		const daemonScript = runner.calls[2]?.args.at(-1) ?? "";
 		expect(daemonScript).toContain("--daemon --daemon-host");
 		expect(daemonScript).toContain("--daemon-allow-full-filesystem");
+		expect(daemonScript).toContain('TMPDIR="$(mktemp -d /var/tmp/grip-lima.XXXXXXXXXX)"');
+		expect(daemonScript).toContain("--daemon-env GOTMPDIR --daemon-env JAVA_TOOL_OPTIONS");
 		expect(daemonScript).toContain("&\necho $!");
 		expect(daemonScript).not.toContain("&;");
 		expect(daemonScript).not.toContain("vm-token");
+	});
+
+	it.skipIf(process.platform === "win32")("won't allocate Lima scratch in RAM", async () => {
+		const runner = new FakeLimaRunner([ok(), ok("/usr/local/bin/grip\n"), ok("GRIP_SANDBOX_TOKEN=vm-token\n")]);
+		const service = new LimaSandboxService({ runner, readinessWaiter: async () => {} });
+		await service.start({ workspaceRoot: hostProject, sessionId: "session" });
+		const daemonScript = runner.calls[2]?.args.at(-1) ?? "";
+		const scratchSetup = daemonScript.slice(daemonScript.indexOf('case "$(stat -f'), daemonScript.indexOf("\nnohup"));
+		expect(scratchSetup).toContain("mktemp -d /var/tmp/");
+		const probe = [
+			"set -eu",
+			'stat() { printf "%s\\n" "$1" >&2; printf "%s" "$FAKE_FSTYPE"; }',
+			'mktemp() { test "$1" = -d; test "$2" = /var/tmp/grip-lima.XXXXXXXXXX; printf "/var/tmp/grip-lima.test\\n"; }',
+			scratchSetup,
+			'sh -c \'printf "%s\\n" "$TMPDIR" "$GOTMPDIR" "$JAVA_TOOL_OPTIONS"\'',
+		].join("\n");
+		const run = (fsType: string) =>
+			spawnSync("sh", ["-c", probe], { encoding: "utf8", env: { ...process.env, FAKE_FSTYPE: fsType } });
+		const disk = run("ef53");
+		expect(disk.status).toBe(0);
+		expect(disk.stdout.trim().split("\n")).toEqual([
+			"/var/tmp/grip-lima.test",
+			"/var/tmp/grip-lima.test",
+			"-Djava.io.tmpdir=/var/tmp/grip-lima.test",
+		]);
+		for (const fsType of ["1021994", "858458f6", ""]) {
+			const blocked = run(fsType);
+			expect(blocked.status).toBe(33);
+			expect(blocked.stderr).toContain("non-RAM-backed /var/tmp");
+			expect(blocked.stdout).toBe("");
+		}
 	});
 
 	it.each(["my-dev", "grip-sandbox-my-dev"])(
