@@ -2,6 +2,22 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.3.7](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.6...@greppleai/grip-v0.3.7) (2026-11-19)
+
+
+### Bug Fixes
+
+* **sandbox:** use disk-backed scratch space in Lima ([0e6aea5](https://github.com/greppleai/grip/commit/0e6aea560cc624a350f52bcf603bb6ff68a0f79d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.3.6 to ^0.3.7
+    * @greppleai/grip-ai bumped from ^0.3.6 to ^0.3.7
+    * @greppleai/grip-tui bumped from ^0.3.6 to ^0.3.7
+
 ## [0.3.6](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.5...@greppleai/grip-v0.3.6) (2026-11-18)
 
 
