@@ -10,7 +10,9 @@ Inside a connected sandbox, `/cd <directory>` changes the guest working director
 
 Lima-managed sandboxes allow workspace tools (`read`, `write`, `edit`, `ls`, `find`, and `grep`) to access paths anywhere in the guest filesystem, including outside the mounted workspace. This does not mount additional host directories; guest OS permissions still apply. `/cd` remains within the mounted workspace. An attached daemon stays workspace-confined by default: only enable `--daemon-allow-full-filesystem` when the daemon runs inside an intentionally isolated guest, never on an untrusted host. Existing guest daemons need an update or restart to enable this access.
 
-Pasting a clipboard image writes its bytes through the active backend to that backend's temporary directory (normally `/tmp` inside Lima), then inserts the guest path. Nothing is saved in the repository, and no host `/tmp` mount is needed. Local sessions use the host system temporary directory. Files follow the backend OS's temporary-file cleanup policy; Grip does not delete them at session exit. Confined attached daemons must configure `GRIP_DAEMON_TEMP_ROOT` to a disposable directory inside their sandbox. Existing guest daemons need an update/restart to support temporary-directory discovery. Failed discovery or writes report an error without inserting an unreadable host path.
+New Grip-managed Lima daemons use a private directory under guest `/var/tmp` for scratch files, including clipboard images and temporary files from tools that honor the configured environment. `/var/tmp` must not be on `tmpfs` or `ramfs`. Grip does not remount guest `/tmp`; programs that explicitly write there still follow the guest's mount policy. Existing daemons keep their current environment until relaunched; see [Migrating an existing Lima VM](#migrating-an-existing-lima-vm). Scratch files follow the guest OS's cleanup policy; Grip does not delete them at session exit.
+
+Pasting an image writes it through the active backend and inserts the resulting path. Nothing is saved in the repository, and no host `/tmp` mount is needed. Local sessions use the host temporary directory. Confined attached daemons must configure `GRIP_DAEMON_TEMP_ROOT` to a disposable directory inside their sandbox. Failed discovery or writes report an error without inserting an unreadable host path.
 
 ## Commands
 
@@ -111,6 +113,32 @@ Each TUI obtains the guest credential through local Lima access and opens its ow
 Grip probes guest mode under the named owner lock before any legacy setup. A missing marker follows the per-session path; unreadable, symlinked, or ambiguous state refuses attachment. A stopped shared VM with a mismatched mount is not automatically resumed. Per-session start and stop check for shared guest state before rotating or killing a legacy daemon. Noncooperating programs may ignore these locks; a VM name alone proves nothing.
 
 Shared startup requires guest `systemd-run --user`, `systemctl --user`, and `loginctl ... Linger=yes` already enabled by an operator. Grip launches one transient `grip-shared-lima-PORT.service` with `Restart=no`; it does not automatically restart failed units or retry uncertain operations. The unit reads its private 0600 token file without passing credentials in service arguments. Grip verifies its MainPID against a boot-ID/process-start-time-bound PID record before reuse. Missing manager, mismatched process identity, or uncertain guest state require manual reconciliation; guest shutdown remains explicit.
+
+## Migrating an existing Lima VM
+
+No VM rebuild is needed. Before restarting the daemon, finish any active jobs and check that `/var/tmp` in the guest is writable by the Grip daemon user, has enough disk space, and is backed by the guest disk rather than `tmpfs` or `ramfs`. From the host, replace `my-dev` with the exact Lima instance name:
+
+```sh
+limactl shell my-dev stat -f -c '%T' /var/tmp
+limactl shell my-dev df -h /var/tmp
+limactl shell my-dev test -w /var/tmp
+```
+
+- **Named per-session VM:** Run `/sandbox stop` in the Grip process that started the daemon. Then run `/sandbox start --name my-dev` from the updated Grip. The VM and workspace mount stay in place. Simply reconnecting can reuse the old daemon without changing its temporary directory.
+- **Shared VM:** Coordinate downtime with all clients, then run `/sandbox start --name my-dev --update` from the updated Grip. This disconnects every client. Verify the result below: if systemd retained the old transient service definition, the update can restart the old launcher. If verification shows the old launcher is still in use:
+  1. Prevent concurrent connections and updates. As the guest daemon user, stop the verified `grip-shared-lima-PORT.service` with `systemctl --user stop grip-shared-lima-PORT.service`. Replace `PORT` with the configured daemon port (usually `8787`).
+  2. Confirm that `systemctl --user show -p LoadState grip-shared-lima-PORT.service` reports `LoadState=not-found` and that the old daemon is no longer listening. If ownership or service state is uncertain, stop here and reconcile it before moving any files.
+  3. Privately archive only that port's stale `daemon-PORT.pid`, `daemon-PORT.identity`, and `daemon-PORT.token` files under `~/.cache/grip/shared-lima/`. Keep the `shared-lima` directory itself: Grip uses it to recognize the VM as shared.
+  4. With matching host and guest Grip versions, reconnect using `/sandbox start --name my-dev` **without** `--update` to create the new service.
+
+Verify from a **Grip sandbox shell**, not a separate Lima login shell:
+
+```sh
+printf 'TMPDIR=%s\nGOTMPDIR=%s\nJAVA_TOOL_OPTIONS=%s\n' "$TMPDIR" "$GOTMPDIR" "$JAVA_TOOL_OPTIONS"
+stat -f -c '%T' "$TMPDIR"
+```
+
+`TMPDIR` and `GOTMPDIR` should point to the same `/var/tmp/grip-lima.*` directory, and `JAVA_TOOL_OPTIONS` should include `-Djava.io.tmpdir=` for that path. The filesystem type must not be `tmpfs` or `ramfs`. This change does not move or delete existing files in `/tmp`; configure tools that hard-code `/tmp` separately.
 
 ## Lifecycle and security
 

@@ -92,6 +92,8 @@ it("checks the installed version, uses private persistent PID/token files and wa
 			expect(script).toContain("\"$grip_bin\" '/workspace'");
 			expect(script).toContain('--daemon-cwd "$2" --daemon-shared-parent "$2"');
 			expect(script).toContain("--daemon-allow-full-filesystem");
+			expect(script).toContain('TMPDIR="$(mktemp -d /var/tmp/grip-lima.XXXXXXXXXX)"');
+			expect(script).toContain("--daemon-env GOTMPDIR --daemon-env JAVA_TOOL_OPTIONS");
 			expect(script).not.toContain('kill "$pid"');
 			expect(script).not.toContain(secret);
 			expect(await service.ensureSharedDaemon(options, owner)).toBe(secret);

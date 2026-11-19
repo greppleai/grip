@@ -118,6 +118,9 @@ it("stages the verified local development binary instead of downloading a releas
 		const copy = runner.calls.find((args) => args[0] === "copy");
 		expect(copy).toContain(binary);
 		expect(runner.calls.some((args) => args.at(-1)?.includes("curl -fLsS"))).toBe(false);
+		const restart = runner.calls.find((args) => args.at(-1)?.includes("systemd-run --user"))?.at(-1) ?? "";
+		expect(restart).toContain('TMPDIR="$(mktemp -d /var/tmp/grip-lima.XXXXXXXXXX)"');
+		expect(restart).toContain("--daemon-env GOTMPDIR --daemon-env JAVA_TOOL_OPTIONS");
 		expect(runner.calls.some((args) => args.at(-1)?.includes("systemctl --user stop"))).toBe(true);
 	} finally {
 		await rm(parent, { recursive: true, force: true });
