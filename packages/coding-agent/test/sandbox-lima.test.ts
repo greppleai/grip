@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -31,16 +32,22 @@ class FakeLimaRunner implements SandboxRunner {
 	readonly calls: RunnerCall[] = [];
 	private readonly results: SandboxCommandResult[];
 	private readonly modeProbeResult: SandboxCommandResult;
+	private readonly daemonProbeResult: SandboxCommandResult;
 
-	constructor(results: SandboxCommandResult[], modeProbeResult = ok("GRIP_LEGACY_GUEST\n")) {
+	constructor(
+		results: SandboxCommandResult[],
+		modeProbeResult = ok("GRIP_LEGACY_GUEST\n"),
+		daemonProbeResult = ok("GRIP_SANDBOX_ABSENT\n"),
+	) {
 		this.results = [...results];
 		this.modeProbeResult = modeProbeResult;
+		this.daemonProbeResult = daemonProbeResult;
 	}
 
 	async run(command: string, args: string[], options?: SandboxCommandOptions): Promise<SandboxCommandResult> {
 		this.calls.push({ command, args, options });
 		if (args[0] === "shell" && args.at(-1)?.includes("GRIP_LEGACY_GUEST")) return this.modeProbeResult;
-		if (args[0] === "shell" && args.at(-1)?.includes("GRIP_SANDBOX_ABSENT")) return ok("GRIP_SANDBOX_ABSENT\n");
+		if (args[0] === "shell" && args.at(-1)?.includes("GRIP_SANDBOX_ABSENT")) return this.daemonProbeResult;
 		return this.results.shift() ?? { exitCode: 0, stdout: "", stderr: "" };
 	}
 }
@@ -67,7 +74,150 @@ function limaRecord(
 	});
 }
 
+function reconnectFailureRunner(name: string, scenario: string): FakeLimaRunner {
+	const mount = {
+		location: scenario === "wrong-mount" ? hostOther : hostProject,
+		mountPoint: "/workspace",
+		writable: scenario !== "read-only",
+	};
+	const forward = {
+		guestPort: 8787,
+		hostPort: 8787,
+		hostIP: scenario === "public-forward" ? "0.0.0.0" : "127.0.0.1",
+	};
+	const forwards = [forward];
+	if (scenario === "no-forward") forwards.length = 0;
+	if (scenario === "duplicate-forward") forwards.push(forward);
+	const record = JSON.stringify({
+		name,
+		status: scenario === "stopped" ? "Stopped" : "Running",
+		config: { mounts: [mount], portForwards: forwards },
+	});
+	let daemon = ok(`GRIP_SANDBOX_TOKEN=${"A".repeat(43)}=\n`);
+	if (scenario === "invalid-token") daemon = ok("GRIP_SANDBOX_TOKEN=invalid\n");
+	if (scenario === "absent-daemon") daemon = ok("GRIP_SANDBOX_ABSENT\n");
+	if (scenario === "uncertain-daemon") daemon = { exitCode: 31, stdout: "", stderr: "" };
+	const mode = scenario === "uncertain-mode" ? { exitCode: 42, stdout: "", stderr: "" } : ok("GRIP_LEGACY_GUEST\n");
+	return new FakeLimaRunner([ok(scenario === "missing" ? "[]" : record)], mode, daemon);
+}
+
 describe("Lima sandbox core", () => {
+	it("concurrently reconnects to a legacy daemon under a stale host lock without claiming ownership", async () => {
+		const name = `stale-${randomUUID()}`;
+		const owner = await acquireSharedLimaOwnerLock(name);
+		await owner.release();
+		const contents = JSON.stringify({ pid: 2147483647, nonce: "a".repeat(32) });
+		await writeFile(owner.path, contents, { mode: 0o600, flag: "wx" });
+		try {
+			const token = `${"A".repeat(43)}=`;
+			const runners = [0, 1].map(
+				() =>
+					new FakeLimaRunner(
+						[ok(limaRecord(name))],
+						ok("GRIP_LEGACY_GUEST\n"),
+						ok(`GRIP_SANDBOX_TOKEN=${token}\n`),
+					),
+			);
+			const allocator = vi.fn(async () => 8787);
+			const readiness = vi.fn(async () => {});
+			const tracked = new Map<string, { workspaceRoot: string; daemonPort: number; managed: boolean }>();
+			const services = runners.map(
+				(runner) =>
+					new LimaSandboxService({
+						runner,
+						portAllocator: allocator,
+						readinessWaiter: readiness,
+						managedInstances: tracked,
+						env: { GRIP_SANDBOX_CLEANUP: "remove" },
+					}),
+			);
+			const results = await Promise.all(
+				services.map((service) => service.start({ workspaceRoot: hostProject, name })),
+			);
+			for (const result of results) {
+				expect(result).toMatchObject({
+					containerName: name,
+					workspaceRoot: hostProject,
+					workspaceMountPath: "/workspace",
+					daemonUrl: "ws://127.0.0.1:8787/grip/workspace",
+					token,
+					ownsDaemon: false,
+				});
+			}
+			await Promise.all(services.map((service) => service.stopManagedInstances()));
+			expect(tracked.size).toBe(0);
+			expect(allocator).not.toHaveBeenCalled();
+			expect(readiness).toHaveBeenCalledTimes(2);
+			for (const runner of runners) {
+				expect(runner.calls.map((call) => call.args[0])).toEqual(["list", "shell", "shell"]);
+				expect(runner.calls[0]?.args).toEqual(["list", "--json", name]);
+				const scripts = runner.calls
+					.slice(1)
+					.map((call) => call.args.at(-1) ?? "")
+					.join("\n");
+				expect(scripts).not.toMatch(/nohup|\bmkdir\b|\brm\b|\bkill\s+(?!-0)|--daemon --daemon-host/);
+			}
+			expect(await readFile(owner.path, "utf8")).toBe(contents);
+		} finally {
+			await rm(owner.path, { force: true });
+		}
+	});
+
+	it.each([
+		"occupied",
+		"malformed",
+		"update",
+		"stopped",
+		"missing",
+		"wrong-mount",
+		"read-only",
+		"no-forward",
+		"public-forward",
+		"duplicate-forward",
+		"absent-daemon",
+		"uncertain-daemon",
+		"invalid-token",
+		"uncertain-mode",
+	])("fails closed for %s without lifecycle or ownership changes", async (scenario) => {
+		const name = `stale-${randomUUID()}`;
+		const owner = await acquireSharedLimaOwnerLock(name);
+		await owner.release();
+		const contents = JSON.stringify({
+			pid: scenario === "occupied" ? process.pid : 2147483647,
+			nonce: scenario === "malformed" ? "bad" : "a".repeat(32),
+		});
+		await writeFile(owner.path, contents, { mode: 0o600, flag: "wx" });
+		try {
+			const runner = reconnectFailureRunner(name, scenario);
+			const allocator = vi.fn(async () => 8787);
+			const readiness = vi.fn(async () => {});
+			const tracked = new Map<string, { workspaceRoot: string; daemonPort: number; managed: boolean }>();
+			const service = new LimaSandboxService({
+				runner,
+				portAllocator: allocator,
+				readinessWaiter: readiness,
+				managedInstances: tracked,
+				env: { GRIP_SANDBOX_CLEANUP: "remove" },
+			});
+			await expect(
+				service.start({ workspaceRoot: hostProject, name, update: scenario === "update" }),
+			).rejects.toThrow();
+			await service.stopManagedInstances();
+			expect(tracked.size).toBe(0);
+			expect(allocator).not.toHaveBeenCalled();
+			expect(readiness).not.toHaveBeenCalled();
+			if (["occupied", "malformed", "update"].includes(scenario)) expect(runner.calls).toHaveLength(0);
+			expect(runner.calls.every(({ args: [command] }) => command === "list" || command === "shell")).toBe(true);
+			const scripts = runner.calls
+				.filter((call) => call.args[0] === "shell")
+				.map((call) => call.args.at(-1) ?? "")
+				.join("\n");
+			expect(scripts).not.toMatch(/nohup|\bmkdir\b|\brm\b|\bkill\s+(?!-0)|--daemon --daemon-host/);
+			expect(await readFile(owner.path, "utf8")).toBe(contents);
+		} finally {
+			await rm(owner.path, { force: true });
+		}
+	});
 	it.each(["Running", "Stopped"])(
 		"selects a nested workspace in a %s legacy VM without remounting",
 		async (status) => {

@@ -64,6 +64,7 @@ export interface SandboxStartResult {
 	daemonUrl: string;
 	daemonUrlRedacted: string;
 	token: string;
+	ownsDaemon: boolean;
 	labels: Record<string, string>;
 }
 

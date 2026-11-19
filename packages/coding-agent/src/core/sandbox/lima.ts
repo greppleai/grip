@@ -5,7 +5,11 @@ import { basename, resolve } from "node:path";
 import { VERSION } from "../../config.ts";
 import { DAEMON_WEBSOCKET_PATH } from "../../daemon/config.ts";
 import { spawnProcess } from "../../utils/child-process.ts";
-import { acquireSharedLimaOwnerLock, type SharedLimaOwnerLock } from "../remote-workspace-protocol/lima-owner-lock.ts";
+import {
+	acquireSharedLimaOwnerLock,
+	type SharedLimaOwnerLock,
+	SharedLimaOwnerLockError,
+} from "../remote-workspace-protocol/lima-owner-lock.ts";
 import type { SettingsManager } from "../settings-manager.ts";
 import type {
 	SandboxCommandOptions,
@@ -242,6 +246,45 @@ function selectLimaSandbox(instances: SandboxContainer[], target: string | undef
 	return instances.find((instance) => instance.name === target || instance.id.startsWith(target));
 }
 type LegacyLimaGuestStateOperation = "attach" | "stop";
+type LimaGuestMode = "shared" | "legacy";
+
+const SHARED_DAEMON_DIRECTORY = "$HOME/.cache/grip/shared-lima";
+const NO_GUEST_MODE_TRANSITION =
+	'test ! -e "$HOME/.cache/grip/daemon-mode.lock" && test ! -L "$HOME/.cache/grip/daemon-mode.lock" || exit 28';
+const NO_LEGACY_DAEMON_FILES = [
+	'for legacy_file in "$HOME/.cache/grip"/sandbox-daemon-*.pid "$HOME/.cache/grip"/sandbox-daemon-*.log; do',
+	'  if test -e "$legacy_file" || test -L "$legacy_file"; then exit 27; fi',
+	"done",
+];
+// Boot ID plus /proc start time rejects recycled PIDs; kill -0 alone also accepts zombies.
+const LIVE_PROCESS_START_TIME = `awk '{ sub(/^.*\\) /, ""); if ($1 == "Z" || $1 == "X") exit 1; print $20 }'`;
+const SHARED_DAEMON_IDENTITY_CHECKS = [
+	'test -f "$token_file" && test -f "$pid_file" && test -f "$identity_file" || exit 21',
+	'for file in "$token_file" "$pid_file" "$identity_file"; do test "$(stat -c %a "$file")" = 600 || exit 22; done',
+	'pid="$(cat "$pid_file")"',
+	"case \"$pid\" in ''|0|*[!0-9]*) exit 23;; esac",
+	'kill -0 "$pid" || exit 24',
+	`start_time="$(${LIVE_PROCESS_START_TIME} "/proc/$pid/stat")" || exit 25`,
+	'boot_id="$(cat /proc/sys/kernel/random/boot_id)" || exit 25',
+	'test -n "$start_time" && test -n "$boot_id" && test "$(cat "$identity_file")" = "$boot_id:$start_time" || exit 25',
+	'test "$(systemctl --user show -P MainPID "$unit")" = "$pid" && systemctl --user is-active --quiet "$unit" || exit 25',
+	'token="$(cat "$token_file")"',
+	`test "$(${LIVE_PROCESS_START_TIME} "/proc/$pid/stat")" = "$start_time" || exit 25`,
+];
+
+function sharedDaemonFiles(port: number): string[] {
+	return [
+		`token_file="$directory/daemon-${port}.token"`,
+		`pid_file="$directory/daemon-${port}.pid"`,
+		`identity_file="$directory/daemon-${port}.identity"`,
+		`log_file="$directory/daemon-${port}.log"`,
+		`start_lock="$directory/daemon-${port}.starting"`,
+		`unit="grip-shared-lima-${port}.service"`,
+		'test ! -L "$token_file"; test ! -L "$pid_file"; test ! -L "$identity_file"; test ! -L "$log_file"',
+		'if test -e "$log_file"; then test -f "$log_file" && test "$(stat -c %a "$log_file")" = 600 || exit 22; fi',
+		'test ! -e "$start_lock" && test ! -L "$start_lock" || exit 26',
+	];
+}
 
 export class LimaSandboxService {
 	private readonly settingsManager: Pick<SettingsManager, "getSandboxSettings"> | undefined;
@@ -325,6 +368,47 @@ export class LimaSandboxService {
 			daemonUrl: `ws://${urlHost(config.daemonHostBind)}:${config.daemonPort}${DAEMON_WEBSOCKET_PATH}`,
 		};
 	}
+	private async assertSharedDaemonVersion(config: SandboxConfig, name: string, useLocalPath: boolean): Promise<void> {
+		const version = await this.runner.run(config.limaBinary, [
+			"shell",
+			"--tty=false",
+			name,
+			"sh",
+			"-lc",
+			useLocalPath ? '"$HOME/.local/bin/grip" --version' : "grip --version",
+		]);
+		if (version.exitCode !== 0 || version.stdout.trim() !== VERSION) {
+			throw new Error("Shared Lima grip version mismatch or binary missing; install the matching version manually");
+		}
+	}
+
+	private async readSharedDaemonToken(config: SandboxConfig, name: string, script: string): Promise<string> {
+		const result = await this.runner.run(config.limaBinary, ["shell", "--tty=false", name, "sh", "-lc", script]);
+		// Never include stdout/stderr from a credential-bearing shell in an error.
+		if (result.exitCode !== 0)
+			throw new Error("Shared Lima daemon state is uncertain; reconcile guest PID/token files manually");
+		const token = result.stdout.match(/(?:^|\n)GRIP_SHARED_TOKEN=([A-Za-z0-9+/]{43}=)(?:\r?\n|$)/)?.[1];
+		if (!token) throw new Error("Shared Lima daemon did not return a valid credential; reconcile manually");
+		await this.readinessWaiter(config.daemonHostBind, config.daemonPort);
+		return token;
+	}
+
+	private async reconnectSharedDaemon(name: string): Promise<string> {
+		const config = this.resolveConfig();
+		await this.assertSharedDaemonVersion(config, name, Boolean(this.env.GRIP_SANDBOX_GUEST_BINARY));
+		const script = [
+			"set -eu",
+			NO_GUEST_MODE_TRANSITION,
+			`directory="${SHARED_DAEMON_DIRECTORY}"`,
+			'test -d "$directory" && test ! -L "$directory" && test "$(stat -c %a "$directory")" = 700 || exit 22',
+			...NO_LEGACY_DAEMON_FILES,
+			...sharedDaemonFiles(config.daemonPort),
+			...SHARED_DAEMON_IDENTITY_CHECKS,
+			"printf 'GRIP_SHARED_TOKEN=%s\\n' \"$token\"",
+		].join("\n");
+		return this.readSharedDaemonToken(config, name, script);
+	}
+
 	/** Reinspect and reuse the supervised guest daemon under the exclusive named-VM owner lock. */
 	async ensureSharedDaemon(
 		options: SharedLimaInstanceOptions,
@@ -338,36 +422,18 @@ export class LimaSandboxService {
 		const local = this.env.GRIP_SANDBOX_GUEST_BINARY
 			? await inspectLocalGuestBinary(this.env.GRIP_SANDBOX_GUEST_BINARY)
 			: undefined;
-		const versionArgs = [
-			"shell",
-			"--tty=false",
-			options.instanceName,
-			"sh",
-			"-lc",
-			local || updated ? '"$HOME/.local/bin/grip" --version' : "grip --version",
-		];
-		const version = await this.runner.run(config.limaBinary, versionArgs);
-		if (version.exitCode !== 0 || version.stdout.trim() !== VERSION) {
-			throw new Error("Shared Lima grip version mismatch or binary missing; install the matching version manually");
-		}
+		await this.assertSharedDaemonVersion(config, options.instanceName, Boolean(local) || updated);
 		await owner.assertHeld();
-		const directory = "$HOME/.cache/grip/shared-lima";
-		// /proc start time plus boot ID distinguishes a recycled PID or a rebooted guest.
-		// kill -0 also succeeds for zombies, which must never be reused as a live daemon.
-		const processStartTime = `awk '{ sub(/^.*\\) /, ""); if ($1 == "Z" || $1 == "X") exit 1; print $20 }'`;
 		const script = [
 			"set -eu",
 			"umask 077",
-			`directory="${directory}"`,
+			`directory="${SHARED_DAEMON_DIRECTORY}"`,
 			// Both current modes reserve the guest transition; a crashed reservation is operator-owned.
 			'mkdir -p "$HOME/.cache/grip"',
 			'mode_lock="$HOME/.cache/grip/daemon-mode.lock"',
 			'mkdir "$mode_lock" || exit 28',
 			"trap 'rmdir \"$mode_lock\" 2>/dev/null || true' EXIT",
-			// A legacy per-session daemon may own this VM or its port. Do not start a second daemon.
-			'for legacy_file in "$HOME/.cache/grip"/sandbox-daemon-*.pid "$HOME/.cache/grip"/sandbox-daemon-*.log; do',
-			'  if test -e "$legacy_file" || test -L "$legacy_file"; then exit 27; fi',
-			"done",
+			...NO_LEGACY_DAEMON_FILES,
 			// A transient user service must outlive the Lima SSH session. Do not mutate
 			// private state unless the guest manager is running and linger was enabled by an operator.
 			"command -v systemd-run >/dev/null && systemctl --user show-environment >/dev/null || exit 29",
@@ -375,28 +441,9 @@ export class LimaSandboxService {
 			`mkdir -p "$directory"; test ! -L "$directory"; chmod 700 "$directory"`,
 			'rmdir "$mode_lock" || exit 28',
 			"trap - EXIT",
-			`token_file="$directory/daemon-${config.daemonPort}.token"`,
-			`pid_file="$directory/daemon-${config.daemonPort}.pid"`,
-			`identity_file="$directory/daemon-${config.daemonPort}.identity"`,
-			`log_file="$directory/daemon-${config.daemonPort}.log"`,
-			`start_lock="$directory/daemon-${config.daemonPort}.starting"`,
-			`unit="grip-shared-lima-${config.daemonPort}.service"`,
-			'test ! -L "$token_file"; test ! -L "$pid_file"; test ! -L "$identity_file"; test ! -L "$log_file"',
-			'if test -e "$log_file"; then test -f "$log_file" && test "$(stat -c %a "$log_file")" = 600 || exit 22; fi',
-			'test ! -e "$start_lock" && test ! -L "$start_lock" || exit 26',
+			...sharedDaemonFiles(config.daemonPort),
 			'if test -e "$token_file" || test -e "$pid_file" || test -e "$identity_file"; then',
-			'  test -f "$token_file" && test -f "$pid_file" && test -f "$identity_file" || exit 21',
-			'  test "$(stat -c %a "$token_file")" = 600 || exit 22',
-			'  test "$(stat -c %a "$pid_file")" = 600 || exit 22',
-			'  test "$(stat -c %a "$identity_file")" = 600 || exit 22',
-			'  pid="$(cat "$pid_file")"',
-			"  case \"$pid\" in ''|*[!0-9]*) exit 23;; esac",
-			'  kill -0 "$pid" || exit 24',
-			`  start_time="$(${processStartTime} "/proc/$pid/stat")" || exit 25`,
-			'  boot_id="$(cat /proc/sys/kernel/random/boot_id)" || exit 25',
-			'  test -n "$start_time" && test -n "$boot_id" && test "$(cat "$identity_file")" = "$boot_id:$start_time" || exit 25',
-			'  test "$(systemctl --user show -P MainPID "$unit")" = "$pid" && systemctl --user is-active --quiet "$unit" || exit 25',
-			'  token="$(cat "$token_file")"',
+			...SHARED_DAEMON_IDENTITY_CHECKS,
 			"else",
 			'  mkdir "$start_lock" || exit 26',
 			"  trap 'rmdir \"$start_lock\" 2>/dev/null || true' EXIT",
@@ -419,7 +466,7 @@ export class LimaSandboxService {
 			'  systemctl --user is-active --quiet "$unit" || exit 25',
 			'  printf \'%s\' "$pid" >"$pid_file"',
 			'  chmod 600 "$pid_file"',
-			`  start_time="$(${processStartTime} "/proc/$pid/stat")" || exit 25`,
+			`  start_time="$(${LIVE_PROCESS_START_TIME} "/proc/$pid/stat")" || exit 25`,
 			'  boot_id="$(cat /proc/sys/kernel/random/boot_id)" || exit 25',
 			'  test -n "$start_time" && test -n "$boot_id" || exit 25',
 			'  printf \'%s:%s\' "$boot_id" "$start_time" >"$identity_file"',
@@ -429,14 +476,7 @@ export class LimaSandboxService {
 			"fi",
 			"printf 'GRIP_SHARED_TOKEN=%s\\n' \"$token\"",
 		].join("\n");
-		const args = ["shell", "--tty=false", options.instanceName, "sh", "-lc", script];
-		const result = await this.runner.run(config.limaBinary, args);
-		// Never include stdout/stderr from a credential-bearing shell in an error.
-		if (result.exitCode !== 0)
-			throw new Error("Shared Lima daemon state is uncertain; reconcile guest PID/token files manually");
-		const token = result.stdout.match(/(?:^|\n)GRIP_SHARED_TOKEN=([A-Za-z0-9+/]{43}=)(?:\r?\n|$)/)?.[1];
-		if (!token) throw new Error("Shared Lima daemon did not return a valid credential; reconcile manually");
-		await this.readinessWaiter(config.daemonHostBind, config.daemonPort);
+		const token = await this.readSharedDaemonToken(config, options.instanceName, script);
 		// Readiness can outlive the owner. Never hand a guest credential to a lost owner.
 		await owner.assertHeld();
 		return token;
@@ -681,7 +721,7 @@ export class LimaSandboxService {
 		return token;
 	}
 
-	private async prepareExistingInstance(
+	private async inspectLegacyMount(
 		config: SandboxConfig,
 		record: LimaListRecord,
 		name: string,
@@ -692,11 +732,16 @@ export class LimaSandboxService {
 		if (mounts.length !== 1 || !mount?.location || !mount.writable) {
 			throw new Error(`Lima instance ${name} requires one writable workspace mount at ${config.workspaceMountPath}`);
 		}
-		const binding = await resolveSharedLimaWorkspace(
-			resolve(mount.location),
-			config.workspaceMountPath,
-			workspaceRoot,
-		);
+		return resolveSharedLimaWorkspace(resolve(mount.location), config.workspaceMountPath, workspaceRoot);
+	}
+
+	private async prepareExistingInstance(
+		config: SandboxConfig,
+		record: LimaListRecord,
+		name: string,
+		workspaceRoot: string,
+	): Promise<SharedLimaWorkspaceBinding> {
+		const binding = await this.inspectLegacyMount(config, record, name, workspaceRoot);
 		const status = record.status?.toLowerCase();
 		if (status === "running") return binding;
 		if (status !== "stopped") {
@@ -723,62 +768,136 @@ export class LimaSandboxService {
 			if (options.update) throw new Error("Sandbox update requires a named running shared VM");
 			return this.startWithLegacyInstance(options);
 		}
-		// Coordinate VM resume/create as well as guest daemon launch with a named shared owner.
-		// A stale lock is ambiguous, not permission to start an existing VM.
-		const owner = await acquireSharedLimaOwnerLock(requestedName);
+		// Only the owner can create/resume a VM or mutate its daemon lifecycle.
+		let owner: SharedLimaOwnerLock;
+		try {
+			owner = await acquireSharedLimaOwnerLock(requestedName);
+		} catch (error) {
+			if (!(error instanceof SharedLimaOwnerLockError) || error.state !== "stale" || options.update) throw error;
+			return this.reconnectNamedInstance(options, requestedName, error);
+		}
 		try {
 			const config = this.resolveConfig(options);
 			const existing = await this.findExactLegacyInstance(config, requestedName);
-			if (options.update && existing?.status?.toLowerCase() !== "running") {
-				throw new Error("Sandbox update requires an existing running shared VM");
-			}
 			if (existing?.status?.toLowerCase() !== "running") {
+				if (options.update) throw new Error("Sandbox update requires an existing running shared VM");
 				return await this.startWithLegacyInstance(options, { record: existing });
 			}
-			// Select the guest mode before any legacy setup. An unreadable or ambiguous
-			// marker is not permission to start a per-session daemon in this VM.
-			const probe = await this.runner.run(config.limaBinary, [
-				"shell",
-				"--tty=false",
-				requestedName,
-				"sh",
-				"-lc",
-				'if test -e "$HOME/.cache/grip/shared-lima" || test -L "$HOME/.cache/grip/shared-lima"; then if test -d "$HOME/.cache/grip/shared-lima" && test ! -L "$HOME/.cache/grip/shared-lima"; then printf "GRIP_SHARED_GUEST\\n"; else exit 42; fi; else printf "GRIP_LEGACY_GUEST\\n"; fi',
-			]);
-			if (probe.exitCode !== 0) throw new Error("Lima guest daemon mode is uncertain; refusing named attach");
-			if (probe.stdout.trim() === "GRIP_LEGACY_GUEST") {
+			if ((await this.probeNamedGuestMode(config, requestedName)) === "legacy") {
 				if (options.update)
 					throw new Error("Sandbox update requires a supervised shared guest; legacy guest is unchanged");
 				return await this.startWithLegacyInstance(options, { record: existing });
 			}
-			if (probe.stdout.trim() !== "GRIP_SHARED_GUEST") {
-				throw new Error("Lima guest daemon mode is uncertain; refusing named attach");
-			}
 			await owner.assertHeld();
-			const mount = findWorkspaceMount(existing, config.workspaceMountPath);
-			if (!mount?.location) throw new Error("Shared Lima instance mount is unavailable; refusing attach");
-			const sharedOptions = {
-				instanceName: requestedName,
-				hostParent: resolve(mount.location),
-				hostRoot: resolve(options.workspaceRoot),
-			};
+			const sharedOptions = this.namedSharedOptions(config, existing, requestedName, options.workspaceRoot);
 			const inspection = await this.inspectSharedInstance(sharedOptions);
 			if (options.update) await this.updateSharedDaemon(sharedOptions, owner);
 			const token = await this.ensureSharedDaemon(sharedOptions, owner, options.update);
-			const daemonUrl = `grip+${inspection.daemonUrl}?root=${encodeURIComponent(inspection.guestRoot)}`;
-			return {
-				containerId: requestedName,
-				containerName: requestedName,
-				workspaceRoot: inspection.hostRoot,
-				workspaceMountPath: inspection.guestRoot,
-				daemonUrl,
-				daemonUrlRedacted: inspection.daemonUrl,
-				token,
-				labels: { [`${SANDBOX_LABEL_PREFIX}.runtime`]: "lima", [`${SANDBOX_LABEL_PREFIX}.version`]: VERSION },
-			};
+			return this.sharedStartResult(inspection, token);
 		} finally {
 			await owner.release();
 		}
+	}
+
+	private async probeNamedGuestMode(
+		config: SandboxConfig,
+		name: string,
+		reconnectOnly = false,
+	): Promise<LimaGuestMode> {
+		// An interrupted guest mode transition is not proof that either daemon is safe to reuse.
+		const checks = reconnectOnly ? [NO_GUEST_MODE_TRANSITION] : [];
+		checks.push(
+			'if test -e "$HOME/.cache/grip/shared-lima" || test -L "$HOME/.cache/grip/shared-lima"; then if test -d "$HOME/.cache/grip/shared-lima" && test ! -L "$HOME/.cache/grip/shared-lima"; then printf "GRIP_SHARED_GUEST\\n"; else exit 42; fi; else printf "GRIP_LEGACY_GUEST\\n"; fi',
+		);
+		const probe = await this.runner.run(config.limaBinary, [
+			"shell",
+			"--tty=false",
+			name,
+			"sh",
+			"-lc",
+			checks.join("\n"),
+		]);
+		if (probe.exitCode === 0) {
+			if (probe.stdout.trim() === "GRIP_LEGACY_GUEST") return "legacy";
+			if (probe.stdout.trim() === "GRIP_SHARED_GUEST") return "shared";
+		}
+		throw new Error("Lima guest daemon mode is uncertain; refusing named attach");
+	}
+
+	private namedSharedOptions(
+		config: SandboxConfig,
+		record: LimaListRecord,
+		name: string,
+		workspaceRoot: string,
+	): SharedLimaInstanceOptions {
+		const mount = findWorkspaceMount(record, config.workspaceMountPath);
+		if (!mount?.location) throw new Error("Shared Lima instance mount is unavailable; refusing attach");
+		return { instanceName: name, hostParent: resolve(mount.location), hostRoot: resolve(workspaceRoot) };
+	}
+
+	private sharedStartResult(inspection: SharedLimaInstanceInspection, token: string): SandboxStartResult {
+		return {
+			containerId: inspection.instanceName,
+			containerName: inspection.instanceName,
+			workspaceRoot: inspection.hostRoot,
+			workspaceMountPath: inspection.guestRoot,
+			daemonUrl: `grip+${inspection.daemonUrl}?root=${encodeURIComponent(inspection.guestRoot)}`,
+			daemonUrlRedacted: inspection.daemonUrl,
+			token,
+			ownsDaemon: false,
+			labels: { [`${SANDBOX_LABEL_PREFIX}.runtime`]: "lima", [`${SANDBOX_LABEL_PREFIX}.version`]: VERSION },
+		};
+	}
+
+	/** Reuse only; no lock removal, VM start, guest install, daemon launch, or ownership claim. */
+	private async reconnectNamedInstance(
+		options: SandboxStartOptions,
+		name: string,
+		lockError: SharedLimaOwnerLockError,
+	): Promise<SandboxStartResult> {
+		try {
+			return await this.reconnectRunningInstance(options, name);
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			throw new Error(redactSecrets(`${lockError.message}; reconnect-only attempt failed: ${detail}`));
+		}
+	}
+
+	private async reconnectRunningInstance(options: SandboxStartOptions, name: string): Promise<SandboxStartResult> {
+		const config = this.resolveConfig(options);
+		const record = await this.findExactLegacyInstance(config, name);
+		if (record?.status?.toLowerCase() !== "running") throw new Error(`Lima instance ${name} is not running`);
+		if ((await this.probeNamedGuestMode(config, name, true)) === "shared") {
+			const inspection = await this.inspectSharedInstance(
+				this.namedSharedOptions(config, record, name, options.workspaceRoot),
+			);
+			return this.sharedStartResult(inspection, await this.reconnectSharedDaemon(name));
+		}
+		const binding = await this.inspectLegacyMount(config, record, name, resolve(options.workspaceRoot));
+		const forward = findDaemonForward(record, config.daemonPort);
+		const port = forward?.hostPort;
+		const host = forward?.hostIP;
+		if (
+			port === undefined ||
+			!Number.isSafeInteger(port) ||
+			port < 1 ||
+			port > 65535 ||
+			(host !== "127.0.0.1" && host !== "::1") ||
+			record.config?.portForwards?.filter((entry) => entry.hostPort === port || entry.guestPort === port).length !==
+				1
+		) {
+			throw new Error(`Lima instance ${name} has no unambiguous loopback daemon forward`);
+		}
+		const daemonConfig: SandboxConfig = {
+			...config,
+			daemonPort: port,
+			daemonHostBind: host,
+			workspaceMountPath: binding.guestRoot,
+		};
+		const token = await this.reuseDaemon(daemonConfig, name, binding.guestParent);
+		if (!token) throw new Error("No existing Lima daemon to reconnect to");
+		await this.readinessWaiter(host, port);
+		return this.legacyStartResult(daemonConfig, name, binding, token, false);
 	}
 
 	private async startWithLegacyInstance(
@@ -839,7 +958,17 @@ export class LimaSandboxService {
 				managed,
 			});
 		}
-		const daemonUrl = `ws://${urlHost(daemonConnectionHost(config.daemonHostBind))}:${daemonPort}${DAEMON_WEBSOCKET_PATH}`;
+		return this.legacyStartResult(effectiveConfig, name, binding, token, !reusedToken);
+	}
+
+	private legacyStartResult(
+		config: SandboxConfig,
+		name: string,
+		binding: SharedLimaWorkspaceBinding,
+		token: string,
+		ownsDaemon: boolean,
+	): SandboxStartResult {
+		const daemonUrl = `ws://${urlHost(daemonConnectionHost(config.daemonHostBind))}:${config.daemonPort}${DAEMON_WEBSOCKET_PATH}`;
 		return {
 			containerId: name,
 			containerName: name,
@@ -848,6 +977,7 @@ export class LimaSandboxService {
 			daemonUrl,
 			daemonUrlRedacted: daemonUrl,
 			token,
+			ownsDaemon,
 			labels: { [`${SANDBOX_LABEL_PREFIX}.runtime`]: "lima", [`${SANDBOX_LABEL_PREFIX}.version`]: VERSION },
 		};
 	}
