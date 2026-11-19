@@ -148,6 +148,7 @@ function createStartResult(): SandboxStartResult {
 		daemonUrlRedacted: "ws://127.0.0.1:49153/pi/workspace",
 		token: "secret-token",
 		labels: {},
+		ownsDaemon: true,
 	};
 }
 
@@ -266,6 +267,7 @@ describe("hidden sandbox command", () => {
 				daemonUrlRedacted: "ws://127.0.0.1:49153/pi/workspace",
 				token: "secret-token",
 				labels: {},
+				ownsDaemon: true,
 			}),
 		).toContain("Sandbox started: grip-sandbox-project-hash (abc123)");
 		expect(
@@ -484,11 +486,114 @@ describe("hidden sandbox command", () => {
 		expect(showError).toHaveBeenCalledWith("disconnect failed");
 	});
 
+	it("retains legacy attach-only ownership across session restoration and detaches without stopping", async () => {
+		const result = {
+			...createStartResult(),
+			containerId: "legacy-vm",
+			containerName: "legacy-vm",
+			ownsDaemon: false,
+		};
+		const stop = vi.fn(async () => ({ status: "stopped" as const, container: createContainer() }));
+		const clearRemoteSandbox = vi.fn(async () => {});
+		const context: SandboxHandlerContext = {
+			session: {
+				activateSandboxDaemon: vi.fn(async () => ({
+					type: "remote" as const,
+					cwd: "/workspace",
+					url: result.daemonUrl,
+					protocol: "ws" as const,
+					configured: true as const,
+					workspace: { id: "workspace", root: "/workspace", pathFlavor: "posix" as const },
+				})),
+				getToolBackendInfo: () => ({ type: "local", cwd: "/host/project" }),
+				clearRemoteSandbox,
+			},
+			activeSession: { getCwd: () => "/host/project", getSessionId: () => "session-a" },
+			sessionSandboxStates: new Map(),
+			managedLimaInstances: new Map(),
+			createLimaSandboxService: () => ({
+				resolveConfig: () => ({ workspaceMountPath: "/workspace" }),
+				start: vi.fn(async () => result),
+				list: vi.fn(),
+				stop,
+			}),
+			refreshUiAfterBackendChange: vi.fn(),
+			updateToolBackendStatus: vi.fn(),
+			formatToolBackendStatus: () => "remote",
+			showStatus: vi.fn(),
+			showWarning: vi.fn(),
+			showError: vi.fn(),
+		};
+		Object.setPrototypeOf(context, InteractiveMode.prototype);
+		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start --name legacy-vm");
+		expect(context.sessionSandboxStates.get("/host/project\0session-a")).toMatchObject({ ownsDaemon: false });
+		await interactiveModePrototype.restoreCurrentSessionSandbox.call(context);
+		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox stop abc123");
+		expect(stop).toHaveBeenCalledOnce();
+		expect(clearRemoteSandbox).not.toHaveBeenCalled();
+		await interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox stop legacy-vm");
+		expect(stop).toHaveBeenCalledOnce();
+		expect(clearRemoteSandbox).toHaveBeenCalledOnce();
+		expect(context.sessionSandboxStates.size).toBe(0);
+		expect(context.activeSandboxContainerId).toBeUndefined();
+		expect(context.showError).not.toHaveBeenCalled();
+	});
+
+	it("does not stop a legacy attach-only VM when activation fails", async () => {
+		vi.useFakeTimers();
+		try {
+			const result = {
+				...createStartResult(),
+				containerId: "legacy-vm",
+				containerName: "legacy-vm",
+				ownsDaemon: false,
+			};
+			const stop = vi.fn();
+			const activateSandboxDaemon = vi.fn(async () => {
+				throw new Error("activation failed");
+			});
+			const context: SandboxHandlerContext = {
+				session: {
+					activateSandboxDaemon,
+					getToolBackendInfo: () => ({ type: "local", cwd: "/host/project" }),
+					clearRemoteSandbox: vi.fn(),
+				},
+				activeSession: { getCwd: () => "/host/project", getSessionId: () => "session-a" },
+				sessionSandboxStates: new Map(),
+				managedLimaInstances: new Map(),
+				createLimaSandboxService: () => ({
+					resolveConfig: () => ({ workspaceMountPath: "/workspace" }),
+					start: vi.fn(async () => result),
+					list: vi.fn(),
+					stop,
+				}),
+				refreshUiAfterBackendChange: vi.fn(),
+				updateToolBackendStatus: vi.fn(),
+				formatToolBackendStatus: () => "remote",
+				showStatus: vi.fn(),
+				showWarning: vi.fn(),
+				showError: vi.fn(),
+			};
+			Object.setPrototypeOf(context, InteractiveMode.prototype);
+			const command = interactiveModePrototype.handleSandboxCommand.call(context, "/sandbox start --name legacy-vm");
+			await vi.runAllTimersAsync();
+			await command;
+			expect(activateSandboxDaemon).toHaveBeenCalledTimes(10);
+			expect(stop).not.toHaveBeenCalled();
+			expect(context.activeSandboxContainerId).toBeUndefined();
+			expect(context.sessionSandboxStates.size).toBe(0);
+			expect(context.showError).toHaveBeenCalledWith("activation failed");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("detaches shared named Lima sessions through the interactive command without stopping the VM", async () => {
 		const sharedResult = {
 			...createStartResult(),
 			containerId: "shared-dev",
 			containerName: "shared-dev",
+			ownsDaemon: false,
 			workspaceMountPath: "/workspace/project",
 			daemonUrl: "grip+ws://127.0.0.1:8787/grip/workspace?root=%2Fworkspace%2Fproject",
 		};

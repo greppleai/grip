@@ -51,7 +51,7 @@ it("requires manual reconciliation for dead, malformed or replaced owner locks",
 	const base = await mkdtemp(join(tmpdir(), "grip-shared-lima-stale-"));
 	try {
 		const owner = await acquireSharedLimaOwnerLock("shared-test", base);
-		await writeFile(owner.path, JSON.stringify({ pid: 2147483647, nonce: "dead" }), { mode: 0o600 });
+		await writeFile(owner.path, JSON.stringify({ pid: 2147483647, nonce: "a".repeat(32) }), { mode: 0o600 });
 		await expect(acquireSharedLimaOwnerLock("shared-test", base)).rejects.toThrow("stale");
 		await expect(owner.release()).rejects.toThrow("contents changed");
 		await rm(owner.path);
@@ -67,6 +67,22 @@ it("requires manual reconciliation for dead, malformed or replaced owner locks",
 	}
 });
 
+it.each(["dead", "A".repeat(32), "g".repeat(32), "a".repeat(31), "a".repeat(33), ""])(
+	"treats a dead PID with malformed nonce %s as unverifiable",
+	async (nonce) => {
+		const base = await mkdtemp(join(tmpdir(), "grip-shared-lima-malformed-"));
+		try {
+			const owner = await acquireSharedLimaOwnerLock("shared-test", base);
+			await owner.release();
+			const contents = JSON.stringify({ pid: 2147483647, nonce });
+			await writeFile(owner.path, contents, { mode: 0o600, flag: "wx" });
+			await expect(acquireSharedLimaOwnerLock("shared-test", base)).rejects.toThrow("unverifiable");
+			expect(await readFile(owner.path, "utf8")).toBe(contents);
+		} finally {
+			await rm(base, { recursive: true, force: true });
+		}
+	},
+);
 it.skipIf(process.platform === "win32")("rejects unsafe host owner directory replacements", async () => {
 	const base = await mkdtemp(join(tmpdir(), "grip-lima-owner-dir-"));
 	try {

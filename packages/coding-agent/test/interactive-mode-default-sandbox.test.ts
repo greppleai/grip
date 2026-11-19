@@ -35,6 +35,7 @@ function createMode(name?: string, backend: WorkspaceBackend = "local", profile?
 			daemonUrlRedacted: "ws://127.0.0.1:8787/pi/workspace",
 			token: "test-token",
 			labels: {},
+			ownsDaemon: false,
 		}),
 	);
 	const showWarning = vi.fn();

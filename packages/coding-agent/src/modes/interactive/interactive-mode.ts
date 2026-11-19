@@ -291,6 +291,7 @@ interface SessionSandboxState {
 	hostWorkspaceRoot?: string;
 	containerId?: string;
 	containerName?: string;
+	ownsDaemon: boolean;
 }
 
 function getSessionSandboxKey(session: Session): string {
@@ -7323,7 +7324,7 @@ export class InteractiveMode {
 		const info = await this.session.activateSandboxDaemon({ url, token, expectedCwd });
 		this.activeSandboxContainerId = undefined;
 		this.activeSandboxBackendConnected = true;
-		this.sessionSandboxStates.set(sessionKey, { type: "daemon", url, token, expectedCwd });
+		this.sessionSandboxStates.set(sessionKey, { type: "daemon", url, token, expectedCwd, ownsDaemon: false });
 		this.refreshUiAfterBackendChange();
 		this.updateToolBackendStatus();
 		this.showStatus([`Sandbox attached: ${redactSecrets(url)}`, this.formatToolBackendStatus(info)].join("\n"));
@@ -7377,8 +7378,8 @@ export class InteractiveMode {
 
 		const activationError =
 			lastActivationError instanceof Error ? lastActivationError : new Error(String(lastActivationError));
-		if (result.daemonUrl.startsWith("grip+ws:")) {
-			// A shared-VM attach owns only its channel, never the VM or guest daemon.
+		if (!result.ownsDaemon) {
+			// Attach-only sessions do not own the VM or guest daemon.
 			this.activeSandboxContainerId = undefined;
 			this.activeSandboxBackendConnected = false;
 			throw activationError;
@@ -7433,6 +7434,7 @@ export class InteractiveMode {
 				hostWorkspaceRoot: result.workspaceRoot,
 				containerId: result.containerId,
 				containerName: result.containerName,
+				ownsDaemon: result.ownsDaemon,
 			});
 			this.refreshUiAfterBackendChange();
 			this.updateToolBackendStatus();
@@ -7512,7 +7514,7 @@ export class InteractiveMode {
 		}
 		const attached = this.sessionSandboxStates.get(sessionKey);
 		if (
-			attached?.url?.startsWith("grip+ws:") &&
+			attached?.ownsDaemon === false &&
 			attached.containerId === this.activeSandboxContainerId &&
 			(!target || target === attached.containerId)
 		) {
@@ -7522,7 +7524,7 @@ export class InteractiveMode {
 			this.activeSandboxBackendConnected = false;
 			this.refreshUiAfterBackendChange();
 			this.updateToolBackendStatus();
-			this.showStatus("Shared sandbox detached; VM and guest daemon remain running");
+			this.showStatus("Sandbox detached; VM and guest daemon remain running");
 			return;
 		}
 		const result = await service.stop({

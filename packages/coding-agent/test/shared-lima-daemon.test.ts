@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,8 +18,10 @@ class DaemonRunner implements SandboxRunner {
 	version = VERSION;
 	failDaemon = false;
 	readonly parent: string;
-	constructor(parent: string) {
+	readonly name: string;
+	constructor(parent: string, name = "shared-test") {
 		this.parent = parent;
+		this.name = name;
 	}
 	async run(_binary: string, args: string[]): Promise<SandboxCommandResult> {
 		this.calls.push(args);
@@ -26,7 +29,7 @@ class DaemonRunner implements SandboxRunner {
 			return {
 				exitCode: 0,
 				stdout: JSON.stringify({
-					name: "shared-test",
+					name: this.name,
 					status: "Running",
 					config: {
 						mounts: [{ location: this.parent, mountPoint: "/workspace", writable: true }],
@@ -252,12 +255,15 @@ it.skipIf(!existsSync("/proc/sys/kernel/random/boot_id"))(
 			);
 			await chmod(grip, 0o700);
 			await installFakeSystemd(bin);
-			const owner = await acquireSharedLimaOwnerLock("shared-test", base);
+			const name = `stale-shared-${randomUUID()}`;
+			const owner = await acquireSharedLimaOwnerLock(name, base);
 			try {
-				const runner = new DaemonRunner(parent);
+				const runner = new DaemonRunner(parent, name);
 				const original = runner.run.bind(runner);
 				runner.run = async (binary, args) => {
-					if (!args.at(-1)?.startsWith("set -eu\n")) return original(binary, args);
+					const script = args.at(-1) ?? "";
+					if (!script.startsWith("set -eu\n") && !script.includes("GRIP_SHARED_GUEST"))
+						return original(binary, args);
 					const result = spawnSync("sh", ["-c", args.at(-1) ?? ""], {
 						encoding: "utf8",
 						timeout: 5000,
@@ -274,7 +280,7 @@ it.skipIf(!existsSync("/proc/sys/kernel/random/boot_id"))(
 					return { exitCode: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 				};
 				const service = new LimaSandboxService({ runner, readinessWaiter: async () => {} });
-				const options = { instanceName: "shared-test", hostParent: parent, hostRoot: parent };
+				const options = { instanceName: name, hostParent: parent, hostRoot: parent };
 				const directory = join(home, ".cache", "grip", "shared-lima");
 				const target = join(base, "keep-intact");
 				const legacyDirectory = join(home, ".cache", "grip");
@@ -392,6 +398,31 @@ it.skipIf(!existsSync("/proc/sys/kernel/random/boot_id"))(
 				expect(await service.ensureSharedDaemon(options, owner)).toBe(first);
 				expect(await readFile(tokenFile, "utf8")).toBe(first);
 				expect((await readFile(starts, "utf8")).trim()).toBe("started");
+
+				const lock = await acquireSharedLimaOwnerLock(name);
+				await lock.release();
+				const stale = JSON.stringify({ pid: 2147483647, nonce: "a".repeat(32) });
+				await writeFile(lock.path, stale, { flag: "wx", mode: 0o600 });
+				try {
+					const request = { workspaceRoot: parent, name };
+					const recovered = await service.start(request);
+					expect(recovered.daemonUrl).toMatch(/^grip\+ws:/);
+					expect(recovered.ownsDaemon).toBe(false);
+					expect(recovered.token).toBe(first);
+					await mkdir(startLock);
+					await expect(service.start(request)).rejects.toThrow("state is uncertain");
+					await rm(startLock, { recursive: true });
+					await writeFile(identityFile, "invalid-identity");
+					await expect(service.start(request)).rejects.toThrow("state is uncertain");
+					await writeFile(identityFile, identity);
+					await service.stopManagedInstances();
+					expect(await readFile(lock.path, "utf8")).toBe(stale);
+					expect(await readFile(pidFile, "utf8")).toBe(String(daemonPid));
+					expect(await readFile(tokenFile, "utf8")).toBe(first);
+					expect((await readFile(starts, "utf8")).trim()).toBe("started");
+				} finally {
+					await rm(lock.path);
+				}
 			} finally {
 				await owner.release();
 			}

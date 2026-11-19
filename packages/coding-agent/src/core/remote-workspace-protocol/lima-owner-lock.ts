@@ -15,13 +15,27 @@ interface LockRecord {
 	nonce: string;
 }
 
-function isAlive(pid: number): boolean {
-	if (!Number.isSafeInteger(pid) || pid < 1) return false;
+type OwnerLockState = "occupied" | "stale" | "unverifiable";
+
+export class SharedLimaOwnerLockError extends Error {
+	readonly state: OwnerLockState;
+
+	constructor(state: OwnerLockState) {
+		super(`Shared Lima owner lock ${state}; inspect and reconcile before retrying`);
+		this.name = "SharedLimaOwnerLockError";
+		this.state = state;
+	}
+}
+
+function inspectOwnerPid(pid: unknown): OwnerLockState {
+	if (typeof pid !== "number" || !Number.isInteger(pid) || pid < 1 || pid > 0x7fffffff) return "unverifiable";
 	try {
 		process.kill(pid, 0);
-		return true;
+		return "occupied";
 	} catch (error) {
-		return (error as NodeJS.ErrnoException).code === "EPERM";
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "ESRCH") return "stale";
+		return code === "EPERM" ? "occupied" : "unverifiable";
 	}
 }
 
@@ -43,19 +57,27 @@ export async function acquireSharedLimaOwnerLock(
 		handle = await open(path, "wx", 0o600);
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-		// Even a dead PID is ambiguous (crash during a mutation or VM startup). Manual
-		// reconciliation is required; another owner must not implicitly take over.
-		let state = "unverifiable";
+		// A dead PID does not authorize lifecycle changes: a prior mutation may be incomplete.
+		let state: OwnerLockState = "unverifiable";
 		try {
 			const info = await lstat(path);
 			if (info.isFile() && info.uid === process.getuid?.() && (info.mode & 0o077) === 0) {
-				const existing = JSON.parse(await readFile(path, "utf8")) as Partial<LockRecord>;
-				state = typeof existing.pid === "number" && isAlive(existing.pid) ? "occupied" : "stale";
+				const existing = JSON.parse(await readFile(path, "utf8")) as Partial<LockRecord> | null;
+				const current = await lstat(path);
+				if (
+					typeof existing?.nonce === "string" &&
+					/^[a-f0-9]{32}$/.test(existing.nonce) &&
+					info.dev === current.dev &&
+					info.ino === current.ino &&
+					info.ctimeMs === current.ctimeMs
+				) {
+					state = inspectOwnerPid(existing.pid);
+				}
 			}
 		} catch {
 			// A racing file change is not grounds for a new owner.
 		}
-		throw new Error(`Shared Lima owner lock ${state}; inspect and reconcile before retrying`);
+		throw new SharedLimaOwnerLockError(state);
 	}
 	try {
 		await handle.writeFile(JSON.stringify(record));

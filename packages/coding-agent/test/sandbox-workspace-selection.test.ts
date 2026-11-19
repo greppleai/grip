@@ -72,6 +72,7 @@ it.each([
 		daemonUrlRedacted: "ws://127.0.0.1:8787/grip/workspace",
 		token: "test-token",
 		labels: {},
+		ownsDaemon: false,
 	};
 	const start = vi.fn(async (_options: SandboxStartOptions) => result);
 	const service: SandboxService = {
@@ -100,5 +101,6 @@ it.each([
 	expect(context.sessionSandboxStates.get("session")).toMatchObject({
 		hostWorkspaceRoot: expectedRoot,
 		expectedCwd: "/workspace/other",
+		ownsDaemon: false,
 	});
 });
