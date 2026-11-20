@@ -2,6 +2,22 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.3.8](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.7...@greppleai/grip-v0.3.8) (2026-11-20)
+
+
+### Bug Fixes
+
+* **sandbox:** stale-lima-lock - reconnect to running daemons ([610d11e](https://github.com/greppleai/grip/commit/610d11eb1e079171f4f9c081ea6fca4b3dad24c9))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.3.7 to ^0.3.8
+    * @greppleai/grip-ai bumped from ^0.3.7 to ^0.3.8
+    * @greppleai/grip-tui bumped from ^0.3.7 to ^0.3.8
+
 ## [0.3.7](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.6...@greppleai/grip-v0.3.7) (2026-11-19)
 
 
