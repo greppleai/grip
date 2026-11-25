@@ -2,7 +2,10 @@ import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS } from "../src/core/remote-workspace-protocol/contract.ts";
+import {
+	DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
+	REMOTE_WORKSPACE_PROTOCOL_VERSIONS,
+} from "../src/core/remote-workspace-protocol/contract.ts";
 import type { SharedWorkspaceServerFrame } from "../src/core/remote-workspace-protocol/shared-transport.ts";
 import { withFileMutationQueue } from "../src/core/tools/file-mutation-queue.ts";
 import { parseDaemonCommand } from "../src/daemon/config.ts";
@@ -74,7 +77,7 @@ it("binds independent channels on one transport, including new directories and d
 				payload: {
 					type: "handshake",
 					id: "same-id",
-					versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+					versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 					requiredCapabilities: [],
 					optionalCapabilities: ["primitive_operations"],
 					receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -193,7 +196,7 @@ it("dispatches a sibling during a channel-local wait but retains the global inbo
 				payload: {
 					type: "handshake",
 					id: "handshake",
-					versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+					versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 					requiredCapabilities: [],
 					optionalCapabilities: ["primitive_operations"],
 					receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -253,7 +256,7 @@ it("dispatches a sibling during a channel-local wait but retains the global inbo
 			payload: {
 				type: "handshake",
 				id: "handshake",
-				versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+				versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 				requiredCapabilities: [],
 				optionalCapabilities: ["primitive_operations"],
 				receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -370,7 +373,7 @@ it("detaching a channel cancels queued write and directory creation without harm
 				payload: {
 					type: "handshake",
 					id: "handshake",
-					versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+					versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 					requiredCapabilities: [],
 					optionalCapabilities: ["primitive_operations"],
 					receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -497,7 +500,7 @@ it("cancels a queued v2 mkdir as not started without detaching its channel", asy
 			payload: {
 				type: "handshake",
 				id: "handshake",
-				versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+				versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 				requiredCapabilities: [],
 				optionalCapabilities: ["primitive_operations"],
 				receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -597,7 +600,7 @@ it("does not expose operator resources or a global temporary root on v2 channels
 			payload: {
 				type: "handshake",
 				id: "h",
-				versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+				versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 				requiredCapabilities: [],
 				optionalCapabilities: ["primitive_operations", "catalog_refresh"],
 				receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,

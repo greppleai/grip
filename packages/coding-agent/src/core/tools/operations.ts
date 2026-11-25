@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants, createReadStream, createWriteStream, type Stats, type WriteStream } from "node:fs";
 import {
@@ -10,9 +10,11 @@ import {
 	stat as fsStat,
 	writeFile as fsWriteFile,
 } from "node:fs/promises";
+import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@greppleai/grip-agent-core";
 import WebSocket, { type RawData } from "ws";
 import { DAEMON_WEBSOCKET_PROTOCOL } from "../../daemon/config.ts";
@@ -38,8 +40,11 @@ import {
 import { GuestSharedClientTransport } from "../remote-workspace-protocol/guest-shared-client.ts";
 import {
 	RemoteWorkspaceClientProtocol,
+	RemoteWorkspaceDisconnectedError,
 	type RemoteWorkspaceProtocolCloseReason,
 	RemoteWorkspaceRequestError,
+	RemoteWorkspaceTerminationError,
+	RemoteWorkspaceTransportError,
 } from "../remote-workspace-protocol/session.ts";
 import type { WorkspaceIdentity } from "../workspace-identity.ts";
 
@@ -239,15 +244,7 @@ function resolveTimeoutMs(timeout: number | undefined): number | undefined {
 	return timeoutMs;
 }
 
-function registerChildProcessAbort(signal: AbortSignal | undefined, child: ChildProcess): () => void {
-	const onAbort = (): void => {
-		if (child.pid) killProcessTree(child.pid);
-	};
-	if (!signal) return () => undefined;
-	if (signal.aborted) onAbort();
-	else signal.addEventListener("abort", onAbort, { once: true });
-	return () => signal.removeEventListener("abort", onAbort);
-}
+// Cancellation signals the detached group; completion is reported only after bounded cleanup.
 
 function terminateLingeringProcessGroup(child: ChildProcess): void {
 	if (!child.pid || process.platform === "win32") return;
@@ -257,14 +254,61 @@ function terminateLingeringProcessGroup(child: ChildProcess): void {
 	} catch {}
 }
 
-function cleanupChildExecution(
-	child: ChildProcess,
-	timeoutHandle: NodeJS.Timeout | undefined,
-	removeAbortListener: () => void,
-): void {
-	if (child.pid) untrackDetachedChildPid(child.pid);
-	if (timeoutHandle) clearTimeout(timeoutHandle);
-	removeAbortListener();
+function processGroupAlive(pid: number): boolean {
+	try {
+		process.kill(-pid, 0);
+		return true;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+		throw error;
+	}
+}
+
+function signalProcessGroup(pid: number): void {
+	try {
+		process.kill(-pid, "SIGTERM");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+	}
+}
+
+async function stopChildExecution(child: ChildProcess, result: Promise<number | null>): Promise<void> {
+	const pid = child.pid;
+	if (!pid) return;
+	let exited = false;
+	void result.then(
+		() => {
+			exited = true;
+		},
+		() => {
+			exited = true;
+		},
+	);
+	const windows = process.platform === "win32";
+	if (windows) {
+		// Kill the tree while taskkill can still find its parent. Shell exit alone proves nothing.
+		await new Promise<void>((resolve, reject) => {
+			execFile("taskkill", ["/F", "/T", "/PID", String(pid)], { timeout: 5000, windowsHide: true }, (error) => {
+				if (error) {
+					reject(
+						new RemoteWorkspaceTerminationError("Windows subprocess tree termination could not be confirmed"),
+					);
+				} else resolve();
+			});
+		});
+	} else {
+		signalProcessGroup(pid);
+	}
+	// Fixed grace and forced-exit budgets, independent of output/progress.
+	for (const forced of windows ? [false] : [false, true]) {
+		if (forced) killProcessTree(pid);
+		const deadline = performance.now() + 5000;
+		while (performance.now() < deadline) {
+			if (exited && (windows || !processGroupAlive(pid))) return;
+			await delay(50);
+		}
+	}
+	throw new RemoteWorkspaceTerminationError("Subprocess termination could not be confirmed");
 }
 
 async function copyFileStream(sourcePath: string, destinationPath: string): Promise<void> {
@@ -325,48 +369,53 @@ export class LocalToolOperations implements ToolOperations {
 		} catch {
 			throw new Error(`Working directory does not exist: ${cwd}\nCannot execute bash commands.`);
 		}
-		if (options.signal?.aborted) {
-			throw new Error("aborted");
-		}
-		return new Promise((resolve, reject) => {
-			const child = spawn(shell, [...args, command], {
-				cwd,
-				detached: process.platform !== "win32",
-				env: options.env ?? getShellEnv(),
-				stdio: ["ignore", "pipe", "pipe"],
-				windowsHide: true,
-			});
-			if (child.pid) trackDetachedChildPid(child.pid);
-			let timedOut = false;
-			let timeoutHandle: NodeJS.Timeout | undefined;
-			if (timeoutMs !== undefined) {
-				timeoutHandle = setTimeout(() => {
-					timedOut = true;
-					if (child.pid) killProcessTree(child.pid);
-				}, timeoutMs);
-			}
-			child.stdout?.on("data", options.onData);
-			child.stderr?.on("data", options.onData);
-			const removeAbortListener = registerChildProcessAbort(options.signal, child);
-			waitForChildProcess(child)
-				.then((code) => {
-					terminateLingeringProcessGroup(child);
-					cleanupChildExecution(child, timeoutHandle, removeAbortListener);
-					if (options.signal?.aborted) {
-						reject(new Error("aborted"));
-						return;
-					}
-					if (timedOut) {
-						reject(new Error(`timeout:${options.timeout}`));
-						return;
-					}
-					resolve({ exitCode: code });
-				})
-				.catch((error: unknown) => {
-					cleanupChildExecution(child, timeoutHandle, removeAbortListener);
-					reject(error);
-				});
+		if (options.signal?.aborted) throw new Error("aborted");
+		const child = spawn(shell, [...args, command], {
+			cwd,
+			detached: process.platform !== "win32",
+			env: options.env ?? getShellEnv(),
+			stdio: ["ignore", "pipe", "pipe"],
+			windowsHide: true,
 		});
+		if (child.pid) trackDetachedChildPid(child.pid);
+		child.stdout?.on("data", options.onData);
+		child.stderr?.on("data", options.onData);
+		const result = waitForChildProcess(child);
+		let termination: Promise<void> | null = null;
+		let rejectTermination: (error: unknown) => void = () => undefined;
+		const failure = new Promise<never>((_resolve, reject) => {
+			rejectTermination = reject;
+		});
+		const stop = () => {
+			termination ??= stopChildExecution(child, result);
+			void termination.catch(rejectTermination);
+		};
+		let timedOut = false;
+		const timeoutHandle =
+			timeoutMs === undefined
+				? undefined
+				: setTimeout(() => {
+						timedOut = true;
+						stop();
+					}, timeoutMs);
+		options.signal?.addEventListener("abort", stop, { once: true });
+		if (options.signal?.aborted) stop();
+		try {
+			const code = await Promise.race([result, failure]);
+			if (termination) await termination;
+			else terminateLingeringProcessGroup(child);
+			if (options.signal?.aborted) throw new Error("aborted");
+			if (timedOut) throw new Error(`timeout:${options.timeout}`);
+			return { exitCode: code };
+		} finally {
+			clearTimeout(timeoutHandle);
+			options.signal?.removeEventListener("abort", stop);
+			child.stdout?.off("data", options.onData);
+			child.stderr?.off("data", options.onData);
+			child.stdout?.destroy();
+			child.stderr?.destroy();
+			if (child.pid && (child.exitCode !== null || child.signalCode !== null)) untrackDetachedChildPid(child.pid);
+		}
 	}
 
 	async access(path: string, mode?: ToolAccessMode): Promise<void> {
@@ -414,6 +463,25 @@ export class LocalToolOperations implements ToolOperations {
 	}
 }
 
+/** Bound local attachment work even when a filesystem operation or observer ignores cancellation. */
+function awaitRemoteWork<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+	if (!signal) return work;
+	return new Promise<T>((resolve, reject) => {
+		const aborted = () => reject(new Error("Remote workspace attachment cancelled"));
+		signal.addEventListener("abort", aborted, { once: true });
+		if (signal.aborted) aborted();
+		void work.then(resolve, reject).finally(() => signal.removeEventListener("abort", aborted));
+	});
+}
+
+export type RemoteWorkspaceConnectionStatus = "detached" | "connected" | "reconnecting" | "recovered" | "exhausted";
+
+export interface RemoteWorkspaceConnectionState {
+	status: RemoteWorkspaceConnectionStatus;
+	attempt: number;
+	message: string;
+}
+
 export class DeferredRemoteToolOperations implements ToolOperations {
 	cwd: string;
 	private readonly expectedCwd: string;
@@ -424,6 +492,16 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	private readonly catalogListeners = new Set<() => void | Promise<void>>();
 	private disposePromise: Promise<void> | undefined;
 	private readonly onDisconnect: ((message: string) => void) | undefined;
+	connectionState: RemoteWorkspaceConnectionState = {
+		status: "detached",
+		attempt: 0,
+		message: "Remote workspace detached",
+	};
+	private connectionGeneration = 0;
+	private reconnectController: AbortController | null = null;
+	private attachmentController: AbortController | null = null;
+	private recovery: Promise<void> | null = null;
+	private reconnectFactory: ((signal: AbortSignal) => Promise<ToolBackendInfo>) | null = null;
 
 	constructor(cwd: string, onDisconnect?: (message: string) => void) {
 		this.cwd = cwd;
@@ -436,45 +514,211 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 		url: string,
 		options: DeferredRemoteToolOperationsConnectOptions = {},
 	): Promise<ToolBackendInfo> {
-		const next = await createRemoteToolOperations(url, { ...options, onDisconnect: this.onDisconnect });
+		this.cancelReconnect();
+		const generation = this.connectionGeneration;
+		const controller = new AbortController();
+		this.attachmentController = controller;
+		const signal = options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal;
+		const timer = setTimeout(() => controller.abort(), 45_000);
+		const saved = { ...options, token: options.token ?? process.env.GRIP_REMOTE_TOKEN };
 		try {
-			const stat = await next.stat(next.cwd);
-			if (!stat.isDirectory()) throw new Error(`Remote daemon cwd is not a directory: ${next.cwd}`);
-			const expectedCwd = options.expectedCwd ?? this.expectedCwd;
-			if (!workspaceRootsEqual(next.cwd, expectedCwd, next.workspacePathFlavor)) {
-				// Only managed sandbox activation supplies a verified host mount mapping.
-				// A raw attachment still requires an exact daemon root match.
-				const paths = next.workspacePathFlavor === "windows" ? win32 : posix;
-				const suffix = paths.relative(next.cwd, expectedCwd);
-				if (
-					!options.hostWorkspaceRoot ||
-					!paths.isAbsolute(expectedCwd) ||
-					suffix === ".." ||
-					suffix.startsWith(`..${paths.sep}`) ||
-					paths.isAbsolute(suffix)
-				) {
-					throw new Error(`Remote daemon workspace root mismatch: expected ${expectedCwd}, received ${next.cwd}`);
+			const info = await this.connectRemote(url, { ...saved, signal }, generation, null);
+			if (generation !== this.connectionGeneration || signal.aborted || this.disposePromise) {
+				throw new Error("Remote workspace attachment cancelled");
+			}
+			this.reconnectFactory = (signal) => this.connectRemote(url, { ...saved, signal }, generation, info);
+			this.connectionState = { status: "connected", attempt: 0, message: "Remote workspace connected" };
+			return info;
+		} finally {
+			clearTimeout(timer);
+			if (this.attachmentController === controller) this.attachmentController = null;
+		}
+	}
+
+	private async connectRemote(
+		url: string,
+		options: DeferredRemoteToolOperationsConnectOptions,
+		generation: number,
+		expected: ToolBackendInfo | null,
+	): Promise<ToolBackendInfo> {
+		let attached: RemoteToolOperations | undefined;
+		const next = await awaitRemoteWork(
+			createRemoteToolOperations(url, {
+				...options,
+				onDisconnect: (message) => {
+					if (attached && this.operations === attached && generation === this.connectionGeneration)
+						this.connectionLost(message);
+				},
+			}).then((created) => {
+				if (generation !== this.connectionGeneration || options.signal?.aborted || this.disposePromise) {
+					void created.dispose().catch(() => undefined);
+					throw new Error("Remote workspace attachment cancelled");
 				}
-				const canonicalDirectory = await next.resolveWorkspaceDirectory(expectedCwd);
-				if (!workspaceRootsEqual(canonicalDirectory, expectedCwd, next.workspacePathFlavor)) {
-					throw new Error(
-						`Remote workspace directory mismatch: expected ${expectedCwd}, received ${canonicalDirectory}`,
-					);
+				return created;
+			}),
+			options.signal,
+		);
+		attached = next;
+		try {
+			const actual = next.getBackendInfo();
+			this.verifyIdentity(actual, expected);
+			const expectedCwd = options.expectedCwd ?? this.expectedCwd;
+			await awaitRemoteWork(this.verifyAttachment(next, expectedCwd, options), options.signal);
+			const hostRoot = options.hostWorkspaceRoot
+				? await awaitRemoteWork(fsRealpath(options.hostWorkspaceRoot), options.signal)
+				: undefined;
+			const cwd = expected ? this.cwd : expectedCwd;
+			if (cwd !== expectedCwd) {
+				const directory = await awaitRemoteWork(
+					next.resolveWorkspaceDirectory(cwd, options.signal),
+					options.signal,
+				);
+				if (!workspaceRootsEqual(directory, cwd, next.workspacePathFlavor)) {
+					throw new Error("Remote workspace directory changed; explicit attachment required");
 				}
 			}
-			const hostRoot = options.hostWorkspaceRoot ? await fsRealpath(options.hostWorkspaceRoot) : undefined;
-			await this.replaceOperations(next);
-			this.cwd = expectedCwd;
+			if (generation !== this.connectionGeneration || options.signal?.aborted || this.disposePromise) {
+				throw new Error("Remote workspace attachment cancelled");
+			}
+			if (next.isDisconnected()) throw new RemoteWorkspaceTransportError("Remote workspace lost during attachment");
+			if (this.operations) next.restoreToolSchemas(this.operations);
+			this.replaceOperations(next);
+			this.cwd = cwd;
 			this.workspaceRoot = expectedCwd;
 			this.hostWorkspaceRoot = hostRoot;
-			return this.getBackendInfo();
+			return actual;
 		} catch (error) {
-			await next.dispose();
+			void next.dispose().catch(() => undefined);
 			throw error;
 		}
 	}
 
+	private verifyIdentity(actual: ToolBackendInfo, expected: ToolBackendInfo | null): void {
+		if (expected?.type !== "remote" || !expected.configured || actual.type !== "remote" || !actual.configured) return;
+		if (
+			actual.workspace.id !== expected.workspace.id ||
+			actual.workspace.root !== expected.workspace.root ||
+			actual.workspace.pathFlavor !== expected.workspace.pathFlavor
+		) {
+			throw new Error("Remote workspace identity changed; explicit attachment required");
+		}
+	}
+
+	private async verifyAttachment(
+		next: RemoteToolOperations,
+		expectedCwd: string,
+		options: DeferredRemoteToolOperationsConnectOptions,
+	): Promise<void> {
+		await next.verifyWorkspace(options.signal);
+		if (workspaceRootsEqual(next.cwd, expectedCwd, next.workspacePathFlavor)) return;
+		const paths = next.workspacePathFlavor === "windows" ? win32 : posix;
+		const suffix = paths.relative(next.cwd, expectedCwd);
+		if (
+			!options.hostWorkspaceRoot ||
+			!paths.isAbsolute(expectedCwd) ||
+			suffix === ".." ||
+			suffix.startsWith(`..${paths.sep}`) ||
+			paths.isAbsolute(suffix)
+		) {
+			throw new Error("Remote daemon workspace root mismatch");
+		}
+		const directory = await next.resolveWorkspaceDirectory(expectedCwd, options.signal);
+		if (!workspaceRootsEqual(directory, expectedCwd, next.workspacePathFlavor)) {
+			throw new Error("Remote workspace directory mismatch");
+		}
+	}
+
+	private connectionLost(message: string): void {
+		if (this.recovery || !this.reconnectFactory || this.disposePromise) return;
+		const controller = new AbortController();
+		this.reconnectController = controller;
+		this.connectionState = {
+			status: "reconnecting",
+			attempt: 0,
+			message: "Remote workspace reconnecting; interrupted operations are not replayed",
+		};
+		// Publish the loop before invoking observers: concurrent failures must join it.
+		this.recovery = Promise.resolve()
+			.then(() => this.reconnectLoop(controller, message))
+			.finally(() => {
+				if (this.reconnectController === controller) {
+					this.reconnectController = null;
+					this.recovery = null;
+				}
+			});
+		this.onDisconnect?.(message);
+	}
+
+	private async reconnectLoop(controller: AbortController, cause: string): Promise<void> {
+		const timer = setTimeout(() => controller.abort(), 45_000);
+		try {
+			for (let attempt = 1; attempt <= 4; attempt++) {
+				try {
+					controller.signal.throwIfAborted();
+					this.connectionState = { status: "reconnecting", attempt, message: "Remote workspace reconnecting" };
+					await delay(500 * 2 ** (attempt - 1) * (0.75 + Math.random() * 0.5), undefined, {
+						signal: controller.signal,
+					});
+					await awaitRemoteWork(this.reconnectFactory!(controller.signal), controller.signal);
+					if (controller.signal.aborted || this.reconnectController !== controller) return;
+					await awaitRemoteWork(this.notifyCatalogListeners(), controller.signal);
+					if (controller.signal.aborted || this.reconnectController !== controller) return;
+					if (this.operations?.isDisconnected())
+						throw new RemoteWorkspaceTransportError("Recovered connection lost");
+					this.connectionState = {
+						status: "recovered",
+						attempt,
+						message: "Remote workspace recovered; submit a new prompt",
+					};
+					return;
+				} catch (error) {
+					if (this.reconnectFailed(controller, cause, attempt, error)) return;
+				}
+			}
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	private reconnectFailed(controller: AbortController, cause: string, attempt: number, error: unknown): boolean {
+		if (this.reconnectController !== controller) return true;
+		const retryable =
+			error instanceof RemoteWorkspaceTransportError || error instanceof RemoteWorkspaceDisconnectedError;
+		if (!controller.signal.aborted && retryable && attempt < 4) return false;
+		const outcome = controller.signal.aborted ? "budget exhausted" : "failed";
+		const detail = error instanceof Error ? error.message : "unknown failure";
+		this.connectionState = { status: "exhausted", attempt, message: `${cause}; reconnection ${outcome}: ${detail}` };
+		void this.operations?.dispose().catch(() => undefined);
+		return true;
+	}
+
+	private cancelReconnect(): void {
+		this.connectionGeneration++;
+		this.attachmentController?.abort();
+		this.attachmentController = null;
+		this.reconnectController?.abort();
+		this.reconnectController = null;
+		this.recovery = null;
+		this.reconnectFactory = null;
+		this.connectionState = { status: "detached", attempt: 0, message: "Remote workspace detached" };
+	}
+
+	private async retryRead<T>(operation: (operations: RemoteToolOperations) => Promise<T>): Promise<T> {
+		const generation = this.connectionGeneration;
+		const previous = this.requireOperations();
+		try {
+			return await operation(previous);
+		} catch (error) {
+			if (!(error instanceof RemoteWorkspaceDisconnectedError) || !this.recovery) throw error;
+			await this.recovery;
+			if (generation !== this.connectionGeneration || this.isDisconnected() || this.operations === previous)
+				throw error;
+			return operation(this.requireOperations()); // One retry, only for explicitly listed pure reads.
+		}
+	}
+
 	async clear(): Promise<void> {
+		this.cancelReconnect();
 		const previous = this.operations;
 		this.remoteCatalogUnsubscribe?.();
 		this.remoteCatalogUnsubscribe = undefined;
@@ -484,6 +728,9 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	}
 
 	private requireOperations(): RemoteToolOperations {
+		if (this.connectionState.status === "exhausted") {
+			throw new RemoteWorkspaceDisconnectedError(this.connectionState.message, "not_started");
+		}
 		if (!this.operations) {
 			throw new Error(
 				"Remote backend is not configured. Configure it over RPC or with /sandbox before using tools.",
@@ -497,11 +744,11 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	}
 
 	async access(path: string, mode?: ToolAccessMode): Promise<void> {
-		await this.requireOperations().access(path, mode);
+		await this.retryRead((operations) => operations.access(path, mode));
 	}
 
 	async readFile(path: string): Promise<Buffer> {
-		return this.requireOperations().readFile(path);
+		return this.retryRead((operations) => operations.readFile(path));
 	}
 
 	async writeFile(path: string, content: string | Buffer): Promise<void> {
@@ -529,7 +776,7 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	}
 
 	async stat(path: string): Promise<ToolFileStat> {
-		return this.requireOperations().stat(path);
+		return this.retryRead((operations) => operations.stat(path));
 	}
 
 	async resolveWorkspaceDirectory(path: string): Promise<string> {
@@ -557,19 +804,19 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	}
 
 	async readdir(path: string): Promise<string[]> {
-		return this.requireOperations().readdir(path);
+		return this.retryRead((operations) => operations.readdir(path));
 	}
 
 	async glob(pattern: string, cwd: string, options: ToolGlobOptions): Promise<string[]> {
-		return this.requireOperations().glob(pattern, cwd, options);
+		return this.retryRead((operations) => operations.glob(pattern, cwd, options));
 	}
 
 	async grep(options: ToolGrepOptions): Promise<ToolGrepResult> {
-		return this.requireOperations().grep(options);
+		return this.retryRead((operations) => operations.grep(options));
 	}
 
 	async detectImageMimeType(path: string): Promise<string | null | undefined> {
-		return this.requireOperations().detectImageMimeType(path);
+		return this.retryRead((operations) => operations.detectImageMimeType(path));
 	}
 
 	getBackendInfo(): ToolBackendInfo {
@@ -577,8 +824,13 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 		if (info?.type !== "remote" || !info.configured) return { type: "remote", cwd: this.cwd, configured: false };
 		return { ...info, cwd: this.workspaceRoot, workspace: { ...info.workspace, root: this.workspaceRoot } };
 	}
+
 	isDisconnected(): boolean {
-		return this.operations?.isDisconnected() ?? false;
+		return (
+			this.connectionState.status === "reconnecting" ||
+			this.connectionState.status === "exhausted" ||
+			(this.operations?.isDisconnected() ?? false)
+		);
 	}
 
 	resolveWorkspaceToolExecution(name: string, parameterSchema: unknown): RemoteWorkspaceToolExecutionTarget {
@@ -586,13 +838,10 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	}
 
 	executeWorkspaceTool(name: string, invocation: WorkspaceToolRemoteInvocation): Promise<AgentToolResult<unknown>> {
-		return this.requireOperations().executeWorkspaceTool(name, {
-			...invocation,
-			executionOptions: {
-				...invocation.executionOptions,
-				...(this.cwd === this.requireOperations().cwd ? {} : { cwd: this.cwd }),
-			},
-		});
+		const operations = this.requireOperations();
+		const executionOptions = { ...invocation.executionOptions };
+		if (this.cwd !== operations.cwd) executionOptions.cwd = this.cwd;
+		return operations.executeWorkspaceTool(name, { ...invocation, executionOptions });
 	}
 
 	onWorkspaceToolCatalogChanged(listener: () => void | Promise<void>): () => void {
@@ -601,6 +850,7 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 	}
 
 	dispose(): Promise<void> {
+		this.cancelReconnect();
 		this.disposePromise ??= (async () => {
 			this.remoteCatalogUnsubscribe?.();
 			this.remoteCatalogUnsubscribe = undefined;
@@ -612,20 +862,22 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 		return this.disposePromise;
 	}
 
-	private async replaceOperations(next: RemoteToolOperations): Promise<void> {
-		if (this.disposePromise) {
-			await next.dispose?.();
-			throw new Error("Deferred remote backend is disposed");
-		}
+	private async notifyCatalogListeners(): Promise<void> {
+		await Promise.all([...this.catalogListeners].map((listener) => listener()));
+	}
+
+	private replaceOperations(next: RemoteToolOperations): void {
+		if (this.disposePromise) throw new Error("Deferred remote backend is disposed");
 		const previous = this.operations;
 		this.remoteCatalogUnsubscribe?.();
 		this.remoteCatalogUnsubscribe = undefined;
 		this.operations = next;
-		this.cwd = next.cwd;
-		this.remoteCatalogUnsubscribe = next.onWorkspaceToolCatalogChanged(() =>
-			Promise.all([...this.catalogListeners].map((listener) => listener())).then(() => undefined),
-		);
-		await previous?.dispose?.();
+		this.remoteCatalogUnsubscribe = next.onWorkspaceToolCatalogChanged(() => {
+			if (this.operations !== next) return;
+			return this.notifyCatalogListeners();
+		});
+		// Retirement must not delay publication or let a stale continuation overwrite a newer attachment.
+		void previous?.dispose().catch(() => undefined);
 	}
 }
 
@@ -678,6 +930,7 @@ export interface RemoteToolOperationsConnectOptions {
 	token?: string;
 	handshakeTimeoutMs?: number;
 	onDisconnect?: (message: string) => void;
+	signal?: AbortSignal;
 }
 
 export class RemoteToolOperations implements ToolOperations {
@@ -762,32 +1015,55 @@ export class RemoteToolOperations implements ToolOperations {
 	static async connect(url: string, options: RemoteToolOperationsConnectOptions = {}): Promise<RemoteToolOperations> {
 		const normalized = normalizeRemoteUrl(url);
 		const token = options.token ?? process.env.GRIP_REMOTE_TOKEN;
+		if (options.signal?.aborted) throw new Error("Remote workspace attachment cancelled");
 		const socket = await new Promise<WebSocket>((resolve, reject) => {
 			const websocket = new WebSocket(normalized.url, DAEMON_WEBSOCKET_PROTOCOL, {
 				perMessageDeflate: false,
-				...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+				headers: token ? { authorization: `Bearer ${token}` } : {},
 			});
+			const timer = setTimeout(
+				() => fail(new RemoteWorkspaceTransportError("Remote workspace connection timed out")),
+				options.handshakeTimeoutMs ?? 5000,
+			);
 			const cleanup = () => {
+				clearTimeout(timer);
+				options.signal?.removeEventListener("abort", aborted);
 				websocket.off("open", onOpen);
 				websocket.off("error", onError);
+				websocket.off("unexpected-response", onResponse);
 			};
+			const fail = (error: Error) => {
+				cleanup();
+				websocket.terminate();
+				reject(error);
+			};
+			const aborted = () => fail(new Error("Remote workspace attachment cancelled"));
 			const onOpen = () => {
 				cleanup();
 				resolve(websocket);
 			};
-			const onError = () => {
-				cleanup();
-				websocket.terminate();
-				reject(new Error(`Failed to connect remote workspace: ${normalized.url}`));
+			const onError = () => fail(new RemoteWorkspaceTransportError("Remote workspace connection failed"));
+			const onResponse = (_request: unknown, response: IncomingMessage) => {
+				response.resume();
+				const status = response.statusCode;
+				fail(
+					status === 401 || status === 403
+						? new Error("Remote workspace authentication rejected")
+						: new Error("Remote workspace upgrade rejected"),
+				);
 			};
-			// Bun can emit another error while terminating a failed opening socket.
-			// Keep an error listener through teardown and the handoff to the protocol client.
 			websocket.on("error", () => undefined);
 			websocket.once("open", onOpen);
 			websocket.once("error", onError);
+			websocket.once("unexpected-response", onResponse);
+			options.signal?.addEventListener("abort", aborted, { once: true });
+			if (options.signal?.aborted) aborted();
 		});
 		const operations = new RemoteToolOperations(normalized.url, normalized.protocol, socket, options);
+		const aborted = () => socket.terminate();
+		options.signal?.addEventListener("abort", aborted, { once: true });
 		try {
+			if (options.signal?.aborted) throw new Error("Remote workspace attachment cancelled");
 			const handshake = await operations.client.start();
 			operations.cwd = handshake.workspace.root;
 			operations.workspacePathFlavor = handshake.workspace.pathFlavor;
@@ -796,6 +1072,8 @@ export class RemoteToolOperations implements ToolOperations {
 		} catch (error) {
 			socket.terminate();
 			throw error;
+		} finally {
+			options.signal?.removeEventListener("abort", aborted);
 		}
 	}
 
@@ -805,7 +1083,7 @@ export class RemoteToolOperations implements ToolOperations {
 		token: string,
 		options: RemoteToolOperationsConnectOptions = {},
 	): Promise<RemoteToolOperations> {
-		const socket = await GuestSharedClientTransport.attach(url, root, token);
+		const socket = await GuestSharedClientTransport.attach(url, root, token, options.signal);
 		const operations = new RemoteToolOperations(url, "ws", socket, options);
 		try {
 			const handshake = await operations.client.start();
@@ -896,6 +1174,19 @@ export class RemoteToolOperations implements ToolOperations {
 	onWorkspaceToolCatalogChanged(listener: () => void | Promise<void>): () => void {
 		this.catalogListeners.add(listener);
 		return () => this.catalogListeners.delete(listener);
+	}
+
+	async verifyWorkspace(signal?: AbortSignal): Promise<void> {
+		const result = requireRecord(
+			await this.client.request("workspace.stat", { path: this.cwd }, { signal }),
+			"workspace stat",
+		);
+		if (result.kind !== "directory") throw new Error("Remote workspace is not a directory");
+	}
+
+	restoreToolSchemas(previous: RemoteToolOperations): void {
+		for (const [name, hash] of previous.localToolSchemas) this.localToolSchemas.set(name, hash);
+		this.client.setLocalToolSchemas(this.localToolSchemas);
 	}
 
 	private request(method: RemoteWorkspaceMethod, params: unknown) {
@@ -1070,9 +1361,9 @@ export class RemoteToolOperations implements ToolOperations {
 		};
 	}
 
-	async resolveWorkspaceDirectory(path: string): Promise<string> {
+	async resolveWorkspaceDirectory(path: string, signal?: AbortSignal): Promise<string> {
 		const result = requireRecord(
-			await this.request("workspace.stat", { path, workspaceOnly: true }),
+			await this.client.request("workspace.stat", { path, workspaceOnly: true }, { signal }),
 			"workspace directory result",
 		);
 		if (result.kind !== "directory") throw new Error(`Not a workspace directory: ${path}`);

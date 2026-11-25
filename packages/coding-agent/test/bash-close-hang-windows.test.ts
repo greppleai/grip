@@ -108,6 +108,32 @@ describe.skipIf(process.platform !== "win32")("Windows child-process close handl
 		}
 	});
 
+	it("aborts only after the shell's subprocess tree has stopped", async () => {
+		const pidFile = join(testDir, "cancelled-grandchild.pid");
+		const command =
+			'node -e "' +
+			"const child=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},60000)']);" +
+			"require('fs').writeFileSync(process.argv[1],String(child.pid));" +
+			"console.log('ready');setTimeout(()=>{},60000);" +
+			'" ' +
+			toBashSingleQuotedArg(pidFile);
+		const controller = new AbortController();
+		try {
+			const execution = new LocalToolOperations(testDir).exec(command, {
+				signal: controller.signal,
+				onData: () => {
+					if (existsSync(pidFile)) controller.abort();
+				},
+			});
+			await expect(withTimeout(execution, 12_000, () => controller.abort())).rejects.toThrow(/^aborted$/);
+			const pid = Number(readFileSync(pidFile, "utf-8"));
+			expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+		} finally {
+			controller.abort();
+			cleanupDetachedChild(pidFile);
+		}
+	}, 15_000);
+
 	it("bash tool resolves after the shell exits even if inherited stdio handles stay open", async () => {
 		const pidFile = join(testDir, "tool-grandchild.pid");
 		const command = createInheritedStdioCommand(pidFile);

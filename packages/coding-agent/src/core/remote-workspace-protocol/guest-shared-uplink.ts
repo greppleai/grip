@@ -8,6 +8,7 @@ import {
 	type RemoteWorkspaceServerMessage,
 } from "./contract.ts";
 import { type GuestOutboundFrame, GuestOutboundScheduler } from "./guest-shared-outbound-scheduler.ts";
+import { RemoteWorkspaceTransportError } from "./session.ts";
 import {
 	parseSharedWorkspaceServerFrame,
 	SHARED_WORKSPACE_WEBSOCKET_PROTOCOL,
@@ -104,7 +105,8 @@ export class GuestSharedUplink {
 		channel.onMessage(frame.payload);
 	}
 
-	static async connect(url: string, token?: string): Promise<GuestSharedUplink> {
+	static async connect(url: string, token?: string, signal?: AbortSignal): Promise<GuestSharedUplink> {
+		if (signal?.aborted) throw new Error("Shared workspace attachment cancelled");
 		const endpoint = new URL(url);
 		if (
 			!(["ws:", "wss:"] as string[]).includes(endpoint.protocol) ||
@@ -118,17 +120,32 @@ export class GuestSharedUplink {
 			perMessageDeflate: false,
 			...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
 		});
+		const aborted = () => socket.terminate();
+		signal?.addEventListener("abort", aborted, { once: true });
+		if (signal?.aborted) aborted();
 		try {
 			await new Promise<void>((resolve, reject) => {
-				const timer = setTimeout(() => reject(new Error("Shared workspace connection timed out")), 5000);
-				socket.once("open", () => {
+				const timer = setTimeout(
+					() => finish(new RemoteWorkspaceTransportError("Shared workspace connection timed out")),
+					5000,
+				);
+				const finish = (error?: Error) => {
 					clearTimeout(timer);
-					resolve();
-				});
-				socket.once("error", () => {
-					clearTimeout(timer);
-					reject(new Error("Shared workspace connection failed"));
-				});
+					socket.off("open", opened);
+					socket.off("error", failed);
+					socket.off("close", failed);
+					socket.off("unexpected-response", rejected);
+					if (error) reject(error);
+					else resolve();
+				};
+				const opened = () => finish();
+				const failed = () => finish(new RemoteWorkspaceTransportError("Shared workspace connection failed"));
+				const rejected = () => finish(new Error("Shared workspace authentication or upgrade rejected"));
+				socket.on("error", () => undefined);
+				socket.once("open", opened);
+				socket.once("error", failed);
+				socket.once("close", failed);
+				socket.once("unexpected-response", rejected);
 			});
 			if (socket.protocol !== SHARED_WORKSPACE_WEBSOCKET_PROTOCOL) {
 				throw new Error("Daemon does not support grip.workspace.v2");
@@ -136,7 +153,10 @@ export class GuestSharedUplink {
 			const id = randomBytes(12).toString("hex");
 			const epoch = await new Promise<string>((resolve, reject) => {
 				let settled = false;
-				const timer = setTimeout(() => settle(undefined, new Error("Shared workspace hello timed out")), 5000);
+				const timer = setTimeout(
+					() => settle(undefined, new RemoteWorkspaceTransportError("Shared workspace hello timed out")),
+					5000,
+				);
 				const settle = (value?: string, error?: Error) => {
 					if (settled) return;
 					settled = true;
@@ -147,8 +167,8 @@ export class GuestSharedUplink {
 					if (error) reject(error);
 					else resolve(value!);
 				};
-				const onError = () => settle(undefined, new Error("Shared workspace hello failed"));
-				const onClose = () => settle(undefined, new Error("Shared workspace hello failed"));
+				const onError = () => settle(undefined, new RemoteWorkspaceTransportError("Shared workspace hello failed"));
+				const onClose = () => settle(undefined, new RemoteWorkspaceTransportError("Shared workspace hello failed"));
 				const onMessage = (data: WebSocket.RawData, isBinary: boolean) => {
 					try {
 						if (isBinary) throw new Error("Unexpected binary frame");
@@ -175,6 +195,8 @@ export class GuestSharedUplink {
 			socket.on("error", () => undefined);
 			socket.terminate();
 			throw error;
+		} finally {
+			signal?.removeEventListener("abort", aborted);
 		}
 	}
 

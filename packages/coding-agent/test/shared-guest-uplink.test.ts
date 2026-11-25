@@ -7,6 +7,7 @@ import { WebSocketServer } from "ws";
 import { VERSION } from "../src/config.ts";
 import {
 	DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
+	REMOTE_WORKSPACE_PROTOCOL_VERSIONS,
 	type RemoteWorkspaceServerMessage,
 } from "../src/core/remote-workspace-protocol/contract.ts";
 import { GuestSharedUplink } from "../src/core/remote-workspace-protocol/guest-shared-uplink.ts";
@@ -55,7 +56,9 @@ it("opens independent daemon channels on one authenticated v2 uplink and fails c
 	const { url } = await server.listen();
 	let uplink: GuestSharedUplink | undefined;
 	try {
-		await expect(GuestSharedUplink.connect(url, "incorrect")).rejects.toThrow("Shared workspace connection failed");
+		await expect(GuestSharedUplink.connect(url, "incorrect")).rejects.toThrow(
+			"Shared workspace authentication or upgrade rejected",
+		);
 		uplink = await GuestSharedUplink.connect(url, "local-test-token-with-more-than-32-bytes");
 		expect(uplink.epoch).toHaveLength(24);
 		const first = inbox();
@@ -74,7 +77,7 @@ it("opens independent daemon channels on one authenticated v2 uplink and fails c
 		const handshake = {
 			type: "handshake" as const,
 			id: "same-id",
-			versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+			versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 			requiredCapabilities: [],
 			optionalCapabilities: ["primitive_operations", "tool_updates"],
 			receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
