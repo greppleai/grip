@@ -2,6 +2,22 @@
 
 All notable changes to Grip are documented in this file.
 
+## [0.3.9](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.8...@greppleai/grip-v0.3.9) (2026-11-25)
+
+
+### Features
+
+* **coding-agent:** reconnect remote workspaces and confirm cancellation ([8e3dc0f](https://github.com/greppleai/grip/commit/8e3dc0f5b284e89f184e95b4a5bade7a77894a23))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @greppleai/grip-agent-core bumped from ^0.3.8 to ^0.3.9
+    * @greppleai/grip-ai bumped from ^0.3.8 to ^0.3.9
+    * @greppleai/grip-tui bumped from ^0.3.8 to ^0.3.9
+
 ## [0.3.8](https://github.com/greppleai/grip/compare/@greppleai/grip-v0.3.7...@greppleai/grip-v0.3.8) (2026-11-20)
 
 
