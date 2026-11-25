@@ -6,7 +6,10 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { VERSION } from "../src/config.ts";
-import { DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS } from "../src/core/remote-workspace-protocol/contract.ts";
+import {
+	DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
+	REMOTE_WORKSPACE_PROTOCOL_VERSIONS,
+} from "../src/core/remote-workspace-protocol/contract.ts";
 import { SHARED_WORKSPACE_WEBSOCKET_PROTOCOL } from "../src/core/remote-workspace-protocol/shared-transport.ts";
 import { DAEMON_WEBSOCKET_PROTOCOL, parseDaemonCommand } from "../src/daemon/config.ts";
 import { createDaemonServer } from "../src/daemon/server.ts";
@@ -109,7 +112,7 @@ it("routes distinct, same-root and newly created workspaces over a single live W
 					payload: {
 						type: "handshake",
 						id: "same-id",
-						versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+						versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 						requiredCapabilities: [],
 						optionalCapabilities: ["primitive_operations", "tool_updates"],
 						receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -496,7 +499,7 @@ it("keeps the physical v2 socket and sibling channel alive after an invalid inne
 					payload: {
 						type: "handshake",
 						id: "handshake",
-						versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+						versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 						requiredCapabilities: [],
 						optionalCapabilities: ["primitive_operations"],
 						receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -557,7 +560,7 @@ it("keeps v1 mutations unconditioned but rejects v2 preconditions on a v1 socket
 			{
 				type: "handshake",
 				id: "h",
-				versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+				versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 				requiredCapabilities: [],
 				optionalCapabilities: ["primitive_operations"],
 				receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -645,7 +648,7 @@ it("shares the daemon active-request quota across v1 and v2 and releases it on c
 					payload: {
 						type: "handshake",
 						id: "h",
-						versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+						versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 						requiredCapabilities: [],
 						optionalCapabilities: ["primitive_operations", "tool_updates"],
 						receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -660,7 +663,7 @@ it("shares the daemon active-request quota across v1 and v2 and releases it on c
 			{
 				type: "handshake",
 				id: "h",
-				versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+				versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 				requiredCapabilities: [],
 				optionalCapabilities: ["primitive_operations"],
 				receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -762,7 +765,7 @@ it("keeps successful shared catalogs alive when a different transport fails duri
 				payload: {
 					type: "handshake",
 					id: "h",
-					versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+					versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 					requiredCapabilities: [],
 					optionalCapabilities: ["primitive_operations", "catalog_refresh"],
 					receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -775,7 +778,7 @@ it("keeps successful shared catalogs alive when a different transport fails duri
 			{
 				type: "handshake",
 				id: "h",
-				versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+				versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 				requiredCapabilities: [],
 				optionalCapabilities: ["primitive_operations", "catalog_refresh"],
 				receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -863,7 +866,7 @@ it("serves a sibling channel while one channel's outbound send is stalled", asyn
 					payload: {
 						type: "handshake",
 						id: "handshake",
-						versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+						versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 						requiredCapabilities: [],
 						optionalCapabilities: ["primitive_operations", "file_transfer"],
 						receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -1002,7 +1005,7 @@ it("closes an uncertain multi-channel socket on partial reload without stopping 
 					payload: {
 						type: "handshake",
 						id: "h",
-						versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+						versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 						requiredCapabilities: [],
 						optionalCapabilities: ["catalog_refresh"],
 						receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -1120,7 +1123,7 @@ it("releases in-flight shared work after a physical socket crash without disrupt
 					payload: {
 						type: "handshake",
 						id: "h",
-						versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+						versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 						requiredCapabilities: [],
 						optionalCapabilities: ["primitive_operations", "tool_updates"],
 						receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -1218,7 +1221,7 @@ it("terminates a stalled physical send rather than pinning channel output reserv
 					payload: {
 						type: "handshake",
 						id: "h",
-						versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+						versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 						requiredCapabilities: [],
 						optionalCapabilities: ["primitive_operations"],
 						receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -1321,7 +1324,7 @@ it("closes the whole multiplexed socket when another channel exhausts its physic
 					payload: {
 						type: "handshake",
 						id: "h",
-						versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+						versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 						requiredCapabilities: [],
 						optionalCapabilities: ["primitive_operations"],
 						receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -1424,7 +1427,7 @@ it("bounds a real paused TCP reader on a multiplexed socket", async () => {
 					payload: {
 						type: "handshake",
 						id: "h",
-						versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+						versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 						requiredCapabilities: [],
 						optionalCapabilities: ["primitive_operations"],
 						receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,

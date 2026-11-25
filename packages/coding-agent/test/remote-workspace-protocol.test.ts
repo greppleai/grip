@@ -137,6 +137,7 @@ interface ServerHarnessOptions {
 
 function createProtocolPair(handler: RemoteWorkspaceServerHandler, options: ProtocolPairOptions = {}): ProtocolPair {
 	const catalog = options.catalog ?? validCatalog();
+	const limits = options.limits ?? { ...DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS, maxCancellationMs: 100 };
 	const localToolSchemas = new Map(catalog.tools.map((tool) => [tool.name, tool.schemaHash]));
 	const clientMessages: RemoteWorkspaceClientMessage[] = [];
 	const serverMessages: RemoteWorkspaceServerMessage[] = [];
@@ -168,7 +169,7 @@ function createProtocolPair(handler: RemoteWorkspaceServerHandler, options: Prot
 		versions: options.clientVersions,
 		requiredCapabilities: options.clientRequiredCapabilities ?? ["primitive_operations"],
 		optionalCapabilities: ["tool_updates", "file_transfer", "catalog_refresh"],
-		receiveLimits: options.limits,
+		receiveLimits: limits,
 		localToolSchemas,
 		onCatalogChanged: (event) => options.onCatalogChanged?.(event.generation),
 		onCatalogRefreshed: options.onCatalogRefreshed,
@@ -183,7 +184,7 @@ function createProtocolPair(handler: RemoteWorkspaceServerHandler, options: Prot
 			"catalog_refresh",
 		],
 		versions: options.serverVersions,
-		limits: options.limits,
+		limits,
 	});
 	return { client, server, clientMessages, serverMessages, clientCloses, serverCloses };
 }
@@ -213,7 +214,7 @@ function createServerHarness(
 				"file_transfer",
 				"catalog_refresh",
 			],
-			limits: options.limits,
+			limits: options.limits ?? { ...DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS, maxCancellationMs: 100 },
 		},
 	);
 	return { server, messages, closes };
@@ -381,8 +382,8 @@ describe("remote workspace protocol contract", () => {
 	it("rejects incompatible versions and capabilities before dispatch", async () => {
 		const handler = defaultHandler({ handleRequest: vi.fn(defaultHandler().handleRequest) });
 		const pair = createProtocolPair(handler, {
-			clientVersions: [{ major: 2, minMinor: 0, maxMinor: 0 }],
-			serverVersions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+			clientVersions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+			serverVersions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 		});
 		await expect(pair.client.start()).rejects.toMatchObject({ code: "incompatible_version" });
 		expect(handler.handleRequest).not.toHaveBeenCalled();
@@ -405,7 +406,7 @@ describe("remote workspace protocol contract", () => {
 		const ack = {
 			type: "handshake_ack" as const,
 			id: offer.id,
-			version: { major: 1, minor: 0 },
+			version: { major: 1, minor: 1 },
 			capabilities: ["primitive_operations"],
 			workspace,
 			limits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -982,6 +983,7 @@ describe("remote workspace protocol sessions", () => {
 	it("bounds queued upload chunks and inbound payload bursts before dispatch", async () => {
 		const limits = {
 			...DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
+			maxCancellationMs: 100,
 			maxTransferChunkBytes: 1024,
 			maxPendingTransferBytes: 1024,
 			maxPendingInboundMessages: 1,
@@ -1206,7 +1208,7 @@ describe("remote workspace protocol sessions", () => {
 			JSON.stringify({
 				type: "handshake_ack",
 				id: offer.id,
-				version: { major: 1, minor: 0 },
+				version: { major: 1, minor: 1 },
 				capabilities: ["primitive_operations"],
 				workspace,
 				limits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -1291,7 +1293,7 @@ describe("remote workspace protocol sessions", () => {
 			JSON.stringify({
 				type: "handshake_ack",
 				id: offer.id,
-				version: { major: 1, minor: 0 },
+				version: { major: 1, minor: 1 },
 				capabilities: ["primitive_operations", "tool_updates"],
 				workspace,
 				limits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -1317,5 +1319,123 @@ describe("remote workspace protocol sessions", () => {
 		});
 		await other.receive(JSON.stringify({ type: "result", id: "never-seen", result: {} }));
 		expect(closes.at(-1)?.message).toContain("unknown request ID");
+	});
+	it("waits for slow terminal cleanup after receipt and keeps the connection usable", async () => {
+		vi.useFakeTimers();
+		try {
+			let stopped = false;
+			const pair = createProtocolPair(
+				defaultHandler({
+					handleRequest: async (request, context) => {
+						if (request.method !== "workspace.exec") return statResult();
+						context.markSideEffectStarted();
+						await new Promise<void>((resolve) => {
+							context.signal.addEventListener("abort", () => setTimeout(resolve, 5000), { once: true });
+						});
+						stopped = true;
+						return { exitCode: null };
+					},
+				}),
+				{ limits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS },
+			);
+			await pair.client.start();
+			const request = pair.client.beginRequest("workspace.exec", { command: "fixture", cwd: workspace.root });
+			let settled = false;
+			const outcome = request.result.catch((error: unknown) => {
+				settled = true;
+				return error;
+			});
+			await vi.advanceTimersByTimeAsync(0);
+			await request.cancel();
+			await request.cancel();
+			expect(pair.clientMessages.filter((message) => message.type === "cancel")).toHaveLength(1);
+			expect(pair.serverMessages).toContainEqual({ type: "cancel_ack", id: request.id });
+			await vi.advanceTimersByTimeAsync(4999);
+			expect(settled).toBe(false);
+			expect(stopped).toBe(false);
+			expect(pair.clientCloses).toHaveLength(0);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(await outcome).toMatchObject({ code: "cancelled", executionState: "indeterminate" });
+			expect(stopped).toBe(true);
+			await pair.server.receive(JSON.stringify({ type: "cancel", id: request.id }));
+			await pair.client.receive(JSON.stringify({ type: "cancel_ack", id: request.id }));
+			expect(await pair.client.request("workspace.stat", { path: "a" })).toEqual(statResult());
+			expect(pair.serverCloses).toHaveLength(0);
+			expect(pair.clientCloses).toHaveLength(0);
+			await pair.server.disconnect();
+			await pair.client.disconnect();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("does not extend the terminal watchdog for duplicate receipts or progress", async () => {
+		vi.useFakeTimers();
+		try {
+			const sent: RemoteWorkspaceClientMessage[] = [];
+			const closes: RemoteWorkspaceProtocolCloseReason[] = [];
+			const limits = {
+				...DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
+				maxCancellationMs: 1000,
+				maxTransportSendMs: 100,
+			};
+			const client = new RemoteWorkspaceClientProtocol(
+				{
+					send: async (message) => {
+						sent.push(message);
+					},
+					close: (reason) => {
+						closes.push(reason);
+					},
+				},
+				{ optionalCapabilities: ["primitive_operations", "tool_updates"], receiveLimits: limits },
+			);
+			const starting = client.start();
+			await vi.advanceTimersByTimeAsync(0);
+			const offer = sent[0];
+			if (offer?.type !== "handshake") throw new Error("Missing handshake");
+			const catalog = validCatalog();
+			await client.receive(
+				JSON.stringify({
+					type: "handshake_ack",
+					id: offer.id,
+					version: { major: 1, minor: 1 },
+					capabilities: ["primitive_operations", "tool_updates"],
+					workspace,
+					limits,
+					catalog,
+					catalogHash: hashRemoteWorkspaceCatalog(catalog),
+					backendMetadata: { kind: "remote-workspace" },
+				}),
+			);
+			await starting;
+			const request = client.beginRequest("workspace.exec", { command: "fixture", cwd: workspace.root });
+			let settled = false;
+			const outcome = request.result.catch((error: unknown) => {
+				settled = true;
+				return error;
+			});
+			await vi.advanceTimersByTimeAsync(0);
+			await request.cancel();
+			for (let sequence = 0; sequence < 4; sequence++) {
+				await client.receive(JSON.stringify({ type: "cancel_ack", id: request.id }));
+				await client.receive(JSON.stringify({ type: "update", id: request.id, sequence, update: {} }));
+				await vi.advanceTimersByTimeAsync(300);
+			}
+			expect(settled).toBe(false);
+			await vi.advanceTimersByTimeAsync(249);
+			expect(settled).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(await outcome).toBeInstanceOf(RemoteWorkspaceDisconnectedError);
+			expect(await outcome).toMatchObject({
+				executionState: "indeterminate",
+				message: expect.stringContaining("received but did not complete"),
+			});
+			expect(closes).toHaveLength(1);
+			await client.receive(JSON.stringify({ type: "result", id: request.id, result: { exitCode: 0 } }));
+			expect(closes).toHaveLength(1);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

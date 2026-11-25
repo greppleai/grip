@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { type Static, Type } from "typebox";
 import { Compile, type Validator } from "typebox/compile";
 
-export const REMOTE_WORKSPACE_PROTOCOL_VERSIONS = [{ major: 1, minMinor: 0, maxMinor: 0 }] as const;
+export const REMOTE_WORKSPACE_PROTOCOL_VERSIONS = [{ major: 1, minMinor: 1, maxMinor: 1 }] as const;
 
 export const REMOTE_WORKSPACE_CAPABILITIES = [
 	"catalog_refresh",
@@ -102,7 +102,7 @@ export const DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS: RemoteWorkspaceProtocolLi
 	maxTransferChunks: 16_384,
 	maxActiveRequests: 64,
 	maxActiveTransfers: 8,
-	maxCancellationMs: 100,
+	maxCancellationMs: 15_000,
 	maxTransportSendMs: 10_000,
 };
 
@@ -278,6 +278,13 @@ export const RemoteWorkspaceCancelSchema = Type.Object(
 
 export type RemoteWorkspaceCancel = Static<typeof RemoteWorkspaceCancelSchema>;
 
+/** Receipt only: wait for a terminal result/error before considering execution stopped. */
+export const RemoteWorkspaceCancelAckSchema = Type.Object(
+	{ type: Type.Literal("cancel_ack"), id: RequestIdSchema },
+	closedObject,
+);
+export type RemoteWorkspaceCancelAck = Static<typeof RemoteWorkspaceCancelAckSchema>;
+
 export const RemoteWorkspaceTransferChunkSchema = Type.Object(
 	{
 		type: Type.Literal("transfer_chunk"),
@@ -402,6 +409,7 @@ export const RemoteWorkspaceClientMessageSchema = Type.Union([
 
 export const RemoteWorkspaceServerMessageSchema = Type.Union([
 	RemoteWorkspaceHandshakeAckSchema,
+	RemoteWorkspaceCancelAckSchema,
 	RemoteWorkspaceResultSchema,
 	RemoteWorkspaceErrorMessageSchema,
 	RemoteWorkspaceUpdateSchema,

@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import WebSocket from "ws";
-import { DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS } from "../src/core/remote-workspace-protocol/contract.ts";
+import {
+	DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
+	REMOTE_WORKSPACE_PROTOCOL_VERSIONS,
+} from "../src/core/remote-workspace-protocol/contract.ts";
 import { SHARED_WORKSPACE_WEBSOCKET_PROTOCOL } from "../src/core/remote-workspace-protocol/shared-transport.ts";
 import { DAEMON_WEBSOCKET_PROTOCOL, parseDaemonCommand } from "../src/daemon/config.ts";
 import { createDaemonServer } from "../src/daemon/server.ts";
@@ -54,7 +57,7 @@ it.each([false, true])("streams verified uploads through daemon (shared=%s)", as
 				wrap({
 					type: "handshake",
 					id: "h",
-					versions: [{ major: 1, minMinor: 0, maxMinor: 0 }],
+					versions: [...REMOTE_WORKSPACE_PROTOCOL_VERSIONS],
 					requiredCapabilities: ["file_transfer"],
 					optionalCapabilities: [],
 					receiveLimits: DEFAULT_REMOTE_WORKSPACE_PROTOCOL_LIMITS,
@@ -150,7 +153,12 @@ it.each([false, true])("streams verified uploads through daemon (shared=%s)", as
 				}),
 			),
 		);
-		const cancelled = inner(await wait(wrap({ type: "cancel", id: "cancel" }), (m) => inner(m)?.id === "cancel"));
+		const cancelled = inner(
+			await wait(wrap({ type: "cancel", id: "cancel" }), (m) => {
+				const payload = inner(m);
+				return payload?.id === "cancel" && payload.type === "error";
+			}),
+		);
 		expect(cancelled.error.code).toBe("cancelled");
 		expect(await readFile(target, "utf8")).toBe("updated");
 		await symlink(outside, join(root, "escape"), "dir");

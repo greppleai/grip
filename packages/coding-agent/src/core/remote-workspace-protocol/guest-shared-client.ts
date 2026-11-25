@@ -20,8 +20,16 @@ export class GuestSharedClientTransport implements RemoteWorkspaceProtocolTransp
 		this.root = root;
 	}
 
-	static async attach(url: string, root: string, token: string): Promise<GuestSharedClientTransport> {
-		const uplink = await GuestSharedUplink.connect(url, token);
+	static async attach(
+		url: string,
+		root: string,
+		token: string,
+		signal?: AbortSignal,
+	): Promise<GuestSharedClientTransport> {
+		const uplink = await GuestSharedUplink.connect(url, token, signal);
+		const aborted = () => uplink.dispose();
+		signal?.addEventListener("abort", aborted, { once: true });
+		if (signal?.aborted) aborted();
 		let transport: GuestSharedClientTransport | undefined;
 		try {
 			const channel = await uplink.open(
@@ -38,6 +46,8 @@ export class GuestSharedClientTransport implements RemoteWorkspaceProtocolTransp
 		} catch (error) {
 			uplink.dispose();
 			throw error;
+		} finally {
+			signal?.removeEventListener("abort", aborted);
 		}
 	}
 

@@ -12,6 +12,7 @@ import {
 	parseRemoteWorkspaceResult,
 	parseRemoteWorkspaceServerMessage,
 	REMOTE_WORKSPACE_PROTOCOL_VERSIONS,
+	type RemoteWorkspaceCancelAck,
 	type RemoteWorkspaceCapability,
 	type RemoteWorkspaceCatalog,
 	type RemoteWorkspaceCatalogChanged,
@@ -80,8 +81,8 @@ export class RemoteWorkspaceRequestError extends Error {
 export class RemoteWorkspaceDisconnectedError extends Error {
 	readonly executionState: RemoteWorkspaceExecutionState;
 
-	constructor(message: string, executionState: RemoteWorkspaceExecutionState) {
-		super(message);
+	constructor(message: string, executionState: RemoteWorkspaceExecutionState, cause?: Error) {
+		super(message, { cause });
 		this.name = "RemoteWorkspaceDisconnectedError";
 		this.executionState = executionState;
 	}
@@ -94,7 +95,7 @@ export class RemoteWorkspaceTerminationError extends Error {
 	}
 }
 
-class RemoteWorkspaceTransportError extends Error {
+export class RemoteWorkspaceTransportError extends Error {
 	constructor(error: unknown) {
 		super(error instanceof Error ? error.message : String(error));
 		this.name = "RemoteWorkspaceTransportError";
@@ -107,6 +108,7 @@ export interface RemoteWorkspaceTransferMetadata {
 }
 
 type RemoteWorkspaceRequestMessage =
+	| RemoteWorkspaceCancelAck
 	| RemoteWorkspaceUpdate
 	| RemoteWorkspaceTransferStart
 	| RemoteWorkspaceTransferChunk
@@ -161,6 +163,8 @@ interface ClientPendingRequest {
 	deadlineTimer: NodeJS.Timeout;
 	cancelTimer?: NodeJS.Timeout;
 	cancelSent: boolean;
+	cancelAcknowledged: boolean;
+	cancellationError: Error | null;
 	signal?: AbortSignal;
 	onAbort?: () => void;
 	onUpdate?: (update: unknown) => void;
@@ -473,6 +477,8 @@ export class RemoteWorkspaceClientProtocol {
 				void this.requestCancellation(id, "deadline_exceeded", "Remote workspace request timed out");
 			}, timeoutMs + 25),
 			cancelSent: false,
+			cancelAcknowledged: false,
+			cancellationError: null,
 			signal: options.signal,
 			onUpdate: options.onUpdate,
 			onTransferStart: options.onTransferStart,
@@ -533,7 +539,11 @@ export class RemoteWorkspaceClientProtocol {
 		this.failHandshake(new RemoteWorkspaceDisconnectedError(message, "not_started"));
 		for (const [id, pending] of this.pending) {
 			const state = pending.kind === "read" ? "not_started" : "indeterminate";
-			this.rejectPending(id, new RemoteWorkspaceDisconnectedError(message, state), true);
+			this.rejectPending(
+				id,
+				new RemoteWorkspaceDisconnectedError(message, state, pending.cancellationError ?? undefined),
+				true,
+			);
 		}
 	}
 
@@ -699,6 +709,13 @@ export class RemoteWorkspaceClientProtocol {
 		pending: ClientPendingRequest,
 	): Promise<void> {
 		switch (message.type) {
+			case "cancel_ack":
+				if (!pending.cancelSent) {
+					await this.protocolFailure(new Error("Unexpected cancellation receipt"));
+					return;
+				}
+				pending.cancelAcknowledged = true;
+				return;
 			case "update":
 				await this.handleRequestUpdate(message, pending);
 				return;
@@ -941,23 +958,39 @@ export class RemoteWorkspaceClientProtocol {
 		const pending = this.pending.get(id);
 		if (!pending || pending.cancelSent) return;
 		pending.cancelSent = true;
-		const cancellationMs = this.negotiated?.limits.maxCancellationMs ?? 1000;
-		pending.cancelTimer = setTimeout(() => {
-			const executionState = pending.kind === "read" ? "not_started" : "indeterminate";
-			this.rejectPending(
-				id,
-				new RemoteWorkspaceRequestError({ code, message, executionState, retryable: false }),
-				true,
-			);
-			void this.closeWithReason({
-				code: "policy_violation",
-				message: `Remote workspace cancellation was not acknowledged: ${id}`,
-			}).catch(() => this.disconnect("Remote workspace cancellation was not acknowledged"));
-		}, cancellationMs + 500);
+		clearTimeout(pending.deadlineTimer);
+		pending.cancellationError = new RemoteWorkspaceRequestError({
+			code,
+			message,
+			executionState: pending.kind === "read" ? "not_started" : "indeterminate",
+			retryable: false,
+		});
+		const limits = this.negotiated?.limits ?? this.receiveLimits;
+		const cancellationMs = limits.maxCancellationMs;
+		// Receipt and progress never reset this fixed terminal-event watchdog.
+		pending.cancelTimer = setTimeout(
+			() => {
+				const outcome = pending.cancelAcknowledged ? "received but did not complete" : "was not received";
+				this.rejectPending(
+					id,
+					new RemoteWorkspaceDisconnectedError(
+						`${message}; cancellation ${outcome}; execution outcome is unconfirmed`,
+						pending.kind === "read" ? "not_started" : "indeterminate",
+						pending.cancellationError ?? undefined,
+					),
+					true,
+				);
+				void this.closeWithReason({
+					code: "policy_violation",
+					message: "Remote workspace cancellation did not complete",
+				}).catch(() => this.disconnect("Remote workspace cancellation did not complete"));
+			},
+			cancellationMs + 2 * limits.maxTransportSendMs + 250,
+		);
 		try {
 			const sent = await settlesWithinDeadline(
 				this.send({ type: "cancel", id, reason: message }),
-				cancellationMs + 250,
+				limits.maxTransportSendMs,
 			);
 			if (!sent) throw new RemoteWorkspaceTransportError("Cancellation send timed out");
 		} catch (error) {
@@ -1176,6 +1209,7 @@ interface ServerActiveRequest {
 	resolveHandlerSettled: () => void;
 	handlerDone: boolean;
 	cancellationError?: RemoteWorkspaceProtocolError;
+	cancellation: Promise<void> | null;
 	settled: boolean;
 }
 
@@ -1656,6 +1690,7 @@ export class RemoteWorkspaceServerProtocol {
 			...(request.method === "transfer.upload"
 				? { incomingTransfer: this.createServerUploadState(request.params) }
 				: {}),
+			cancellation: null,
 			settled: false,
 		};
 		return active;
@@ -1671,10 +1706,14 @@ export class RemoteWorkspaceServerProtocol {
 				if (active.cancellationError) return;
 				await this.completeActive(active.request.id, result);
 			} catch (error) {
+				if (error instanceof RemoteWorkspaceTerminationError) {
+					// A rejected handler is not proof its subprocess stopped.
+					await this.closeUnconfirmedCancellation(active.request.id).catch(() => undefined);
+					return;
+				}
 				active.handlerDone = true;
 				active.resolveHandlerSettled();
-				if (active.settled) return;
-				if (active.cancellationError) return;
+				if (active.settled || active.cancellationError) return;
 				await this.handleHandlerFailure(active.request.id, error);
 			}
 		})();
@@ -1724,7 +1763,15 @@ export class RemoteWorkspaceServerProtocol {
 	): Promise<void> {
 		const active = this.active.get(id);
 		if (!active || active.settled) return;
-		active.cancellationError ??= error;
+		if (active.cancellation) return active.cancellation;
+		clearTimeout(active.timer);
+		active.cancellationError = error;
+		active.cancellation = this.stopActive(active, requireTermination);
+		return active.cancellation;
+	}
+
+	private async stopActive(active: ServerActiveRequest, requireTermination: boolean): Promise<void> {
+		const id = active.request.id;
 		active.controller.abort();
 		const termination = Promise.all([active.handlerSettled, active.inboundQueue, active.outboundQueue]).then(
 			() => undefined,
@@ -2001,11 +2048,13 @@ export class RemoteWorkspaceServerProtocol {
 
 	private async handleCancel(id: string): Promise<void> {
 		if (this.active.has(id)) {
-			await this.cancelActive(
+			await this.send({ type: "cancel_ack", id });
+			// Receipt must not serialize subsequent requests behind execution cleanup.
+			void this.cancelActive(
 				id,
 				this.createError("cancelled", "Remote workspace request cancelled", "not_started", false),
 				false,
-			);
+			).catch(() => undefined);
 			return;
 		}
 		this.pruneTombstones();

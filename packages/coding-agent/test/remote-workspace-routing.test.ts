@@ -462,7 +462,7 @@ describe("remote canonical workspace tool routing", () => {
 		const { server, address } = await createServer(workspaceRoot, false, token);
 		await expect(
 			createRemoteToolOperations(address.url, { token: "wrong-token-that-is-at-least-32-bytes" }),
-		).rejects.toThrow("Failed to connect remote workspace");
+		).rejects.toThrow("Remote workspace authentication rejected");
 		const authenticated = await createRemoteToolOperations(address.url, { token });
 		expect(authenticated.cwd).toBe(workspaceRoot);
 		await authenticated.dispose();
