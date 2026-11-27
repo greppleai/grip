@@ -101,6 +101,13 @@ All notable changes to Grip are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Add `/sandbox reconnect` to reopen the active sandbox connection without restarting its daemon or VM.
+
+### Changed
+
+- Reset the active sandbox connection before `/reload`, and recover a dropped connection before sending a new prompt.
 ### Fixed
 
 - Save pasted clipboard images in the active backend's temporary directory so sandbox tools can read them without repository artifacts or host `/tmp` mounts.

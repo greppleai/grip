@@ -1,3 +1,4 @@
+import { type AutocompleteItem, fuzzyFilter } from "@greppleai/grip-tui";
 import type { SandboxContainer, SandboxStartResult, SandboxStopResult } from "./config.ts";
 
 export interface SandboxStartUserCommand {
@@ -18,6 +19,7 @@ export interface SandboxDefaultUserCommand {
 
 export type SandboxUserCommand =
 	| { subcommand: "status" }
+	| { subcommand: "reconnect" }
 	| { subcommand: "clear" }
 	| { subcommand: "attach"; url: string }
 	| SandboxDefaultUserCommand
@@ -108,11 +110,12 @@ export function parseSandboxUserCommand(input: string): SandboxUserCommand {
 	switch (subcommand) {
 		case undefined:
 		case "status":
-			if (tokens.length > 2) throw new Error("Usage: /sandbox status");
-			return { subcommand: "status" };
-		case "clear":
-			if (tokens.length > 2) throw new Error("Usage: /sandbox clear");
-			return { subcommand: "clear" };
+		case "reconnect":
+		case "clear": {
+			const action = subcommand ?? "status";
+			if (tokens.length > 2) throw new Error(`Usage: /sandbox ${action}`);
+			return { subcommand: action };
+		}
 		case "default":
 			return parseSandboxDefaultCommand(tokens);
 		case "--attach":
@@ -128,7 +131,7 @@ export function parseSandboxUserCommand(input: string): SandboxUserCommand {
 			return tokens[2] ? { subcommand: "stop", target: tokens[2] } : { subcommand: "stop" };
 		default:
 			throw new Error(
-				`Unsupported /sandbox subcommand: ${subcommand}. Use status, clear, default, --attach, start, list, or stop.`,
+				`Unsupported /sandbox subcommand: ${subcommand}. Use status, reconnect, clear, default, --attach, start, list, or stop.`,
 			);
 	}
 }
@@ -159,4 +162,25 @@ export function formatSandboxStopResult(result: SandboxStopResult): string {
 		return `Sandbox already stopped: ${result.container.name} (${result.container.id})`;
 	if (result.status === "removed") return `Sandbox removed: ${result.container.name} (${result.container.id})`;
 	return `Sandbox stopped: ${result.container.name} (${result.container.id})`;
+}
+
+export const SANDBOX_ARGUMENT_HINT = "<status|reconnect|clear|--attach|start|list|stop>";
+
+export function completeSandboxCommand(prefix: string): AutocompleteItem[] | null {
+	if (!prefix.includes(" ")) {
+		return fuzzyFilter(
+			["status", "reconnect", "clear", "--attach", "start", "list", "stop"],
+			prefix,
+			(item) => item,
+		).map((item) => ({
+			value: item === "start" || item === "stop" || item === "--attach" ? `${item} ` : item,
+			label: item,
+		}));
+	}
+	const startMatch = prefix.match(/^start\s+(--[^\s]*)?$/);
+	if (!startMatch) return null;
+	return fuzzyFilter(["--name", "--template", "--update"], startMatch[1] ?? "", (item) => item).map((item) => ({
+		value: `start ${item}${item === "--update" ? "" : " "}`,
+		label: item,
+	}));
 }
