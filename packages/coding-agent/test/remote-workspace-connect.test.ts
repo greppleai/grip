@@ -115,6 +115,87 @@ describe("remote workspace recovery", () => {
 		vi.useRealTimers();
 	});
 
+	it("reset replaces a healthy connection and restores its state", async () => {
+		const first = remoteFixture();
+		const next = remoteFixture();
+		const connect = vi
+			.spyOn(RemoteToolOperations, "connect")
+			.mockResolvedValueOnce(first.operations)
+			.mockResolvedValueOnce(next.operations);
+		const backend = new DeferredRemoteToolOperations("/workspace");
+		const catalog = vi.fn();
+		backend.onWorkspaceToolCatalogChanged(catalog);
+		await backend.configureRemote(endpoint);
+		backend.cwd = "/workspace/project";
+		await backend.reconnect("if-disconnected");
+		expect(connect).toHaveBeenCalledOnce();
+
+		const reset = backend.reconnect("reset");
+		expect(backend.connectionState.status).toBe("reconnecting");
+		await vi.advanceTimersByTimeAsync(500);
+		await reset;
+		expect(connect).toHaveBeenCalledTimes(2);
+		expect(first.dispose).toHaveBeenCalledOnce();
+		expect(next.restoreToolSchemas).toHaveBeenCalledWith(first.operations);
+		expect(next.resolveWorkspaceDirectory).toHaveBeenCalledWith("/workspace/project", expect.any(AbortSignal));
+		expect(catalog).toHaveBeenCalledOnce();
+		expect(backend.connectionState.status).toBe("recovered");
+		await backend.readFile("a");
+		expect(next.readFile).toHaveBeenCalledOnce();
+		await backend.dispose();
+	});
+
+	it("joins an in-flight recovery and retries after exhaustion", async () => {
+		const first = remoteFixture();
+		const next = remoteFixture();
+		const gate = deferred<RemoteToolOperations>();
+		const connect = vi
+			.spyOn(RemoteToolOperations, "connect")
+			.mockResolvedValueOnce(first.operations)
+			.mockReturnValueOnce(gate.promise)
+			.mockRejectedValue(new RemoteWorkspaceTransportError("still unavailable"));
+		const backend = new DeferredRemoteToolOperations("/workspace");
+		await backend.configureRemote(endpoint);
+		first.lose(connect.mock.calls[0]![1]);
+		await vi.advanceTimersByTimeAsync(500);
+		const joined = backend.reconnect("if-disconnected");
+		const joinedAgain = backend.reconnect("if-disconnected");
+		expect(connect).toHaveBeenCalledTimes(2);
+		gate.resolve(next.operations);
+		await Promise.all([joined, joinedAgain]);
+		expect(connect).toHaveBeenCalledTimes(2);
+		expect(backend.connectionState.status).toBe("recovered");
+
+		next.lose(connect.mock.calls[1]![1]);
+		await vi.advanceTimersByTimeAsync(7500);
+		expect(backend.connectionState.status).toBe("exhausted");
+		expect(connect).toHaveBeenCalledTimes(6);
+		const recovered = remoteFixture();
+		connect.mockResolvedValueOnce(recovered.operations);
+		const retry = backend.reconnect("if-disconnected");
+		await vi.advanceTimersByTimeAsync(500);
+		await retry;
+		expect(connect).toHaveBeenCalledTimes(7);
+		expect(backend.connectionState.status).toBe("recovered");
+		await backend.readFile("a");
+		expect(recovered.readFile).toHaveBeenCalledOnce();
+		await backend.dispose();
+	});
+
+	it("rejects a pending manual reconnect when cleared", async () => {
+		const first = remoteFixture();
+		const connect = vi.spyOn(RemoteToolOperations, "connect").mockResolvedValue(first.operations);
+		const backend = new DeferredRemoteToolOperations("/workspace");
+		await backend.configureRemote(endpoint);
+		const reconnect = expect(backend.reconnect("reset")).rejects.toThrow("reconnection cancelled");
+		await vi.advanceTimersByTimeAsync(200);
+		await backend.clear();
+		await reconnect;
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(connect).toHaveBeenCalledOnce();
+		expect(backend.connectionState.status).toBe("detached");
+	});
+
 	it("joins concurrent failures, restores cwd/catalog, and ignores stale callbacks", async () => {
 		const first = remoteFixture();
 		const next = remoteFixture();

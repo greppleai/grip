@@ -475,6 +475,7 @@ function awaitRemoteWork<T>(work: Promise<T>, signal: AbortSignal | undefined): 
 }
 
 export type RemoteWorkspaceConnectionStatus = "detached" | "connected" | "reconnecting" | "recovered" | "exhausted";
+export type RemoteWorkspaceReconnectMode = "reset" | "if-disconnected";
 
 export interface RemoteWorkspaceConnectionState {
 	status: RemoteWorkspaceConnectionStatus;
@@ -628,8 +629,27 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 		}
 	}
 
+	async reconnect(mode: RemoteWorkspaceReconnectMode): Promise<void> {
+		const generation = this.connectionGeneration;
+		if (!this.recovery) {
+			if (mode === "if-disconnected" && !this.isDisconnected()) return;
+			this.startReconnect(mode === "reset" ? "Sandbox connection reset requested" : "Sandbox connection lost");
+		}
+		await this.recovery;
+		if (generation !== this.connectionGeneration || !this.reconnectFactory) {
+			throw new RemoteWorkspaceDisconnectedError("Sandbox reconnection cancelled", "not_started");
+		}
+		if (this.isDisconnected()) {
+			throw new RemoteWorkspaceDisconnectedError(this.connectionState.message, "not_started");
+		}
+	}
+
 	private connectionLost(message: string): void {
-		if (this.recovery || !this.reconnectFactory || this.disposePromise) return;
+		if (this.startReconnect(message)) this.onDisconnect?.(message);
+	}
+
+	private startReconnect(message: string): boolean {
+		if (this.recovery || !this.reconnectFactory || this.disposePromise) return false;
 		const controller = new AbortController();
 		this.reconnectController = controller;
 		this.connectionState = {
@@ -646,7 +666,7 @@ export class DeferredRemoteToolOperations implements ToolOperations {
 					this.recovery = null;
 				}
 			});
-		this.onDisconnect?.(message);
+		return true;
 	}
 
 	private async reconnectLoop(controller: AbortController, cause: string): Promise<void> {

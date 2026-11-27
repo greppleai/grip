@@ -1,5 +1,6 @@
 import type { AutocompleteItem, AutocompleteProvider } from "@greppleai/grip-tui";
 import { describe, expect, it, vi } from "vitest";
+import { completeSandboxCommand, parseSandboxUserCommand } from "../src/core/sandbox/command.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 interface SandboxNameFixture {
@@ -189,7 +190,7 @@ describe("built-in slash command argument choices", () => {
 			["/hooks ", ["enable", "disable"]],
 			["/context-compression o", ["on", "off"]],
 			["/compress-detection ", ["on", "off"]],
-			["/sandbox ", ["status", "clear", "--attach", "start", "list", "stop"]],
+			["/sandbox ", ["status", "reconnect", "clear", "--attach", "start", "list", "stop"]],
 			["/sandbox start ", ["--name", "--template", "--update"]],
 			["/sandbox start --", ["--name", "--template", "--update"]],
 		] as const) {
@@ -219,5 +220,23 @@ describe("/cd sandbox autocomplete", () => {
 		expect(guest).toHaveBeenCalledWith("pl");
 		expect(suggestions?.items).toEqual([{ value: "planner/", label: "planner/" }]);
 		expect(await automaticSuggestions(provider, "/cd missing")).toBeNull();
+	});
+});
+
+describe("/sandbox reconnect", () => {
+	it("parses reconnect and rejects arguments", () => {
+		expect(parseSandboxUserCommand(" /sandbox\treconnect ")).toEqual({ subcommand: "reconnect" });
+		expect(() => parseSandboxUserCommand("/sandbox reconnect extra")).toThrow("Usage: /sandbox reconnect");
+	});
+
+	it("completes reconnect without arguments and preserves start options", () => {
+		expect(completeSandboxCommand("rec")).toContainEqual({ value: "reconnect", label: "reconnect" });
+		expect(completeSandboxCommand("")?.map((item) => item.label)).toContain("reconnect");
+		expect(completeSandboxCommand("reconnect ")).toBeNull();
+		expect(completeSandboxCommand("start --")?.map((item) => item.label)).toEqual([
+			"--name",
+			"--template",
+			"--update",
+		]);
 	});
 });

@@ -21,7 +21,8 @@ function createReloadMode(backend: () => ToolBackendInfo, reload: () => Promise<
 				isIdle: true,
 				isStreaming: false,
 				isCompacting: false,
-				reload,
+				reload: vi.fn(reload),
+				reconnectSandbox: vi.fn(async () => true),
 				waitForIdle: vi.fn(async () => {}),
 				getToolBackendInfo: backend,
 				resourceLoader: { getThemes: () => ({ themes: [] }) },
@@ -94,9 +95,14 @@ describe("InteractiveMode /reload backend status", () => {
 				statuses.set("extension", "reloaded");
 			},
 		);
-		const reload = Reflect.get(mode, "handleReloadCommand") as (this: InteractiveMode) => Promise<boolean>;
+		const reload = Reflect.get(mode, "handleReloadCommand") as (
+			this: InteractiveMode,
+			reset: boolean,
+		) => Promise<boolean>;
+		const session = Reflect.get(mode, "session") as AgentSession;
 
-		expect(await reload.call(mode)).toBe(true);
+		expect(await reload.call(mode, true)).toBe(true);
+		expect(session.reconnectSandbox).toHaveBeenCalledBefore(vi.mocked(session.reload));
 
 		expect(statuses.get("toolBackend")).toContain("tools: remote grip+ws://127.0.0.1:8787/grip/workspace /workspace");
 		expect(statuses.get("extension")).toBe("reloaded");

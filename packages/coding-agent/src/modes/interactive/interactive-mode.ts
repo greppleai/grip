@@ -141,10 +141,12 @@ import type {
 } from "../../core/resource-loader.ts";
 import type { LoadRulesResult } from "../../core/rules.ts";
 import {
+	completeSandboxCommand,
 	formatSandboxList,
 	formatSandboxStartResult,
 	formatSandboxStopResult,
 	parseSandboxUserCommand,
+	SANDBOX_ARGUMENT_HINT,
 	type SandboxDefaultUserCommand,
 	type SandboxStartUserCommand,
 	type SandboxUserCommand,
@@ -945,25 +947,8 @@ export class InteractiveMode {
 
 		const sandboxCommand = slashCommands.find((command) => command.name === "sandbox");
 		if (sandboxCommand) {
-			sandboxCommand.argumentHint = "<status|clear|--attach|start|list|stop>";
-			sandboxCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
-				if (!prefix.includes(" ")) {
-					return fuzzyFilter(["status", "clear", "--attach", "start", "list", "stop"], prefix, (item) => item).map(
-						(item) => ({
-							value: item === "start" || item === "stop" || item === "--attach" ? `${item} ` : item,
-							label: item,
-						}),
-					);
-				}
-				const startMatch = prefix.match(/^start\s+(--[^\s]*)?$/);
-				if (!startMatch) return null;
-				return fuzzyFilter(["--name", "--template", "--update"], startMatch[1] ?? "", (item) => item).map(
-					(item) => ({
-						value: `start ${item}${item === "--update" ? "" : " "}`,
-						label: item,
-					}),
-				);
-			};
+			sandboxCommand.argumentHint = SANDBOX_ARGUMENT_HINT;
+			sandboxCommand.getArgumentCompletions = completeSandboxCommand;
 		}
 		const modelCommand = slashCommands.find((command) => command.name === "model");
 		if (modelCommand) {
@@ -1470,7 +1455,7 @@ export class InteractiveMode {
 		try {
 			await this.promptSession(message, options);
 		} catch (error: unknown) {
-			this.showError(error instanceof Error ? error.message : "Unknown error occurred");
+			this.showError(redactSecrets(error instanceof Error ? error.message : "Unknown error occurred"));
 		}
 	}
 
@@ -1482,7 +1467,13 @@ export class InteractiveMode {
 
 	private async runInteractivePromptLoop(): Promise<never> {
 		while (true) {
-			await this.promptAndReportError(await this.getUserInput());
+			const message = await this.getUserInput();
+			const session = this.session;
+			await this.promptAndReportError(message, {
+				preflightResult: (success) => {
+					if (!success && this.session === session && !this.editor.getText().trim()) this.editor.setText(message);
+				},
+			});
 		}
 	}
 
@@ -3517,7 +3508,7 @@ export class InteractiveMode {
 			"/reload": {
 				run: async () => {
 					this.editor.setText("");
-					await this.handleReloadCommand();
+					await this.handleReloadCommand(true);
 				},
 			},
 			"/debug": {
@@ -6852,7 +6843,7 @@ export class InteractiveMode {
 
 	// =========================================================================
 
-	private async handleReloadCommand(): Promise<boolean> {
+	private async handleReloadCommand(resetSandbox = false): Promise<boolean> {
 		const session = this.session;
 		if (session.isStreaming) {
 			this.showWarning("Wait for the current response to finish before reloading.");
@@ -6862,17 +6853,20 @@ export class InteractiveMode {
 			this.showWarning("Wait for compaction to finish before reloading.");
 			return false;
 		}
+		const current = () => !this.isShuttingDown && !this.extensionManagerInvalidating && this.session === session;
 		await this.disposeExtensionManager();
-		if (this.isShuttingDown || this.extensionManagerInvalidating || this.session !== session) return false;
+		if (!current()) return false;
 		this.extensionManagerReload.invalidate();
 		try {
 			await session.waitForIdle();
-			if (this.isShuttingDown || this.extensionManagerInvalidating || this.session !== session) return false;
+			if (!current()) return false;
+			if (resetSandbox) await session.reconnectSandbox();
+			if (!current()) return false;
 			await this.extensionManagerReload.reload(session);
-			return !this.isShuttingDown && !this.extensionManagerInvalidating && this.session === session;
+			return current();
 		} catch (error) {
-			if (!this.isShuttingDown && !this.extensionManagerInvalidating && this.session === session) {
-				this.showError(`Reload failed: ${error instanceof Error ? error.message : String(error)}`);
+			if (current()) {
+				this.showError(`Reload failed: ${redactSecrets(error instanceof Error ? error.message : String(error))}`);
 			}
 			return false;
 		}
@@ -7594,6 +7588,11 @@ export class InteractiveMode {
 		switch (command.subcommand) {
 			case "status":
 				this.showStatus(this.formatToolBackendStatus(this.session.getToolBackendInfo()));
+				return;
+			case "reconnect":
+				this.showStatus(
+					(await this.session.reconnectSandbox()) ? "Sandbox reconnected." : "No active sandbox to reconnect.",
+				);
 				return;
 			case "default":
 				await this.handleDefaultSandboxCommand(command, service, workspaceRoot, sessionKey);

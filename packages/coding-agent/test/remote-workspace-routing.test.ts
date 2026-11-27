@@ -820,7 +820,11 @@ describe("remote canonical workspace tool routing", () => {
 			await vi.waitFor(() => expect(abort).toHaveBeenCalledOnce());
 			expect(harness.session.isSandbox()).toBe(false);
 			expect(harness.session.getToolBackendInfo().type).toBe("remote");
-			await expect(harness.session.prompt("run a local tool instead")).rejects.toThrow("Sandbox connection lost");
+			const preflightResult = vi.fn();
+			await expect(harness.session.prompt("run a local tool instead", { preflightResult })).rejects.toThrow(
+				"reconnection failed",
+			);
+			expect(preflightResult).toHaveBeenCalledExactlyOnceWith(false);
 			await expect(harness.session.getToolOperations().writeFile("host-escape.txt", "unsafe")).rejects.toThrow();
 			await expect(readFile(join(hostRoot, "host-escape.txt"), "utf8")).rejects.toThrow();
 			await expect(readFile(join(workspaceRoot, "host-escape.txt"), "utf8")).rejects.toThrow();

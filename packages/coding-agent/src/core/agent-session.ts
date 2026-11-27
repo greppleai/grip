@@ -199,6 +199,7 @@ import { createJobToolDefinition, type JobRunner } from "./tools/job.ts";
 import {
 	DeferredRemoteToolOperations,
 	LocalToolOperations,
+	type RemoteWorkspaceReconnectMode,
 	type ToolBackendInfo,
 	type ToolOperations,
 } from "./tools/operations.ts";
@@ -1415,6 +1416,16 @@ export class AgentSession {
 			throw error;
 		}
 		return operations.getBackendInfo();
+	}
+
+	async reconnectSandbox(mode: RemoteWorkspaceReconnectMode = "reset"): Promise<boolean> {
+		const operations = this._sandboxToolOperations;
+		if (!operations) return false;
+		if (mode === "reset" && (this.isStreaming || this.isCompacting)) {
+			throw new Error("Wait for the current response or compaction to finish before reconnecting the sandbox");
+		}
+		await this._runActivity("sandbox reconnection", () => operations.reconnect(mode));
+		return true;
 	}
 
 	async clearRemoteSandbox(): Promise<void> {
@@ -3739,7 +3750,12 @@ export class AgentSession {
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
 		if (this._sandboxToolOperations?.isDisconnected()) {
-			throw new Error("Sandbox connection lost; reconnect before prompting");
+			try {
+				await this.reconnectSandbox("if-disconnected");
+			} catch (error) {
+				options?.preflightResult?.(false);
+				throw error;
+			}
 		}
 		const promptId = randomUUID();
 		const state: PromptPreparationState = {
